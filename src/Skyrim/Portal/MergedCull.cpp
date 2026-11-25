@@ -2,15 +2,25 @@
 
 #include "Skyrim/Portal/NpcTravel.h"
 #include "Skyrim/Portal/MergedView.h"
-#include "Skyrim/Render/DoorwayPlanes.h"
+#include "Core/Render/DoorwayPlanes.h"
+#include "Skyrim/Engine/CoreConvert.h"
 
 namespace Portal::MergedCull
 {
 	namespace
 	{
-		using Render::Doorway::Plane;
-		using Render::Doorway::Side;
-		using Render::Doorway::SideOf;
+		using Core::Doorway::Plane;
+		using Core::Doorway::Side;
+
+		Core::Doorway::Side SideOf(const Plane& a_plane, const RE::NiPoint3& a_center, float a_radius)
+		{
+			return Core::Doorway::SideOf(a_plane, ToCore(a_center), a_radius);
+		}
+
+		Plane EdgePlane(const RE::NiPoint3& a_eye, const RE::NiPoint3& a_edgePoint, const RE::NiPoint3& a_along, const RE::NiPoint3& a_center)
+		{
+			return Core::Doorway::EdgePlane(ToCore(a_eye), ToCore(a_edgePoint), ToCore(a_along), ToCore(a_center));
+		}
 
 		Mode                mode = Mode::kShapes;
 		Mode                streetMode = Mode::kOff;
@@ -285,7 +295,7 @@ namespace Portal::MergedCull
 		// corners lie beyond one side of the view frustum. In camera space, not on screen: a corner
 		// behind the camera has no meaningful screen position, and looking away from the door all
 		// four are behind it.
-		bool DoorwayInView(const Render::Doorway::Door& a_door)
+		bool DoorwayInView(const Core::Doorway::Door& a_door)
 		{
 			auto* camera = RE::Main::WorldRootCamera();
 			if (!camera) {
@@ -307,7 +317,7 @@ namespace Portal::MergedCull
 			unsigned           outside = ~0u;  // bit per frustum side that every corner is beyond
 			for (const float sx : { -1.0f, 1.0f }) {
 				for (const float sy : { -1.0f, 1.0f }) {
-					const auto  offset = a_door.center + a_door.right * (sx * a_door.halfWidth) + up * (sy * a_door.halfHeight) - camera->world.translate;
+					const auto  offset = ToNi(a_door.center + a_door.right * (sx * a_door.halfWidth)) + up * (sy * a_door.halfHeight) - camera->world.translate;
 					const float f = offset.Dot(forward);
 					const float u = offset.Dot(upward);
 					const float r = offset.Dot(rightward);
@@ -332,8 +342,8 @@ namespace Portal::MergedCull
 			for (std::size_t i = 0; i < a_polygon.size(); ++i) {
 				const auto&  a = a_polygon[i];
 				const auto&  b = a_polygon[(i + 1) % a_polygon.size()];
-				const double atA = a_plane.At(a);
-				const double atB = a_plane.At(b);
+				const double atA = a_plane.At(ToCore(a));
+				const double atB = a_plane.At(ToCore(b));
 				if (atA >= 0.0) {
 					kept.push_back(a);
 				}
@@ -402,7 +412,7 @@ namespace Portal::MergedCull
 					const auto& b = polygon[(i + 1) % polygon.size()];
 					// An edge in line with the camera gives no plane; leaving it out sees more.
 					if ((a - a_eye).Cross(b - a).Length() > 1.0f) {
-						through.push_back(Render::Doorway::EdgePlane(a_eye, a, b - a, middle));
+						through.push_back(EdgePlane(a_eye, a, b - a, middle));
 					}
 				}
 				a_path.push_back(portal);
@@ -432,7 +442,7 @@ namespace Portal::MergedCull
 			for (std::size_t i = 0; i < std::size(corners); ++i) {
 				const auto& a = corners[i];
 				const auto& b = corners[(i + 1) % std::size(corners)];
-				view.push_back(Render::Doorway::EdgePlane(eye, a, b - a, eye + forward));
+				view.push_back(EdgePlane(eye, a, b - a, eye + forward));
 			}
 			return view;
 		}
@@ -440,7 +450,7 @@ namespace Portal::MergedCull
 		// The rooms of a_cell seen from the camera, through the doorway or (a_inside) from the room
 		// it stands in: graphRooms, seenRooms. False when its rooms aren't culled (no room graph, or
 		// no room to start from).
-		bool SeeRooms(RE::TESObjectCELL* a_cell, const Render::Doorway::Door& a_door, const RE::NiCamera& a_camera, bool a_inside)
+		bool SeeRooms(RE::TESObjectCELL* a_cell, const Core::Doorway::Door& a_door, const RE::NiCamera& a_camera, bool a_inside)
 		{
 			const auto& eye = a_camera.world.translate;
 			auto* loaded = a_cell->GetRuntimeData().loadedData;
@@ -466,7 +476,7 @@ namespace Portal::MergedCull
 				enter(eye);
 			} else {
 				for (const float depth : { 16.0f, 64.0f, 160.0f }) {
-					enter(a_door.center + a_door.normal * depth);
+					enter(ToNi(a_door.center + a_door.normal * depth));
 				}
 			}
 			const auto start = a_inside ? ViewPlanes(a_camera) : std::optional(std::vector<Plane>(std::begin(planes), std::end(planes)));
@@ -543,12 +553,12 @@ namespace Portal::MergedCull
 			if (!camera) {
 				return;
 			}
-			doorCenter = door.center;
+			doorCenter = ToNi(door.center);
 			const char* none = inside                                               ? nullptr :
 			                   mode == Mode::kHideAll                               ? "hidden by hand" :
 			                   a_unseen                                             ? "camera in another room" :
 			                   room->doorShut                                      ? "door shut" :
-			                   !Render::Doorway::Planes(door, camera->world.translate, planes) ? "camera behind the door plane" :
+			                   !Core::Doorway::Planes(door, ToCore(camera->world.translate), planes) ? "camera behind the door plane" :
 			                   !DoorwayInView(door)                                 ? "doorway off screen" :
 			                                                                          nullptr;
 			if (!none && wanted == Mode::kWhole) {

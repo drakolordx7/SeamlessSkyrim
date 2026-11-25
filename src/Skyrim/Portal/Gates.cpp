@@ -8,7 +8,7 @@
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Render/Backend.h"
-#include "Skyrim/Render/DoorwayPlanes.h"
+#include "Core/Render/DoorwayPlanes.h"
 #include "Skyrim/Render/Wire.h"
 #include "Skyrim/Spaces/RemoteCell.h"
 
@@ -65,7 +65,7 @@ namespace Portal::Gates
 			}
 			const auto  center = Doors::Center(gate);
 			const auto  size = Doors::Size(gate);
-			a_door = Render::DoorRect::Upright(center, inward, size.halfWidth, size.halfHeight, false);
+			a_door = Render::UprightDoor(center, inward, size.halfWidth, size.halfHeight, false);
 			return depth + kPastFarGate;
 		}
 	}
@@ -130,10 +130,10 @@ namespace Portal::Gates
 			if (const auto mapping = Doors::TryCompute(*portal)) {
 				const auto  farGate = mapping->toLinked * mapping->sourceCenter - mapping->sourceCenter;
 				const float depth = farGate.x * mapping->inward.x + farGate.y * mapping->inward.y;
-				if (depth > ::Render::Doorway::kMargin) {
+				if (depth > Core::Doorway::kMargin) {
 					constexpr float kCellSize = 4096.0f;
 					passage = depth + kCellSize * Portal::RemoteCell::kNeighbourRadius;
-					door = Render::DoorRect::Upright(mapping->sourceCenter, mapping->inward, mapping->halfWidth, mapping->halfHeight, false);
+					door = Render::UprightDoor(mapping->sourceCenter, mapping->inward, mapping->halfWidth, mapping->halfHeight, false);
 				}
 			}
 		}

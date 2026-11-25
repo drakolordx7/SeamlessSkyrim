@@ -7,7 +7,7 @@
 // through the doorway. Looking at the house, the whole room behind its wall was set up and drawn
 // for nothing. This leaves out, for the length of the player's view, what the mask would throw
 // away whole: everything when no line of sight passes the doorway, otherwise the parts lying
-// wholly outside the space seen through it (Render/DoorwayPlanes.h). An interior built of rooms is
+// wholly outside the space seen through it (Core/Render/DoorwayPlanes.h). An interior built of rooms is
 // also culled through its portals, as the engine culls the current cell.
 namespace Portal::MergedCull
 {

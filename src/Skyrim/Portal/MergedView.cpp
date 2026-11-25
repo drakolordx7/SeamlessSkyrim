@@ -23,7 +23,7 @@
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Portal/StreetMerge.h"
 #include "Skyrim/Render/Backend.h"
-#include "Skyrim/Render/DoorwayPlanes.h"
+#include "Core/Render/DoorwayPlanes.h"
 #include "Skyrim/Render/Frame.h"
 #include "Skyrim/Render/SceneMeter.h"
 #include "Skyrim/Render/SceneQuery.h"
@@ -249,7 +249,7 @@ namespace Portal::MergedView
 		RE::NiPointer<RE::NiLight>            shadowLightOwn;  // the shadow light's own, to put back
 		RE::BSShadowDirectionalLight*         shadowLightSwapped = nullptr;
 
-		void AimSunShadow(const RE::NiPoint3* a_towardSun)
+		void AimSunShadow(const Core::Vec3* a_towardSun)
 		{
 			auto* world = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
 			auto* shadow = world ? world->GetRuntimeData().sunShadowDirLight : nullptr;
@@ -273,7 +273,7 @@ namespace Portal::MergedView
 				shadow->light = streetSun;
 			}
 			// A directional light shines along its local +X.
-			RE::NiPoint3 along = *a_towardSun * -1.0f;
+			RE::NiPoint3 along = ToNi(*a_towardSun * -1.0f);
 			along.Unitize();
 			RE::NiPoint3 side = along.UnitCross({ 0.0f, 0.0f, 1.0f });
 			if (side.Length() < 0.5f) {
@@ -601,10 +601,10 @@ namespace Portal::MergedView
 			// room wasn't masked at all. (Not masked at all while shut, the renderer took the room for
 			// the world's: drawn through the house's walls once the door opened again.)
 			constexpr float kNearlyShut = 0.3f;
-			const float     clear = mapping.halfDepth + static_cast<float>(::Render::Doorway::kMargin) + 1.0f;
+			const float     clear = mapping.halfDepth + static_cast<float>(Core::Doorway::kMargin) + 1.0f;
 			const float     shift = mergedRoom.swing.Shut() ? clear : swung == linked && mergedRoom.swing.Amount() < kNearlyShut ? -clear : 0.0f;
 			const auto      center = mapping.sourceCenter + mapping.inward * shift;
-			const auto door = Render::DoorRect::Upright(center, mapping.inward, mapping.halfWidth, mapping.halfHeight, cameraInside);
+			const auto door = Render::UprightDoor(center, mapping.inward, mapping.halfWidth, mapping.halfHeight, cameraInside);
 			::Render::Backend::SetMergedDoor(a_slot, door);
 			{
 				MergedCull::Room cull;

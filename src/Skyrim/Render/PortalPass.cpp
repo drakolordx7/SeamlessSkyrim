@@ -170,7 +170,7 @@ namespace Render::PortalPass
 			return false;
 		}
 		const auto& bound = a_pass->geometry->worldBound;
-		if (farDoorClip->Distance(bound.center) + bound.radius >= 0.0f) {
+		if (farDoorClip->Distance(ToCore(bound.center)) + bound.radius >= 0.0f) {
 			return false;
 		}
 		static std::unordered_set<const RE::BSGeometry*> reported;
@@ -1055,7 +1055,7 @@ namespace Render::PortalPass
 			through.z = 0.0f;
 			through.Unitize();
 			const auto face = Portal::Doors::Center(linked) - through * Portal::Doors::Size(linked).halfDepth;
-			farDoorClip = ClipPlane{ through, face.Dot(through) };
+			farDoorClip = ClipPlane{ ToCore(through), face.Dot(through) };
 			::Render::Backend::SetPortalClip(farDoorClip);
 		}
 		{

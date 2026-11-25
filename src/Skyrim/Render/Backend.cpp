@@ -136,7 +136,7 @@ namespace Render::Backend
 			if (!a_value) {
 				return nullptr;
 			}
-			a_value->Pack(a_buffer);
+			Pack(*a_value, a_buffer);
 			return a_buffer;
 		}
 

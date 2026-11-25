@@ -1,7 +1,8 @@
 #include "Skyrim/Render/Native/Native.h"
 
 #include "Skyrim/Render/D3D.h"
-#include "Skyrim/Render/DoorwayPlanes.h"
+#include "Core/Render/DoorwayPlanes.h"
+#include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Render/Native/Pass.h"
 #include "Skyrim/Render/SceneQuery.h"
 
@@ -21,7 +22,7 @@
 // rasterizer cuts at per pixel. The cut is exact: a plane's distance is linear in world space and
 // clip distances are interpolated perspective-correctly.
 //
-// The rule is the fork's (X, see Render/DoorwayPlanes.h). A shape of the space the camera is not
+// The rule is the fork's (X, see Core/Render/DoorwayPlanes.h). A shape of the space the camera is not
 // in is kept inside X (one draw, up to six clip distances). A shape of the camera's own space is kept
 // outside X; that isn't convex, so it is drawn in up to six disjoint convex pieces (not P0; P0 and
 // not P1; P0, P1 and not P2; ...). Shapes whose bounds lie wholly on one side are drawn once,
@@ -36,10 +37,10 @@ namespace
 
 	namespace Pass = Render::Native::Pass;
 	using Render::ClipPlane;
-	using Render::Doorway::Door;
-	using Render::Doorway::Plane;
-	using Render::Doorway::Side;
-	using Render::Doorway::SideOf;
+	using Core::Doorway::Door;
+	using Core::Doorway::Plane;
+	using Core::Doorway::Side;
+	using Core::Doorway::SideOf;
 
 	// Set from the portal code (main thread, as is rendering).
 	std::mutex                stateLock;
@@ -156,7 +157,7 @@ namespace
 			return;
 		}
 		const Plane plane{ { clip->normal.x, clip->normal.y, clip->normal.z }, -static_cast<double>(clip->offset) };
-		switch (SideOf(plane, a_pass->geometry->worldBound)) {
+		switch (SideOf(plane, ToCore(a_pass->geometry->worldBound.center), a_pass->geometry->worldBound.radius)) {
 		case Side::kInside:
 			return;
 		case Side::kOutside:
@@ -187,7 +188,7 @@ namespace
 		const bool mergedSpace = Render::Scene().IsMergedShape(a_pass->geometry);
 		const bool cameraSpace = mergedSpace == d->cameraMerged;
 		Plane doorway[5];
-		if (!Render::Doorway::Planes(*d, Eye(), doorway)) {
+		if (!Core::Doorway::Planes(*d, ToCore(Eye()), doorway)) {
 			if (!cameraSpace) {
 				job.active = job.skip = true;
 				++stats.passesLeftOut;
@@ -200,14 +201,14 @@ namespace
 		int count = 5;
 		if (passage > 0.0f) {
 			// A city gate: X ends where the far gate stands in the world (the fork's SeamlessDoorClips).
-			planes[count++] = Render::Doorway::Through(d->center + d->normal * passage, d->normal * -1.0f);
+			planes[count++] = Core::Doorway::Through(d->center + d->normal * passage, d->normal * -1.0f);
 		}
 		const auto& bound = a_pass->geometry->worldBound;
 		Side sides[kPlanesPerPiece];
 		bool clear = false;  // wholly outside X
 		bool within = true;  // wholly inside X
 		for (int i = 0; i < count; ++i) {
-			sides[i] = SideOf(planes[i], bound);
+			sides[i] = SideOf(planes[i], ToCore(bound.center), bound.radius);
 			clear |= sides[i] == Side::kOutside;
 			within &= sides[i] == Side::kInside;
 		}

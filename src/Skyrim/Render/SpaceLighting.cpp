@@ -432,10 +432,10 @@ namespace Render::SpaceLighting
 		Render::SpaceLight Light(const RE::NiColor& a_sun, const RE::NiPoint3& a_towardSun, const RE::NiTransform& a_ambient, const RE::NiMatrix3& a_rotation)
 		{
 			Render::SpaceLight light;
-			light.sun = a_sun;
-			light.towardSun = a_towardSun;
-			light.ambientRotate = a_ambient.rotate * a_rotation.Transpose();
-			light.ambientTranslate = a_ambient.translate;
+			light.sun = ToCore(a_sun);
+			light.towardSun = ToCore(a_towardSun);
+			light.ambientRotate = ToCore(a_ambient.rotate * a_rotation.Transpose());
+			light.ambientTranslate = ToCore(a_ambient.translate);
 			return light;
 		}
 	}
@@ -509,7 +509,7 @@ namespace Render::SpaceLighting
 			return std::nullopt;
 		}
 		const auto& w = *weather;
-		return Render::SpaceFog{ w.fogNear, w.fogFar, w.fogPower, w.fogMax, w.fogNearColor, w.fogFarColor };
+		return Render::SpaceFog{ w.fogNear, w.fogFar, w.fogPower, w.fogMax, ToCore(w.fogNearColor), ToCore(w.fogFarColor) };
 	}
 
 	std::optional<Render::SpaceFog> CellFog(RE::TESObjectCELL* a_cell)

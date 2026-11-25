@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Core/Render/Types.h"
+#include "Skyrim/Engine/CoreConvert.h"
+
 // What the plugin and the Community Shaders fork agree on (docs/COMMUNITY-SHADERS-PATCH.md): the
 // data they pass each other and the functions each exports to the other. The native backend takes
 // the same typed structs, so nothing outside this file knows where a number sits in an array.
@@ -12,102 +15,61 @@ namespace Render
 	// The BSShaderManager::State slot the fork's light limit reads the portal's light scene from.
 	inline constexpr std::uint32_t kPortalSceneSlot = 3;
 
-	// A doorway between the player's space and a merged one. Normal and right are horizontal.
-	struct DoorRect
+	using Core::Render::ClipPlane;
+	using Core::Render::Daylight;
+	using Core::Render::DoorRect;
+	using Core::Render::SpaceFog;
+	using Core::Render::SpaceLight;
+
+	inline DoorRect UprightDoor(const RE::NiPoint3& a_center, const RE::NiPoint3& a_inward, float a_halfWidth, float a_halfHeight, bool a_cameraMerged)
 	{
-		RE::NiPoint3 center;
-		RE::NiPoint3 normal;  // into the merged space
-		RE::NiPoint3 right;
-		float        halfWidth = 0.0f;
-		float        halfHeight = 0.0f;
-		bool         cameraMerged = false;  // the camera is in the merged space
+		return DoorRect::Upright(ToCore(a_center), ToCore(a_inward), a_halfWidth, a_halfHeight, a_cameraMerged);
+	}
 
-		// A doorway standing upright, facing a_inward (its z ignored).
-		static DoorRect Upright(const RE::NiPoint3& a_center, const RE::NiPoint3& a_inward, float a_halfWidth, float a_halfHeight, bool a_cameraMerged)
-		{
-			return { a_center, { a_inward.x, a_inward.y, 0.0f }, { a_inward.y, -a_inward.x, 0.0f }, a_halfWidth, a_halfHeight, a_cameraMerged };
-		}
-
-		void Pack(float (&a_out)[12]) const
-		{
-			const float values[12] = { center.x, center.y, center.z, normal.x, normal.y, normal.z, right.x, right.y, right.z, halfWidth, halfHeight, cameraMerged ? 1.0f : 0.0f };
-			std::ranges::copy(values, a_out);
-		}
-	};
-
-	// A merged space's own light. scale: for its point lights, sun and ambient.
-	struct SpaceLight
+	// The fork's layouts of the typed structs: a_out is what its exports read.
+	inline void Pack(const DoorRect& a_door, float (&a_out)[12])
 	{
-		RE::NiColor   sun;
-		RE::NiPoint3  towardSun;      // the way to the light, not the way it shines
-		RE::NiMatrix3 ambientRotate;  // directional ambient: rotate * normal + translate
-		RE::NiPoint3  ambientTranslate;
-		float         scale = 1.0f;
+		const float values[12] = { a_door.center.x, a_door.center.y, a_door.center.z, a_door.normal.x, a_door.normal.y, a_door.normal.z, a_door.right.x, a_door.right.y, a_door.right.z, a_door.halfWidth, a_door.halfHeight, a_door.cameraMerged ? 1.0f : 0.0f };
+		std::ranges::copy(values, a_out);
+	}
 
-		void Pack(float (&a_out)[19]) const
-		{
-			a_out[0] = sun.red;
-			a_out[1] = sun.green;
-			a_out[2] = sun.blue;
-			a_out[3] = towardSun.x;
-			a_out[4] = towardSun.y;
-			a_out[5] = towardSun.z;
-			for (int row = 0; row < 3; ++row) {
-				a_out[6 + row * 4] = ambientRotate.entry[row][0];
-				a_out[7 + row * 4] = ambientRotate.entry[row][1];
-				a_out[8 + row * 4] = ambientRotate.entry[row][2];
-				a_out[9 + row * 4] = ambientTranslate[row];
-			}
-			a_out[18] = scale;
-		}
-	};
-
-	struct SpaceFog
+	inline void Pack(const SpaceLight& a_light, float (&a_out)[19])
 	{
-		float       nearDistance = 0.0f;
-		float       farDistance = 0.0f;
-		float       power = 1.0f;
-		float       most = 0.0f;  // the most it covers; 0: no fog
-		RE::NiColor nearColor;
-		RE::NiColor farColor;
-
-		void Pack(float (&a_out)[10]) const
-		{
-			const float values[10] = { nearDistance, farDistance, power, most, nearColor.red, nearColor.green, nearColor.blue, farColor.red, farColor.green, farColor.blue };
-			std::ranges::copy(values, a_out);
+		a_out[0] = a_light.sun.red;
+		a_out[1] = a_light.sun.green;
+		a_out[2] = a_light.sun.blue;
+		a_out[3] = a_light.towardSun.x;
+		a_out[4] = a_light.towardSun.y;
+		a_out[5] = a_light.towardSun.z;
+		for (int row = 0; row < 3; ++row) {
+			a_out[6 + row * 4] = a_light.ambientRotate.entry[row][0];
+			a_out[7 + row * 4] = a_light.ambientRotate.entry[row][1];
+			a_out[8 + row * 4] = a_light.ambientRotate.entry[row][2];
+			a_out[9 + row * 4] = a_light.ambientTranslate[row];
 		}
-	};
+		a_out[18] = a_light.scale;
+	}
 
-	// The street's light coming in through a room's doorway: the radiance of the opening.
-	struct Daylight
+	inline void Pack(const SpaceFog& a_fog, float (&a_out)[10])
 	{
-		RE::NiColor radiance;
+		const float values[10] = { a_fog.nearDistance, a_fog.farDistance, a_fog.power, a_fog.most, a_fog.nearColor.red, a_fog.nearColor.green, a_fog.nearColor.blue, a_fog.farColor.red, a_fog.farColor.green, a_fog.farColor.blue };
+		std::ranges::copy(values, a_out);
+	}
 
-		void Pack(float (&a_out)[3]) const
-		{
-			a_out[0] = radiance.red;
-			a_out[1] = radiance.green;
-			a_out[2] = radiance.blue;
-		}
-	};
-
-	// The plane a portal pass is cut at: pixels with dot(P, normal) < offset are cut. The sign
-	// convention is stated here and nowhere else.
-	struct ClipPlane
+	inline void Pack(const Daylight& a_daylight, float (&a_out)[3])
 	{
-		RE::NiPoint3 normal;  // unit
-		float        offset = 0.0f;
+		a_out[0] = a_daylight.radiance.red;
+		a_out[1] = a_daylight.radiance.green;
+		a_out[2] = a_daylight.radiance.blue;
+	}
 
-		[[nodiscard]] float Distance(const RE::NiPoint3& a_point) const { return a_point.Dot(normal) - offset; }  // negative: cut
-
-		void Pack(float (&a_out)[4]) const
-		{
-			a_out[0] = normal.x;
-			a_out[1] = normal.y;
-			a_out[2] = normal.z;
-			a_out[3] = offset;
-		}
-	};
+	inline void Pack(const ClipPlane& a_plane, float (&a_out)[4])
+	{
+		a_out[0] = a_plane.normal.x;
+		a_out[1] = a_plane.normal.y;
+		a_out[2] = a_plane.normal.z;
+		a_out[3] = a_plane.offset;
+	}
 }
 
 // The functions the fork exports and the plugin calls, by name and signature. Every one is
