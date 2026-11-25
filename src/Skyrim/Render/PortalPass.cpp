@@ -848,6 +848,349 @@ namespace Render::PortalPass
 		return freedPassesThisSubmit;
 	}
 
+	namespace
+	{
+		// What ID 52727 (the engine's menu-3D renderer) sets around its own draw.
+		struct EngineGlobals
+		{
+			RE::NiCamera*& currentCamera;  // set by SubmitAccumulator
+			std::uint32_t& depthMode;      // cached DepthStencilDepthMode
+			std::uint32_t& dirtyStates;
+			std::uint8_t&  menuDraw;
+			// Set by Main::RenderWaterEffects when the main view has water in it; the post-accumulation
+			// stage (ID 106584) then rebinds the world's depth buffer for its blended passes, which
+			// inside the portal pass would test and draw them against the main view's depth.
+			std::uint32_t& waterMode;
+		};
+
+		EngineGlobals Globals()
+		{
+			static REL::Relocation<RE::NiCamera**> currentCamera{ REL::RelocationID(527667, 414580) };
+			static REL::Relocation<std::uint32_t*> depthMode{ REL::RelocationID(524794, 388840) };
+			static REL::Relocation<std::uint32_t*> dirtyStates{ REL::RelocationID(524773, 388819) };
+			static REL::Relocation<std::uint8_t*>  menuDraw{ REL::RelocationID(525013, 411494) };
+			static REL::Relocation<std::uint32_t*> waterMode{ REL::RelocationID(513267, 391008) };
+			return { *currentCamera, *depthMode, *dirtyStates, *menuDraw, *waterMode };
+		}
+
+		// The renderer's state as it is now; the returned function puts it back. The portal draw
+		// loads its own camera, targets and globals into it.
+		auto SaveRendererState()
+		{
+			auto*       shadowState = &RE::BSGraphics::RendererShadowState::GetSingleton()->GetRuntimeData();
+			const auto  colorTarget = shadowState->renderTargets[0];
+			const auto  colorMode = shadowState->setRenderTargetMode[0];
+			const auto  depthTarget = shadowState->depthStencil;
+			const auto  depthSlice = shadowState->depthStencilSlice;
+			const auto  depthTargetMode = shadowState->setDepthStencilMode;
+			const auto  posAdjust = shadowState->posAdjust;
+			const auto  previousPosAdjust = shadowState->previousPosAdjust;
+			const auto  cameraData = shadowState->cameraData;
+			auto* const accumulator = RE::BSShaderAccumulator::GetCurrentAccumulator();
+			const auto  globals = Globals();
+			auto* const camera = globals.currentCamera;
+			const auto  depthMode = globals.depthMode;
+			const auto  menuDraw = globals.menuDraw;
+			const auto  waterMode = globals.waterMode;
+			const auto  ambient = SpaceLighting::SaveAmbient();
+			return [=] {
+				// SubmitAccumulator loads the portal camera into the renderer's camera state, including
+				// the "previous frame" matrices TAA and CS reproject with; left there, the whole image
+				// ghosted.
+				shadowState->posAdjust = posAdjust;
+				shadowState->previousPosAdjust = previousPosAdjust;
+				shadowState->cameraData = cameraData;
+				const auto restored = Globals();
+				restored.currentCamera = camera;
+				RE::BSShaderAccumulator::SetCurrentAccumulator(accumulator);
+				restored.menuDraw = menuDraw;
+				restored.waterMode = waterMode;
+				restored.depthMode = depthMode;
+				restored.dirtyStates |= 0x4;
+				SpaceLighting::RestoreAmbient(ambient);
+				ResetAccumulator(portalAccumulator.get());
+				SetColorTarget(0, colorTarget, static_cast<std::uint32_t>(colorMode), true);
+				SetDepthTarget(depthTarget, static_cast<std::uint32_t>(depthTargetMode), depthSlice);
+				// Our targets are still bound until the engine next applies its state; the doorway quad
+				// reads them as textures, which D3D refuses while they are bound for output.
+				ID3D11RenderTargetView* noTargets[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+				D3D::Context()->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, noTargets, nullptr);
+			};
+		}
+
+		// The portal camera as the main camera, every frame: taken once, a change of field of view or
+		// aspect (a zoom, the FOV console command, a resized window) put the portal image out of line
+		// with the doorway, which is composited pixel for pixel.
+		void CopyMainCamera(RE::NiCamera* a_mainCamera)
+		{
+			if (!portalCamera) {
+				portalCamera.reset(static_cast<RE::NiCamera*>(a_mainCamera->Clone()));
+			}
+			portalCamera->GetRuntimeData2() = a_mainCamera->GetRuntimeData2();
+			defaultNear = portalCamera->GetRuntimeData2().viewFrustum.fNear;
+		}
+
+		// A fresh accumulator per remote cell: reusing the previous cell's crashed the batch renderer
+		// on its leftover passes. The old one is kept alive, like the old light scenes.
+		void EnsureAccumulator(const Active& a_portal)
+		{
+			static std::uint32_t                                       generation = UINT32_MAX;
+			static std::vector<RE::NiPointer<RE::BSShaderAccumulator>> retiredAccumulators;
+			if (!portalAccumulator || generation != a_portal.generation) {
+				if (portalAccumulator) {
+					// Kept like the retired light scenes (LightScene::Renew): freeing those crashed, and
+					// nothing says the passes cached on shapes don't name their accumulator too.
+					retiredAccumulators.push_back(std::move(portalAccumulator));
+				}
+				portalFrame = 0;
+				portalAccumulator.reset(RE::BSShaderAccumulator::Create(0x63));  // engine-wide ctor argument
+				generation = a_portal.generation;
+			}
+		}
+
+		// Where the portal camera is: the main camera's (or the capture camera's) place mapped through
+		// the door pair.
+		void PlaceCamera(const std::optional<Pictures::CaptureCamera>& a_capture, const Portal::Doors::Mapping& a_mapping, const RE::NiCamera* a_mainCamera)
+		{
+			portalCamera->local = a_mapping.toLinked * (a_capture ? ToNi(a_capture->camera.transform) : a_mainCamera->world);
+			// A gate's mapping is scaled (Doors::Compute) for where the camera stands; what it sees from
+			// there doesn't change with its own scale.
+			portalCamera->local.scale = 1.0f;
+			if (a_capture) {
+				auto& frustum = portalCamera->GetRuntimeData2().viewFrustum;
+				frustum.fLeft = a_capture->camera.left;
+				frustum.fRight = a_capture->camera.right;
+				frustum.fBottom = a_capture->camera.bottom;
+				frustum.fTop = a_capture->camera.top;
+			}
+			RE::NiUpdateData update;
+			portalCamera->Update(update);
+		}
+
+		// Poor man's clip plane: push the near plane up to the linked door, so the walls and the door
+		// between the mirrored camera and the doorway don't block the view. Exact only when looking
+		// straight at the door (as the capture camera does); an oblique projection would make it exact
+		// at any angle.
+		void SetNearPlane(const Active& a_portal, const std::optional<Pictures::CaptureCamera>& a_capture, const Portal::Doors::Mapping& a_mapping, RE::TESObjectREFR* a_linked)
+		{
+			const auto&        rotate = portalCamera->world.rotate;
+			const RE::NiPoint3 forward{ rotate.entry[0][0], rotate.entry[1][0], rotate.entry[2][0] };  // NiCamera looks along local +X
+			// A gate's mapping is scaled: the capture camera stands that much further from the far gate.
+			const float toDoor = a_capture ? a_capture->camera.toDoorway * a_mapping.toLinked.scale : (Portal::Doors::Center(a_linked) - portalCamera->world.translate).Dot(forward);
+			// The capture camera cuts just past the door plane: its picture reaches beyond the doorway,
+			// where the room's front wall and the door's frame stood within the 20 units kept for the
+			// doorway quad, slivers at the plane that the stand-in drew out into vertical streaks seen
+			// from aside. The street's side has its own wall and frame anyway.
+			constexpr float kCaptureCut = 12.0f;
+			auto&           frustum = portalCamera->GetRuntimeData2().viewFrustum;
+			frustum.fNear = a_capture ? toDoor + kCaptureCut : std::max(defaultNear, toDoor - 20.0f);
+			// The doorway on screen still shows the last picture, read with the clip distances it was
+			// drawn with.
+			if (a_capture) {
+				// In the player's space's units, as the picture keeps its distances: the depth read with
+				// them gives the far side's distances divided by the mapping's scale.
+				const float scale = a_mapping.toLinked.scale;
+				captureDrawn = CaptureDrawn{ a_capture->door, !a_portal.cell->IsInteriorCell(), Portal::Gates::IsGate(a_portal), frustum.fNear / scale, frustum.fFar / scale };
+			} else {
+				portalNear = frustum.fNear;
+				portalFar = frustum.fFar;
+			}
+		}
+
+		// The accumulator draws with the portal's own light scene (the root): with no light scene
+		// GetRenderPasses crashed while culling, and borrowing the main view's crashed as soon as the
+		// player moved. The eye position is what ID 52727 copies from its camera.
+		void AimAccumulator(RE::ShadowSceneNode* a_root)
+		{
+			auto&       data = portalAccumulator->GetRuntimeData();
+			const auto& mainData = RE::BSShaderAccumulator::GetMainAccumulator()->GetRuntimeData();
+			data.activeShadowSceneNode = a_root;
+			data.renderMode = mainData.renderMode;
+			data.eyePosition = portalCamera->world.translate;
+		}
+
+		// The remote cell's shapes into the accumulator, culled with a camera whose frustum only covers
+		// the doorway: everything else would be drawn and then hidden by the walls around the door anyway.
+		void CullRemote(RE::ShadowSceneNode* a_root, const Active& a_portal, const ScreenRect& a_doorway, bool a_capturing)
+		{
+			Portal::LightScene::PrepareForView();
+			ResetAccumulator(portalAccumulator.get());
+			RE::BSCullingProcess::CullingContext context;
+			context.accumulator.reset(portalAccumulator.get());
+			if (!cullCamera) {
+				cullCamera.reset(static_cast<RE::NiCamera*>(portalCamera->Clone()));
+			}
+			cullCamera->local = portalCamera->world;
+			{
+				cullCamera->GetRuntimeData2() = portalCamera->GetRuntimeData2();
+				const auto& full = portalCamera->GetRuntimeData2().viewFrustum;
+				auto&       narrow = cullCamera->GetRuntimeData2().viewFrustum;
+				// The capture camera's image is all room: none of it is hidden by walls.
+				constexpr ScreenRect whole{ 0.0f, 1.0f, 0.0f, 1.0f };
+				const auto&          rect = a_capturing ? whole : a_doorway;
+				narrow.fLeft = full.fLeft + (full.fRight - full.fLeft) * rect[0];
+				narrow.fRight = full.fLeft + (full.fRight - full.fLeft) * rect[1];
+				narrow.fBottom = full.fBottom + (full.fTop - full.fBottom) * rect[2];
+				narrow.fTop = full.fBottom + (full.fTop - full.fBottom) * rect[3];
+				RE::NiUpdateData cullUpdate;
+				cullCamera->Update(cullUpdate);
+			}
+			context.camera.reset(cullCamera.get());
+			context.scene.reset(a_root);
+			// An interior built of rooms (room bounds: Jorrvaskr's living quarters, under rooms all of
+			// it) hangs its contents under BSMultiBoundRoom nodes, and a room's cull (ID 75886) walks
+			// into its children only when the context's portal graph lists the room, or when the cull
+			// ignores multibounds. The portal scene has no graph (see RemoteCell::AttachOne), so such
+			// a room drew nothing: a black doorway. Outdoors keeps the normal mode, where a
+			// multibound around a group of statics still culls the whole group at once.
+			if (a_portal.cell->IsInteriorCell()) {
+				context.cullMode = RE::BSCullingProcess::BSCPCullingType::kIgnoreMultiBounds;
+			}
+			// NPCs of a remote interior keep NiAVObject::kNotVisible on their 3D root, and the cull
+			// skips them: in the portal the room was empty. Outdoors the flag was clear.
+			const auto actors = a_capturing ? HideActorsForCapture(Portal::Manager::RemoteCells()) : ShowActorsForCull(Portal::Manager::RemoteCells());
+			{
+				const Diag::Scope scope("portal cull");
+				RE::BSCullingProcess::Process(context);
+			}
+			if (a_capturing) {
+				ShowActorsAgain(actors);
+			} else {
+				HideActorsAgain(actors);
+			}
+		}
+
+		// Same sequence as the engine's menu-3D renderer (ID 52727): bind with clear, let the clear
+		// happen now (the engine clears lazily, when the binding is applied), then bind without.
+		void BindTargets()
+		{
+			SetColorTarget(0, kColorTarget, RE::BSGraphics::SRTM_CLEAR, true);
+			SetDepthTarget(kDepthTarget, RE::BSGraphics::SRTM_CLEAR, 0);
+			static REL::Relocation<void (*)(void*)>                resetState{ REL::RelocationID(75570, 77371) };  // Renderer::ResetState
+			static REL::Relocation<void (*)(void*, std::uint32_t)> applyState{ REL::RelocationID(75462, 77247) };
+			resetState(RendererObject());
+			applyState(RendererObject(), 0);
+			SetColorTarget(0, kColorTarget, RE::BSGraphics::SRTM_NO_CLEAR, true);
+			SetDepthTarget(kDepthTarget, RE::BSGraphics::SRTM_NO_CLEAR, 0);
+		}
+
+		// Binding the targets set the viewport the way the main view's is set, render scale included
+		// (ID 77240); the full target's comes with kRenderFlags at the submit.
+		void NotePictureSize(bool a_atRenderScale)
+		{
+			auto&      drawing = DrawingTargets();
+			const auto desc = DescOf(drawing.color.texture);
+			const auto scale = a_atRenderScale ? D3D::RenderScale() : std::array{ 1.0f, 1.0f };
+			drawing.pictureWidth = desc.Width * scale[0];
+			drawing.pictureHeight = desc.Height * scale[1];
+		}
+
+		// Start from the normal depth mode instead of whatever the previous pass ended in, and set the
+		// global ID 52727 sets around its own draw (the accumulator's draw routine, ID 106583, otherwise
+		// may switch to "test EQUAL"). SaveRendererState has the old values.
+		void SetPortalGlobals()
+		{
+			const auto globals = Globals();
+			globals.depthMode = static_cast<std::uint32_t>(RE::BSGraphics::DepthStencilDepthMode::kTestWrite);
+			globals.dirtyStates |= 0x4;  // DIRTY_DEPTH_MODE
+			globals.menuDraw = 1;
+			globals.waterMode = 0;
+		}
+
+		void DrawBackground(const SpaceLighting::SkyColors& a_background)
+		{
+			if (auto* view = reinterpret_cast<ID3D11RenderTargetView*>(RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().renderTargets[kColorTarget].RTV)) {
+				DrawSky(D3D::Context(), view, portalCamera.get(), a_background, DrawingTargets().pictureWidth, DrawingTargets().pictureHeight);
+			}
+		}
+
+		// The far door's plane, facing away from the portal camera: nothing on the camera's side of it
+		// can be seen through the doorway (see SeamlessPortalClips in the fork). Its face on the
+		// camera's side, so the door's own frame isn't cut.
+		void ClipAtFarDoor(const Portal::Doors::Mapping& a_mapping, RE::TESObjectREFR* a_linked)
+		{
+			RE::NiPoint3 through = a_mapping.toLinked.rotate * a_mapping.inward;
+			through.z = 0.0f;
+			through.Unitize();
+			const auto face = Portal::Doors::Center(a_linked) - through * Portal::Doors::Size(a_linked).halfDepth;
+			farDoorClip = ClipPlane{ ToCore(through), face.Dot(through) };
+			::Render::Backend::Current().SetPortalClip(farDoorClip);
+		}
+
+		// Only the doorway's part of the picture is ever shown, yet each shape the doorway's cull keeps
+		// was shaded across the whole picture: at Solitude's gate 24 times the doorway's pixels. The
+		// doorway's rectangle (with its margin) bounds the quad that shows the picture, at render scale
+		// and jitter alike. The main view's rain drawn into the picture is cut the same way. A capture's
+		// picture is all of it.
+		// Switched off again on leaving, also by an exception (a door unloaded mid-frame, caught in the
+		// draw hook): left on, the rest of the frame was cut to the doorway's rectangle.
+		class DoorwayScissor
+		{
+		public:
+			DoorwayScissor(const ScreenRect& a_doorway) :
+				state(RE::BSGraphics::RendererShadowState::GetSingleton()->GetRuntimeData())
+			{
+				const float      width = DrawingTargets().pictureWidth, height = DrawingTargets().pictureHeight;
+				const D3D11_RECT rect{ static_cast<LONG>(std::floor(a_doorway[0] * width)), static_cast<LONG>(std::floor((1.0f - a_doorway[3]) * height)),
+					static_cast<LONG>(std::ceil(a_doorway[1] * width)), static_cast<LONG>(std::ceil((1.0f - a_doorway[2]) * height)) };
+				D3D::Context()->RSSetScissorRects(1, &rect);
+				state.rasterStateScissorMode = 1;
+				state.stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_RASTER_CULL_MODE);
+			}
+			~DoorwayScissor()
+			{
+				state.rasterStateScissorMode = 0;
+				state.stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_RASTER_CULL_MODE);
+			}
+
+			DoorwayScissor(const DoorwayScissor&) = delete;
+			DoorwayScissor& operator=(const DoorwayScissor&) = delete;
+
+		private:
+			decltype(RE::BSGraphics::RendererShadowState::GetSingleton()->GetRuntimeData()) state;
+		};
+
+		void Submit(bool a_atRenderScale)
+		{
+			inPortalSubmit = true;
+			{
+				const Diag::Scope scope("portal submit");
+				Diag::GpuBegin("gpu portal submit");
+				RE::BSGraphics::Renderer::SubmitAccumulator(portalCamera.get(), portalAccumulator.get(), a_atRenderScale ? LiveRenderFlags() : kRenderFlags);
+				Diag::GpuEnd("gpu portal submit");
+			}
+			inPortalSubmit = false;
+		}
+
+		// For the bridge's portal_status: only there in agent sessions, and a walk over the cell's
+		// references plus a JSON document every frame is wasted on anyone else.
+		json DescribePass(const Active& a_portal, const RE::NiCamera* a_mainCamera, RE::TESObjectREFR* a_linked)
+		{
+			const auto& p = portalCamera->world.translate;
+			// Where the remote cell's NPCs are in the portal image (0..1, z < 0 = behind).
+			json onScreen = json::array();
+			a_portal.cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
+				if (auto* actor = a_ref ? a_ref->As<RE::Actor>() : nullptr; actor && actor->Get3D()) {
+					float x = 0, y = 0, z = 0;
+					portalCamera->WorldPtToScreenPt3(actor->Get3D()->worldBound.center, x, y, z, 1e-5f);
+					onScreen.push_back({ { "name", actor->GetDisplayFullName() }, { "screen", { x, y, z } } });
+				}
+				return RE::BSContainer::ForEachResult::kContinue;
+			});
+			const auto& shadowState = RE::BSGraphics::RendererShadowState::GetSingleton()->GetRuntimeData();
+			const auto  center = Portal::Doors::Center(a_linked);
+			return {
+				{ "actorsOnScreen", onScreen },
+				{ "portalCamera", { p.x, p.y, p.z } },
+				{ "portalForward", { portalCamera->world.rotate.entry[0][0], portalCamera->world.rotate.entry[1][0], portalCamera->world.rotate.entry[2][0] } },
+				{ "mainForward", { a_mainCamera->world.rotate.entry[0][0], a_mainCamera->world.rotate.entry[1][0], a_mainCamera->world.rotate.entry[2][0] } },
+				{ "linkedDoorCenter", { center.x, center.y, center.z } },
+				{ "near", portalCamera->GetRuntimeData2().viewFrustum.fNear },
+				{ "worldTargets", { static_cast<std::uint32_t>(shadowState.renderTargets[0]), static_cast<std::uint32_t>(shadowState.setRenderTargetMode[0]), shadowState.depthStencil, static_cast<std::uint32_t>(shadowState.setDepthStencilMode) } },
+			};
+		}
+	}
+
 	json Draw(const Active& a_portal, const ScreenRect& a_doorway, const std::optional<Pictures::CaptureCamera>& a_capture, bool a_fullTarget)
 	{
 		auto* root = Portal::LightScene::Get();
@@ -855,155 +1198,21 @@ namespace Render::PortalPass
 		if (!mainCamera) {
 			throw std::runtime_error("no main camera");
 		}
-		if (!portalCamera) {
-			portalCamera.reset(static_cast<RE::NiCamera*>(mainCamera->Clone()));
-		}
-		// Frustum, viewport and projection from the main camera every frame: taken once, a change
-		// of field of view or aspect (a zoom, the FOV console command, a resized window) put the
-		// portal image out of line with the doorway, which is composited pixel for pixel.
-		portalCamera->GetRuntimeData2() = mainCamera->GetRuntimeData2();
-		defaultNear = portalCamera->GetRuntimeData2().viewFrustum.fNear;
-		// A fresh accumulator per remote cell: reusing the previous cell's crashed the batch
-		// renderer on its leftover passes. The old one is kept alive, like the old light scenes.
-		static std::uint32_t                                          generation = UINT32_MAX;
-		static std::vector<RE::NiPointer<RE::BSShaderAccumulator>> retiredAccumulators;
-		if (!portalAccumulator || generation != a_portal.generation) {
-			if (portalAccumulator) {
-				// Kept like the retired light scenes (LightScene::Renew): freeing those crashed, and
-				// nothing says the passes cached on shapes don't name their accumulator too.
-				retiredAccumulators.push_back(std::move(portalAccumulator));
-			}
-			portalFrame = 0;
-			portalAccumulator.reset(RE::BSShaderAccumulator::Create(0x63));  // engine-wide ctor argument
-			generation = a_portal.generation;
-		}
+		CopyMainCamera(mainCamera);
+		EnsureAccumulator(a_portal);
 		const auto mapping = Portal::Doors::Compute(a_portal);
-		const bool capturing = a_capture.has_value();
-		portalCamera->local = mapping.toLinked * (capturing ? ToNi(a_capture->camera.transform) : mainCamera->world);
-		// A gate's mapping is scaled (Doors::Compute) for where the camera stands; what it sees from
-		// there doesn't change with its own scale.
-		portalCamera->local.scale = 1.0f;
-		if (capturing) {
-			auto& frustum = portalCamera->GetRuntimeData2().viewFrustum;
-			frustum.fLeft = a_capture->camera.left;
-			frustum.fRight = a_capture->camera.right;
-			frustum.fBottom = a_capture->camera.bottom;
-			frustum.fTop = a_capture->camera.top;
-		}
-		RE::NiUpdateData update;
-		portalCamera->Update(update);
+		PlaceCamera(a_capture, mapping, mainCamera);
+		auto* linked = Portal::Doors::Door(a_portal.linkedDoor);
+		SetNearPlane(a_portal, a_capture, mapping, linked);
+		AimAccumulator(root);
 
-		// Poor man's clip plane: push the near plane up to the linked door, so the walls and the
-		// door between the mirrored camera and the doorway don't block the view. Exact only when
-		// looking straight at the door (as the capture camera does); an oblique projection would
-		// make it exact at any angle.
-		auto*              linked = Portal::Doors::Door(a_portal.linkedDoor);
-		const auto&        rotate = portalCamera->world.rotate;
-		const RE::NiPoint3 forward{ rotate.entry[0][0], rotate.entry[1][0], rotate.entry[2][0] };  // NiCamera looks along local +X
-		// A gate's mapping is scaled: the capture camera stands that much further from the far gate.
-		const float        toDoor = capturing ? a_capture->camera.toDoorway * mapping.toLinked.scale : (Portal::Doors::Center(linked) - portalCamera->world.translate).Dot(forward);
-		// The capture camera cuts just past the door plane: its
-		// picture reaches beyond the doorway, where the room's front wall and the door's frame
-		// stood within the 20 units kept for the doorway quad, slivers at the plane that the
-		// stand-in drew out into vertical streaks seen from aside. The street's side has its own
-		// wall and frame anyway.
-		constexpr float kCaptureCut = 12.0f;
-		portalCamera->GetRuntimeData2().viewFrustum.fNear = capturing ? toDoor + kCaptureCut : std::max(defaultNear, toDoor - 20.0f);
-		// The doorway on screen still shows the last picture, read with the clip distances it was
-		// drawn with.
-		if (capturing) {
-			// In the player's space's units, as the picture keeps its distances: the depth read with
-			// them gives the far side's distances divided by the mapping's scale.
-			const float scale = mapping.toLinked.scale;
-			captureDrawn = CaptureDrawn{ a_capture->door, !a_portal.cell->IsInteriorCell(), Portal::Gates::IsGate(a_portal), portalCamera->GetRuntimeData2().viewFrustum.fNear / scale,
-				portalCamera->GetRuntimeData2().viewFrustum.fFar / scale };
-		} else {
-			portalNear = portalCamera->GetRuntimeData2().viewFrustum.fNear;
-			portalFar = portalCamera->GetRuntimeData2().viewFrustum.fFar;
-		}
-
-		// The accumulator draws with the portal's own light scene (the root): with no light scene
-		// GetRenderPasses crashed while culling, and borrowing the main view's crashed as soon as
-		// the player moved. The eye position is what ID 52727 copies from its camera.
-		auto&       data = portalAccumulator->GetRuntimeData();
-		const auto& mainData = RE::BSShaderAccumulator::GetMainAccumulator()->GetRuntimeData();
-		data.activeShadowSceneNode = root;
-		data.renderMode = mainData.renderMode;
-		data.eyePosition = portalCamera->world.translate;
-
-		// Everything below is restored at the end.
-		auto&       shadowState = RE::BSGraphics::RendererShadowState::GetSingleton()->GetRuntimeData();
-		const auto  savedColorTarget = shadowState.renderTargets[0];
-		const auto  savedColorMode = shadowState.setRenderTargetMode[0];
-		const auto  savedDepthTarget = shadowState.depthStencil;
-		const auto  savedDepthSlice = shadowState.depthStencilSlice;
-		const auto  savedDepthTargetMode = shadowState.setDepthStencilMode;
-		const auto  savedPosAdjust = shadowState.posAdjust;
-		const auto  savedPreviousPosAdjust = shadowState.previousPosAdjust;
-		const auto  savedCameraData = shadowState.cameraData;
-		auto* const savedAccumulator = RE::BSShaderAccumulator::GetCurrentAccumulator();
-		static REL::Relocation<RE::NiCamera**>  currentCamera{ REL::RelocationID(527667, 414580) };  // set by SubmitAccumulator
-		static REL::Relocation<std::uint32_t*> depthMode{ REL::RelocationID(524794, 388840) };       // cached DepthStencilDepthMode
-		static REL::Relocation<std::uint32_t*> dirtyStates{ REL::RelocationID(524773, 388819) };
-		static REL::Relocation<std::uint8_t*>  menuDrawGlobal{ REL::RelocationID(525013, 411494) };
-		auto* const savedCamera = *currentCamera;
-		const auto  savedDepthMode = *depthMode;
-		const auto  savedMenuDrawGlobal = *menuDrawGlobal;
-		const auto  mainAmbient = SpaceLighting::SaveAmbient();
-		auto*       d3dContext = D3D::Context();
+		// Everything the draw changes is restored at the end.
+		const auto              restoreRendererState = SaveRendererState();
 		const OwnTargetsInPlace targets(DrawingTargets());  // to the end of the function, past the restore below
+		const HiddenFarDoors    hiddenDoors(linked);
 
-		const HiddenFarDoors hiddenDoors(linked);
-
-		Portal::LightScene::PrepareForView();
-		ResetAccumulator(portalAccumulator.get());
-		RE::BSCullingProcess::CullingContext context;
-		context.accumulator.reset(portalAccumulator.get());
-		// Culled with a camera whose frustum only covers the doorway: everything else would be
-		// drawn and then hidden by the walls around the door anyway.
-		if (!cullCamera) {
-			cullCamera.reset(static_cast<RE::NiCamera*>(portalCamera->Clone()));
-		}
-		cullCamera->local = portalCamera->world;
-		{
-			cullCamera->GetRuntimeData2() = portalCamera->GetRuntimeData2();
-			const auto& full = portalCamera->GetRuntimeData2().viewFrustum;
-			auto&       narrow = cullCamera->GetRuntimeData2().viewFrustum;
-			// The capture camera's image is all room: none of it is hidden by walls.
-			constexpr ScreenRect whole{ 0.0f, 1.0f, 0.0f, 1.0f };
-			const auto&          rect = capturing ? whole : a_doorway;
-			narrow.fLeft = full.fLeft + (full.fRight - full.fLeft) * rect[0];
-			narrow.fRight = full.fLeft + (full.fRight - full.fLeft) * rect[1];
-			narrow.fBottom = full.fBottom + (full.fTop - full.fBottom) * rect[2];
-			narrow.fTop = full.fBottom + (full.fTop - full.fBottom) * rect[3];
-			RE::NiUpdateData cullUpdate;
-			cullCamera->Update(cullUpdate);
-		}
-		context.camera.reset(cullCamera.get());
-		context.scene.reset(root);
-		// An interior built of rooms (room bounds: Jorrvaskr's living quarters, under rooms all of
-		// it) hangs its contents under BSMultiBoundRoom nodes, and a room's cull (ID 75886) walks
-		// into its children only when the context's portal graph lists the room, or when the cull
-		// ignores multibounds. The portal scene has no graph (see RemoteCell::AttachOne), so such
-		// a room drew nothing: a black doorway. Outdoors keeps the normal mode, where a
-		// multibound around a group of statics still culls the whole group at once.
-		if (a_portal.cell->IsInteriorCell()) {
-			context.cullMode = RE::BSCullingProcess::BSCPCullingType::kIgnoreMultiBounds;
-		}
-		{
-			// NPCs of a remote interior keep NiAVObject::kNotVisible on their 3D root, and the cull
-			// skips them: in the portal the room was empty. Outdoors the flag was clear.
-			const auto actors = capturing ? HideActorsForCapture(Portal::Manager::RemoteCells()) : ShowActorsForCull(Portal::Manager::RemoteCells());
-			{
-				const Diag::Scope scope("portal cull");
-				RE::BSCullingProcess::Process(context);
-			}
-			if (capturing) {
-				ShowActorsAgain(actors);
-			} else {
-				HideActorsAgain(actors);
-			}
-		}
+		const bool capturing = a_capture.has_value();
+		CullRemote(root, a_portal, a_doorway, capturing);
 
 		// The other side's sun and ambient, before its shadows are drawn with that sun.
 		const auto background = SpaceLighting::ApplyRemoteLighting(root, a_portal.cell);
@@ -1016,57 +1225,14 @@ namespace Render::PortalPass
 		}
 		::Render::Backend::Current().SetPortalWorldspace(a_portal.cell->IsInteriorCell() ? nullptr : a_portal.cell->GetRuntimeData().worldSpace);
 
-		// Same sequence as the engine's menu-3D renderer (ID 52727): bind with clear, let the clear
-		// happen now (the engine clears lazily, when the binding is applied), then bind without.
-		SetColorTarget(0, kColorTarget, RE::BSGraphics::SRTM_CLEAR, true);
-		SetDepthTarget(kDepthTarget, RE::BSGraphics::SRTM_CLEAR, 0);
-		{
-			static REL::Relocation<void (*)(void*)>                resetState{ REL::RelocationID(75570, 77371) };  // Renderer::ResetState
-			static REL::Relocation<void (*)(void*, std::uint32_t)> applyState{ REL::RelocationID(75462, 77247) };
-			resetState(RendererObject());
-			applyState(RendererObject(), 0);
-		}
-		SetColorTarget(0, kColorTarget, RE::BSGraphics::SRTM_NO_CLEAR, true);
-		SetDepthTarget(kDepthTarget, RE::BSGraphics::SRTM_NO_CLEAR, 0);
-		// Binding the targets set the viewport the way the main view's is set, render scale included
-		// (ID 77240); the full target's comes with kRenderFlags at the submit.
 		const bool atRenderScale = !capturing && !a_fullTarget;
-		{
-			auto&      drawing = DrawingTargets();
-			const auto desc = DescOf(drawing.color.texture);
-			const auto scale = atRenderScale ? D3D::RenderScale() : std::array{ 1.0f, 1.0f };
-			drawing.pictureWidth = desc.Width * scale[0];
-			drawing.pictureHeight = desc.Height * scale[1];
-		}
-		// Start from the normal depth mode instead of whatever the previous pass ended in, and set
-		// the global ID 52727 sets around its own draw (the accumulator's draw routine, ID 106583,
-		// otherwise may switch to "test EQUAL").
-		*depthMode = static_cast<std::uint32_t>(RE::BSGraphics::DepthStencilDepthMode::kTestWrite);
-		*dirtyStates |= 0x4;  // DIRTY_DEPTH_MODE
-		*menuDrawGlobal = 1;
-		// Set by Main::RenderWaterEffects when the main view has water in it; the post-accumulation
-		// stage (ID 106584) then rebinds the world's depth buffer for its blended passes, which
-		// inside the portal pass would test and draw them against the main view's depth.
-		static REL::Relocation<std::uint32_t*> waterMode{ REL::RelocationID(513267, 391008) };
-		const auto                             savedWaterMode = *waterMode;
-		*waterMode = 0;
-
+		BindTargets();
+		NotePictureSize(atRenderScale);
+		SetPortalGlobals();
 		if (background) {
-			if (auto* view = reinterpret_cast<ID3D11RenderTargetView*>(RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().renderTargets[kColorTarget].RTV)) {
-				DrawSky(d3dContext, view, portalCamera.get(), *background, DrawingTargets().pictureWidth, DrawingTargets().pictureHeight);
-			}
+			DrawBackground(*background);
 		}
-		{
-			// The far door's plane, facing away from the portal camera: nothing on the camera's side
-			// of it can be seen through the doorway (see SeamlessPortalClips in the fork). Its face
-			// on the camera's side, so the door's own frame isn't cut.
-			RE::NiPoint3 through = mapping.toLinked.rotate * mapping.inward;
-			through.z = 0.0f;
-			through.Unitize();
-			const auto face = Portal::Doors::Center(linked) - through * Portal::Doors::Size(linked).halfDepth;
-			farDoorClip = ClipPlane{ ToCore(through), face.Dot(through) };
-			::Render::Backend::Current().SetPortalClip(farDoorClip);
-		}
+		ClipAtFarDoor(mapping, linked);
 		{
 			auto* sun = root->GetRuntimeData().sunLight;
 			::Render::Backend::Current().BeginPortalPass(sun ? skyrim_cast<RE::NiDirectionalLight*>(sun->light.get()) : nullptr, a_portal.cell->IsInteriorCell(), portalCamera.get());
@@ -1075,54 +1241,24 @@ namespace Render::PortalPass
 		portalFrame += 1;
 		freedPassesThisSubmit = 0;
 		drawnThisSubmit.clear();
-		// Only the doorway's part of the picture is ever shown, yet each shape the doorway's cull keeps
-		// was shaded across the whole picture: at Solitude's gate 24 times the doorway's pixels. The
-		// doorway's rectangle (with its margin) bounds the quad that shows the picture, at render scale
-		// and jitter alike. The main view's rain drawn into the picture below is cut the same way. A
-		// capture's picture is all of it.
-		// Switched off again on leaving, also by an exception (a door unloaded mid-frame, caught in
-		// the draw hook): left on, the rest of the frame was cut to the doorway's rectangle.
-		struct Scissor
 		{
-			decltype(shadowState) state;
-			bool                  on;
-			void Off()
-			{
-				if (std::exchange(on, false)) {
-					state.rasterStateScissorMode = 0;
-					state.stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_RASTER_CULL_MODE);
-				}
+			std::optional<DoorwayScissor> scissor;
+			if (atRenderScale) {
+				scissor.emplace(a_doorway);
 			}
-			~Scissor() { Off(); }
-		} scissor{ shadowState, !capturing && !a_fullTarget };
-		if (scissor.on) {
-			const float     width = DrawingTargets().pictureWidth, height = DrawingTargets().pictureHeight;
-			const D3D11_RECT rect{ static_cast<LONG>(std::floor(a_doorway[0] * width)), static_cast<LONG>(std::floor((1.0f - a_doorway[3]) * height)),
-				static_cast<LONG>(std::ceil(a_doorway[1] * width)), static_cast<LONG>(std::ceil((1.0f - a_doorway[2]) * height)) };
-			d3dContext->RSSetScissorRects(1, &rect);
-			shadowState.rasterStateScissorMode = 1;
-			shadowState.stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_RASTER_CULL_MODE);
+			Submit(atRenderScale);
+			Diag::AddCount("portal passes", static_cast<double>(drawnThisSubmit.size()));
+			// Not for the main view's rain drawn into the picture next (its own pass, see
+			// DrawMainPrecipitation); EndPortalPass puts the world's shadows back.
+			if (shadowed) {
+				::Render::Backend::Current().SetPortalShadows(nullptr, nullptr, nullptr);
+			}
+			// The weather's rain falls through a city gate too. Not in a doorway picture: it is kept,
+			// and would show its streaks standing still in any weather.
+			if (atRenderScale && !a_portal.cell->IsInteriorCell() && !RE::PlayerCharacter::GetSingleton()->GetParentCell()->IsInteriorCell()) {
+				DrawMainPrecipitation(root);
+			}
 		}
-		inPortalSubmit = true;
-		{
-			const Diag::Scope scope("portal submit");
-			Diag::GpuBegin("gpu portal submit");
-			RE::BSGraphics::Renderer::SubmitAccumulator(portalCamera.get(), portalAccumulator.get(), atRenderScale ? LiveRenderFlags() : kRenderFlags);
-			Diag::GpuEnd("gpu portal submit");
-		}
-		inPortalSubmit = false;
-		Diag::AddCount("portal passes", static_cast<double>(drawnThisSubmit.size()));
-		// Not for the main view's rain drawn into the picture next (its own pass, see
-		// DrawMainPrecipitation); EndPortalPass puts the world's shadows back.
-		if (shadowed) {
-			::Render::Backend::Current().SetPortalShadows(nullptr, nullptr, nullptr);
-		}
-		// The weather's rain falls through a city gate too. Not in a doorway picture: it is kept,
-		// and would show its streaks standing still in any weather.
-		if (atRenderScale && !a_portal.cell->IsInteriorCell() && !RE::PlayerCharacter::GetSingleton()->GetParentCell()->IsInteriorCell()) {
-			DrawMainPrecipitation(root);
-		}
-		scissor.Off();
 		// A capture isn't for the doorway: the last picture stays on screen this frame. Otherwise the
 		// new one goes on screen at once; a picture held back for drawing fewer passes than usual
 		// stood still in the doorway while the view turned (the doorway's cull is narrowed to its
@@ -1139,55 +1275,9 @@ namespace Render::PortalPass
 		}
 		::Render::Backend::Current().EndPortalPass();
 		::Render::Backend::Current().SetPortalClip(std::nullopt);
+		restoreRendererState();
 
-
-		// SubmitAccumulator loads the portal camera into the renderer's camera state, including the
-		// "previous frame" matrices TAA and CS reproject with; left there, the whole image ghosted.
-		shadowState.posAdjust = savedPosAdjust;
-		shadowState.previousPosAdjust = savedPreviousPosAdjust;
-		shadowState.cameraData = savedCameraData;
-		*currentCamera = savedCamera;
-		RE::BSShaderAccumulator::SetCurrentAccumulator(savedAccumulator);
-		*menuDrawGlobal = savedMenuDrawGlobal;
-		*waterMode = savedWaterMode;
-		*depthMode = savedDepthMode;
-		*dirtyStates |= 0x4;
-		SpaceLighting::RestoreAmbient(mainAmbient);
-		ResetAccumulator(portalAccumulator.get());
-		SetColorTarget(0, savedColorTarget, static_cast<std::uint32_t>(savedColorMode), true);
-		SetDepthTarget(savedDepthTarget, static_cast<std::uint32_t>(savedDepthTargetMode), savedDepthSlice);
-		{
-			// Our targets are still bound until the engine next applies its state; the doorway quad
-			// reads them as textures, which D3D refuses while they are bound for output.
-			ID3D11RenderTargetView* noTargets[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
-			d3dContext->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, noTargets, nullptr);
-		}
-
-		// Diagnostics, for the bridge's portal_status: only there in agent sessions, and a walk over
-		// the cell's references plus a JSON document every frame is wasted on anyone else.
-		if (!Diag::AgentMode()) {
-			return json::object();
-		}
-		const auto& p = portalCamera->world.translate;
-		// Where the remote cell's NPCs are in the portal image (0..1, z < 0 = behind).
-		json onScreen = json::array();
-		a_portal.cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
-			if (auto* actor = a_ref ? a_ref->As<RE::Actor>() : nullptr; actor && actor->Get3D()) {
-				float x = 0, y = 0, z = 0;
-				portalCamera->WorldPtToScreenPt3(actor->Get3D()->worldBound.center, x, y, z, 1e-5f);
-				onScreen.push_back({ { "name", actor->GetDisplayFullName() }, { "screen", { x, y, z } } });
-			}
-			return RE::BSContainer::ForEachResult::kContinue;
-		});
-		return {
-			{ "actorsOnScreen", onScreen },
-			{ "portalCamera", { p.x, p.y, p.z } },
-			{ "portalForward", { portalCamera->world.rotate.entry[0][0], portalCamera->world.rotate.entry[1][0], portalCamera->world.rotate.entry[2][0] } },
-			{ "mainForward", { mainCamera->world.rotate.entry[0][0], mainCamera->world.rotate.entry[1][0], mainCamera->world.rotate.entry[2][0] } },
-			{ "linkedDoorCenter", [&] { const auto c = Portal::Doors::Center(linked); return json{ c.x, c.y, c.z }; }() },
-			{ "near", portalCamera->GetRuntimeData2().viewFrustum.fNear },
-			{ "worldTargets", { static_cast<std::uint32_t>(savedColorTarget), static_cast<std::uint32_t>(savedColorMode), savedDepthTarget, static_cast<std::uint32_t>(savedDepthTargetMode) } },
-		};
+		return Diag::AgentMode() ? DescribePass(a_portal, mainCamera, linked) : json::object();
 	}
 
 	void HookDrawPass(std::uintptr_t a_site)

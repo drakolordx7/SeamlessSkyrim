@@ -11,11 +11,11 @@ who does that.
 | Native | No Community Shaders (vanilla shaders, and ENB, which runs on them) | `src/Skyrim/Render/Native/NativeMask.cpp`, `src/Skyrim/Render/Native/NativeLighting.cpp` |
 | None | A stock Community Shaders (no fork exports) | Nothing: no render-merge; the portal pass is drawn unclipped, with only the sun and ambient the portal code sets. Crossing without a loading screen works. |
 
-How many rooms can be merged at once (`Render::Backend::MergedRooms`): 4 with
+How many rooms can be merged at once (`Render::Backend::Interface::MergedRooms`): 4 with
 the fork's per-room exports (`SeamlessPortal_SetMergedRoomDoor/Lighting`), else 1. `SetMergedDoor` and
 `SetMergedLighting` take the room's slot; the native backend accepts slot 0 only.
 
-Chosen once when the portal hooks are installed (`Portal::Manager::Install`, kDataLoaded).
+Chosen once when the portal hooks are installed (`Plugin::Install`, kDataLoaded).
 `[Render] sBackend` in `SeamlessSkyrim.ini` overrides: `auto` (default), `cs`, `native`, `none`.
 `native` with Community Shaders loaded is allowed for testing: the mask works on CS's shaders too,
 but CS lights the world itself, so the room's light doesn't match.
