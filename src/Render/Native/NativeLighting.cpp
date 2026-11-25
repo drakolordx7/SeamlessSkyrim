@@ -1,8 +1,10 @@
 #include "Render/Native/Native.h"
 
+#include "Engine/Fog.h"
 #include "Engine/Hooks.h"
 #include "Portal/LightOcclusion.h"
-#include "Portal/PortalManager.h"
+#include "Render/Native/Pass.h"
+#include "Render/SceneQuery.h"
 
 // The light of another space with the game's own lighting shader.
 //
@@ -28,13 +30,13 @@
 namespace
 {
 	using Render::Native::LightingSwap;
+	namespace Pass = Render::Native::Pass;
 
-	constexpr std::uint32_t kPortalSceneSlot = 3;
-	constexpr int           kMaxPointLights = 7;  // three technique bits; the shader's arrays hold 7
+	constexpr int kMaxPointLights = 7;  // three technique bits; the shader's arrays hold 7
 
-	std::mutex                            lightingLock;
-	std::optional<std::array<float, 19>> mergedLighting;  // under lightingLock
-	std::optional<std::array<float, 10>> mergedFog;       // under lightingLock
+	std::mutex                         lightingLock;
+	std::optional<Render::SpaceLight> mergedLighting;  // under lightingLock
+	std::optional<Render::SpaceFog>   mergedFog;       // under lightingLock
 
 	struct Stats
 	{
@@ -45,18 +47,10 @@ namespace
 		std::uint64_t ownFog = 0;    // merged passes fogged with the street's fog
 	} stats;
 
-	// The fog the lighting shader's technique setup (ID 107320, from SetupTechnique) uploads: the
-	// active light scene's fog property (ID 105637 by the scene index at ID 390982). Fields read
-	// there: near colour +0x38, far colour +0x44, near +0x50, far +0x54, power +0x84, most +0x88.
-	constexpr std::size_t kFogBegin = 0x38;
-	constexpr std::size_t kFogEnd = 0x8C;
-
-	std::byte* ActiveFog()
-	{
-		static REL::Relocation<std::uint8_t*>    sceneIndex{ REL::RelocationID(513241, 390982) };
-		static REL::Relocation<void* (*)(int)> fogOf{ REL::RelocationID(98984, 105637) };
-		return static_cast<std::byte*>(fogOf(*sceneIndex.get()));
-	}
+	// The fog the lighting shader's technique setup (ID 107320, from SetupTechnique) uploads is the
+	// active light scene's fog property (Engine/Fog.h).
+	constexpr std::size_t kFogBegin = Engine::Fog::kBegin;
+	constexpr std::size_t kFogEnd = Engine::Fog::kEnd;
 
 	// The directional ambient transform the lighting shader's setup reads (rotation, translation, scale).
 	RE::NiTransform& AmbientTransform()
@@ -77,7 +71,7 @@ namespace
 		static void* Thunk(int a_index)
 		{
 			auto* property = static_cast<std::byte*>(func(a_index));
-			std::optional<std::array<float, 10>> fog;
+			std::optional<Render::SpaceFog> fog;
 			{
 				std::scoped_lock lock(lightingLock);
 				fog = mergedFog;
@@ -89,15 +83,7 @@ namespace
 			}
 			alignas(16) static std::byte copy[0x90];
 			std::memcpy(copy, property, sizeof(copy));
-			const auto put = [&](std::size_t a_offset, float a_value) { std::memcpy(copy + a_offset, &a_value, sizeof(float)); };
-			for (int i = 0; i < 3; ++i) {
-				put(0x38 + 4 * i, (*fog)[4 + i]);
-				put(0x44 + 4 * i, (*fog)[7 + i]);
-			}
-			put(0x50, (*fog)[0]);
-			put(0x54, (*fog)[1]);
-			put(0x84, (*fog)[2]);
-			put(0x88, (*fog)[3]);
+			Engine::Fog::Write(copy, *fog);
 			return copy;
 		}
 		static inline REL::Relocation<decltype(Thunk)> func;
@@ -142,7 +128,7 @@ namespace
 
 	struct Candidate
 	{
-		float     distance;
+		float        distance;
 		RE::BSLight* light;
 	};
 
@@ -185,18 +171,14 @@ namespace Render::Native
 		if (storageInUse || !a_pass || !a_pass->geometry || a_pass->numLights < 1 || !a_pass->sceneLights || !a_pass->sceneLights[0]) {
 			return;
 		}
-		auto&      state = RE::BSShaderManager::State::GetSingleton();
-		auto*      portalScene = state.shadowSceneNode[kPortalSceneSlot];
-		auto*      accumulator = RE::BSShaderAccumulator::GetCurrentAccumulator();
-		auto*      scene = accumulator ? accumulator->GetRuntimeData().activeShadowSceneNode : nullptr;
-		const bool portal = portalScene && scene == portalScene;
-		const bool merged = !portal && scene && scene == state.shadowSceneNode[0] && MergedDoorSet() && Portal::Manager::IsMergedShape(a_pass->geometry) &&
-		                    !Portal::Manager::IsPlayerShape(a_pass->geometry);
+		auto*      portalScene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[Render::kPortalSceneSlot];
+		const bool portal = Pass::InPortalScene();
+		const bool merged = !portal && Pass::IsMergedRoomShape(a_pass->geometry);
 		if (!portal && !merged) {
 			return;
 		}
-		std::optional<std::array<float, 19>> lighting;
-		std::optional<std::array<float, 10>> fog;
+		std::optional<Render::SpaceLight> lighting;
+		std::optional<Render::SpaceFog>   fog;
 		if (merged) {
 			std::scoped_lock lock(lightingLock);
 			lighting = mergedLighting;
@@ -204,9 +186,9 @@ namespace Render::Native
 		}
 		// The room's lights are in the portal scene; a street merged into an interior keeps its
 		// own in the world's (RemoteCell doesn't adopt them), and is left with the engine's pairing.
-		const auto& remote = Portal::Manager::RemoteCells();
+		const auto& remote = Render::Scene().RemoteCells();
 		const bool  giveLights = portal || (!remote.empty() && remote.front()->IsInteriorCell());
-		const float scale = lighting ? (*lighting)[18] : 1.0f;
+		const float scale = lighting ? lighting->scale : 1.0f;
 
 		storageInUse = true;
 		saved = &storage;
@@ -220,18 +202,10 @@ namespace Render::Native
 		// set up again with the street's fog in the scene's fog property; the destructor puts the
 		// property back and makes the next pass set its technique up again.
 		if (fog) {
-			if (auto* property = ActiveFog()) {
+			if (auto* property = Engine::Fog::ActiveProperty()) {
 				s.fog = property;
 				std::memcpy(s.fogBytes.data(), property + kFogBegin, s.fogBytes.size());
-				const auto put = [&](std::size_t a_offset, float a_value) { std::memcpy(property + a_offset, &a_value, sizeof(float)); };
-				for (int i = 0; i < 3; ++i) {
-					put(0x38 + 4 * i, (*fog)[4 + i]);
-					put(0x44 + 4 * i, (*fog)[7 + i]);
-				}
-				put(0x50, (*fog)[0]);
-				put(0x54, (*fog)[1]);
-				put(0x84, (*fog)[2]);
-				put(0x88, (*fog)[3]);
+				Engine::Fog::Write(property, *fog);
 				a_shader->SetupTechnique(a_pass->passEnum);
 				++stats.ownFog;
 			}
@@ -274,10 +248,10 @@ namespace Render::Native
 				s.sunFade = data.fade;
 				s.sunDirection = direction;
 				s.sunRotate = s.sun->world.rotate;
-				data.diffuse = { (*lighting)[0] * scale, (*lighting)[1] * scale, (*lighting)[2] * scale };
+				data.diffuse = { lighting->sun.red * scale, lighting->sun.green * scale, lighting->sun.blue * scale };
 				data.fade = 1.0f;
 				// The light shines along its direction; the array has the way towards it.
-				const RE::NiPoint3 along{ -(*lighting)[3], -(*lighting)[4], -(*lighting)[5] };
+				const RE::NiPoint3 along{ -lighting->towardSun.x, -lighting->towardSun.y, -lighting->towardSun.z };
 				direction = along;
 				for (int row = 0; row < 3; ++row) {
 					s.sun->world.rotate.entry[row][0] = along[row];
@@ -288,9 +262,9 @@ namespace Render::Native
 			s.ambientSwapped = true;
 			for (int row = 0; row < 3; ++row) {
 				for (int column = 0; column < 3; ++column) {
-					ambient.rotate.entry[row][column] = (*lighting)[6 + row * 4 + column] * scale;
+					ambient.rotate.entry[row][column] = lighting->ambientRotate.entry[row][column] * scale;
 				}
-				ambient.translate[row] = (*lighting)[9 + row * 4] * scale;
+				ambient.translate[row] = lighting->ambientTranslate[row] * scale;
 			}
 			++stats.ownLight;
 		}
@@ -330,16 +304,10 @@ namespace Render::Native
 		storageInUse = false;
 	}
 
-	void SetMergedLighting(const float* a_lighting)
+	void SetMergedLighting(const std::optional<SpaceLight>& a_light)
 	{
 		std::scoped_lock lock(lightingLock);
-		if (a_lighting) {
-			std::array<float, 19> values;
-			std::copy_n(a_lighting, values.size(), values.begin());
-			mergedLighting = values;
-		} else {
-			mergedLighting.reset();
-		}
+		mergedLighting = a_light;
 	}
 
 	void InstallLightingHooks()
@@ -350,16 +318,10 @@ namespace Render::Native
 		}
 	}
 
-	void SetMergedFog(const float* a_fog)
+	void SetMergedFog(const std::optional<SpaceFog>& a_fog)
 	{
 		std::scoped_lock lock(lightingLock);
-		if (a_fog) {
-			std::array<float, 10> values;
-			std::copy_n(a_fog, values.size(), values.begin());
-			mergedFog = values;
-		} else {
-			mergedFog.reset();
-		}
+		mergedFog = a_fog;
 	}
 
 	json DescribeLighting()

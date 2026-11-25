@@ -520,7 +520,7 @@ namespace Portal::MergedCull
 		void CullRoom(const Room& a_room, bool a_unseen)
 		{
 			const auto* room = &a_room;
-			const auto door = Render::Doorway::Door::From(room->door);
+			const auto& door = room->door;
 			// The camera stands in the room: it is the space seen everywhere, but for its rooms the
 			// camera can't see into.
 			const bool inside = door.cameraMerged && mode != Mode::kHideAll;
@@ -618,9 +618,9 @@ namespace Portal::MergedCull
 			}
 			++stats.views;
 			std::string why;
-			const bool  cameraInRoom = std::ranges::any_of(rooms, [](const Room& a_room) { return Render::Doorway::Door::From(a_room.door).cameraMerged; });
+			const bool  cameraInRoom = std::ranges::any_of(rooms, [](const Room& a_room) { return a_room.door.cameraMerged; });
 			for (const auto& room : rooms) {
-				CullRoom(room, cameraInRoom && !Render::Doorway::Door::From(room.door).cameraMerged);
+				CullRoom(room, cameraInRoom && !room.door.cameraMerged);
 				why += (why.empty() ? "" : "; ") + stats.lastWhy;
 			}
 			stats.lastWhy = std::move(why);

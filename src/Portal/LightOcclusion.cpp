@@ -290,10 +290,3 @@ namespace Portal::LightOcclusion
 			{ "slots", bySlot } };
 	}
 }
-
-// The patched Community Shaders asks this for every shadow-casting light it gives an object drawn
-// in a portal pass, and scales the light by it.
-extern "C" __declspec(dllexport) float SeamlessPortal_LightVisibility(RE::BSGeometry* a_geometry, RE::NiLight* a_light)
-{
-	return Portal::LightOcclusion::Visibility(a_geometry, a_light);
-}
