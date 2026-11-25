@@ -1,7 +1,6 @@
 <#
 .SYNOPSIS
-Builds the release archive: a FOMOD installer with SeamlessSkyrim and, as an option, the patched
-Community Shaders.
+Builds the release archive: a FOMOD installer with SeamlessSkyrim.
 
 .DESCRIPTION
 The archive holds:
@@ -9,15 +8,8 @@ The archive holds:
   Core\SKSE\Plugins\SeamlessSkyrim.dll     Release build, without its PDB
   Core\SKSE\Plugins\SeamlessSkyrim.ini     package\, as a player gets it
   Core\SKSE\Plugins\SeamlessSkyrim_Doors.ini   package\, with the doors tuned in game moved in
-  CommunityShaders\SKSE\Plugins\CommunityShaders.dll   the fork's build
-  CommunityShaders\...                     every file the fork changed or added under package\
-                                           and features\*\ since -CsBase
-  LICENSE, SOURCE.txt                      the GPL text and where the source of both parts is
-  THIRD-PARTY-NOTICES.txt                  the licenses of the libraries built into both DLLs
-
-The Community Shaders part is a separate option because it is only a patch: installed without
-Community Shaders, its DLL runs with none of the shaders and data it expects and rendering breaks.
-The installer preselects it when CommunityShaders.dll is already installed.
+  LICENSE, SOURCE.txt                      the GPL text and where the source is
+  THIRD-PARTY-NOTICES.txt                  the licenses of the libraries built into the DLL
 
 Door tunings made in game (the game's SeamlessSkyrim_Doors_User.ini) are moved into package\'s
 SeamlessSkyrim_Doors.ini first (tools\fold-door-tunings.ps1; commit them there). The user file is
@@ -29,27 +21,18 @@ tools\make-release.ps1 -Build
 #Requires -Version 7
 [CmdletBinding()]
 param(
-	[string]$GameData = 'E:\SteamLibrary\steamapps\common\Skyrim Special Edition\Data',
-	[string]$CsFork = 'E:\projects\CommunityShaders-Seamless',
-	# The Community Shaders release the fork is based on (a tag or commit in the fork).
-	[string]$CsBase = 'v1.9.1',
-	# Build SeamlessSkyrim (Release) and the fork's CommunityShaders target first.
+	# The Data folder whose SeamlessSkyrim_Doors_User.ini holds the doors tuned in game.
+	[Parameter(Mandatory = $true)][string]$GameData,
+	# Build SeamlessSkyrim (Release) first.
 	[switch]$Build,
 	# Written into the archive's SOURCE.txt.
-	[string]$SourceUrl = 'https://github.com/OneManMonkeySquad/SeamlessSkyrim',
-	[string]$CsSourceUrl = 'https://github.com/OneManMonkeySquad/CommunityShaders-Seamless',
+	[string]$SourceUrl = 'https://github.com/drakolordx7/SeamlessSkyrim',
 	# Defaults to build\release\SeamlessSkyrim-<version>.zip.
 	[string]$OutFile
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $plugins = 'SKSE\Plugins'
-
-function Invoke-Git {
-	$output = & git -C $CsFork @args
-	if ($LASTEXITCODE) { throw "git $args failed" }
-	$output
-}
 
 # A stale DLL is the easiest way to ship the wrong thing. $Sources: everything it is built from,
 # folders and single files.
@@ -77,8 +60,6 @@ if ($Build) {
 
 	& $cmake --build (Join-Path $repo 'build') --config Release
 	if ($LASTEXITCODE) { throw 'SeamlessSkyrim build failed.' }
-	& $cmake --build (Join-Path $CsFork 'build\ALL') --config Release --target CommunityShaders
-	if ($LASTEXITCODE) { throw 'Community Shaders build failed.' }
 }
 
 # ---- doors -----------------------------------------------------------------------------------
@@ -100,31 +81,15 @@ if ((Get-Content -Raw -LiteralPath $ini) -match '(?m)^bEnabled=0') {
 $files["Core\$plugins\SeamlessSkyrim.ini"] = $ini
 $files["Core\$plugins\SeamlessSkyrim_Doors.ini"] = $doors
 
-$csDll = Join-Path $CsFork 'build\ALL\Release\CommunityShaders.dll'
-Assert-Newer $csDll (Join-Path $CsFork 'src')
-$files["CommunityShaders\$plugins\CommunityShaders.dll"] = $csDll
-
-$forkChanged = @(Invoke-Git diff --name-only --diff-filter=d $CsBase -- package features) +
-	@(Invoke-Git ls-files --others --exclude-standard -- package features)
-foreach ($path in $forkChanged | Sort-Object -Unique) {
-	# Community Shaders' packaging copies package\ and each features\<name>\ into Data as they are.
-	$relative = ($path -replace '^(package|features/[^/]+)/', '') -replace '/', '\'
-	$files["CommunityShaders\$relative"] = Join-Path $CsFork $path
-}
-# The archive is built from the working tree; uncommitted fork changes would ship without a
-# commit to rebase onto the next Community Shaders release.
-$forkDirty = Invoke-Git status --porcelain -- src package features
-if ($forkDirty) { Write-Warning "The fork has uncommitted changes:`n$($forkDirty -join "`n")" }
-
 # ---- third-party notices ---------------------------------------------------------------------
-# Both DLLs link vcpkg's libraries statically and compile in the code under extern\; MIT and BSD
+# The DLL links vcpkg's libraries statically and compiles in the code under extern\; MIT and BSD
 # ask for each one's notice to travel with the binary. Collected from the build trees, so a new
 # dependency can't be left out.
 # Compared without whitespace: the copies differ in line endings.
 function Get-Words([string]$Path) { ((Get-Content -Raw -LiteralPath $Path) -replace '\s+', ' ').Trim() }
 $gplWords = Get-Words (Join-Path $repo 'LICENSE')
 
-function Get-Notices([string]$VcpkgShare, [string]$Extern, [hashtable]$More = @{}) {
+function Get-Notices([string]$VcpkgShare, [string]$Extern) {
 	$sections = [ordered]@{}
 	foreach ($dir in Get-ChildItem -LiteralPath $VcpkgShare -Directory) {
 		# Folders without one hold only CMake config of a port with another name (nlohmann_json).
@@ -138,14 +103,12 @@ function Get-Notices([string]$VcpkgShare, [string]$Extern, [hashtable]$More = @{
 			ForEach-Object FullName)
 		if (-not $sections[$dir.Name]) { throw "No license file found in $($dir.FullName)." }
 	}
-	foreach ($name in $More.Keys) { $sections[$name] = @($More[$name]) }
-
 	$text = [Text.StringBuilder]::new()
 	foreach ($name in $sections.Keys) {
 		[void]$text.Append("`n$('=' * 100)`n$name`n$('=' * 100)`n")
 		foreach ($path in $sections[$name]) {
 			$content = Get-Content -Raw -LiteralPath $path
-			# CommonLib and Community Shaders are GPL-3 themselves; one copy of it is enough.
+			# CommonLib is GPL-3 itself; one copy of it is enough.
 			if ((Get-Words $path) -eq $gplWords) { $content = "GNU General Public License, version 3: see LICENSE.`n" }
 			[void]$text.Append("`n--- $(Split-Path $path -Leaf) ---`n`n$content")
 		}
@@ -154,14 +117,8 @@ function Get-Notices([string]$VcpkgShare, [string]$Extern, [hashtable]$More = @{
 }
 
 $notices = @"
-SeamlessSkyrim.dll and the patched CommunityShaders.dll are built with the code below. Each part's
-copyright notice and license follow.
-
-####  In SeamlessSkyrim.dll  ####
+SeamlessSkyrim.dll is built with the code below. Each part's copyright notice and license follow.
 $(Get-Notices (Join-Path $repo 'build\vcpkg_installed\x64-windows-static-md\share') (Join-Path $repo 'extern'))
-
-####  In CommunityShaders.dll (the CommunityShaders option)  ####
-$(Get-Notices (Join-Path $CsFork 'build\ALL\vcpkg_installed\x64-windows-static-md-release\share') (Join-Path $CsFork 'extern') @{ 'Community Shaders' = (Join-Path $CsFork 'EXCEPTIONS.md') })
 "@
 
 # ---- stage and zip ---------------------------------------------------------------------------
@@ -179,13 +136,10 @@ try {
 	[IO.File]::WriteAllText((Join-Path $stage 'SOURCE.txt'), @"
 SeamlessSkyrim $version is free software, licensed under the GNU General Public License,
 version 3 or (at your option) any later version: see LICENSE. The libraries built into it and
-into CommunityShaders.dll, and their licenses: see THIRD-PARTY-NOTICES.txt.
+their licenses: see THIRD-PARTY-NOTICES.txt.
 
-Source of SeamlessSkyrim:
+Source:
   $SourceUrl
-Source of the patched Community Shaders (the CommunityShaders option), branch seamless-portal:
-  $CsSourceUrl
-
 "@)
 
 	$fomod = Join-Path $stage 'fomod'

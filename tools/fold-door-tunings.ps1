@@ -5,21 +5,22 @@ Moves the doors tuned in game into package\'s SeamlessSkyrim_Doors.ini, the door
 .DESCRIPTION
 The plugin writes in-game tunings to the game's SeamlessSkyrim_Doors_User.ini, never to
 SeamlessSkyrim_Doors.ini: a player's update replaces the shipped file, and their tunings with it
-if they lived there. On this machine the tunings are the mod's defaults to be, so this script
+if they lived there. The tunings made in game are the mod's defaults to be, so this script
 moves them into package\:
 
 - A door in the user file replaces all of its entries in package\'s file, as the plugin reads
   them. [DoorPortal]=1, which the plugin writes only to keep a tuned door in the user file, is
   dropped: on is the default.
-- The result is written into the game's SeamlessSkyrim_Doors.ini as well (in place, so Vortex's
-  hard link stays), and the user file is deleted: the game reads the same doors as before.
+- The result is written into the game's SeamlessSkyrim_Doors.ini as well, and the user file is
+  deleted: the game reads the same doors as before.
 
 Nothing happens without a user file. Commit package\'s file afterwards.
 #>
 #Requires -Version 7
 [CmdletBinding()]
 param(
-	[string]$GameData = 'E:\SteamLibrary\steamapps\common\Skyrim Special Edition\Data'
+	# The Data folder whose SeamlessSkyrim_Doors_User.ini holds the tunings.
+	[Parameter(Mandatory = $true)][string]$GameData
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -74,6 +75,6 @@ foreach ($section in $shipped.Keys) {
 	foreach ($entry in $shipped[$section]) { [void]$text.Append("$entry`r`n") }
 }
 [IO.File]::WriteAllText($doors, $text.ToString(), $encoding)
-if (Test-Path -LiteralPath $liveDoors) { & (Join-Path $PSScriptRoot 'copy-in-place.ps1') -Destination $liveDoors $doors | Out-Null }
+if (Test-Path -LiteralPath $liveDoors) { Copy-Item -LiteralPath $doors -Destination $liveDoors -Force }
 Remove-Item -LiteralPath $tunings
 Write-Host "$($tunedDoors.Count) door tuning(s) from the game moved into package\$plugins\SeamlessSkyrim_Doors.ini; commit them." -ForegroundColor Yellow

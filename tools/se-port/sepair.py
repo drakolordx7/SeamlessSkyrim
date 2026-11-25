@@ -9,9 +9,9 @@ Run from tools/skyrim-mcp (its venv has capstone): uv run python ../se-port/sepa
                                functions referencing it reference things in their SE versions
 
 Needs build/se-port/SkyrimSE-1.5.97-mem.exe (dump.py), se-ids.csv (addrlib.py) and
-ae2se-all.txt (fullmap.py). AE code comes from the exe on disk.
+ae2se-all.txt (fullmap.py). AE code comes from the exe on disk: set SKYRIM_AE_EXE to the AE game's SkyrimSE.exe.
 """
-import bisect, collections, csv, json, pathlib, struct, sys
+import bisect, collections, csv, json, os, pathlib, struct, sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DATA = ROOT / "build" / "se-port"
 sys.path.insert(0, str(ROOT / "tools" / "skyrim-mcp"))
@@ -20,7 +20,7 @@ from capstone import CS_GRP_CALL, CS_GRP_JUMP
 from capstone.x86 import X86_OP_IMM, X86_OP_MEM, X86_REG_RIP
 
 CACHE = ROOT / "tools" / "skyrim-mcp" / ".cache"
-AE_EXE = pathlib.Path(r"E:\SteamLibrary\steamapps\common\Skyrim Special Edition\SkyrimSE.exe")
+AE_EXE = pathlib.Path(os.environ["SKYRIM_AE_EXE"])  # the AE game's SkyrimSE.exe
 AE_IDS = next(CACHE.glob("ids-*.csv"))  # exported by the MCP server from a running AE game
 
 
