@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <span>
 
 // The space seen through a doorway, as planes. Shared by whatever cuts draws at these planes and
 // whatever leaves out whole shapes beyond them: both must agree on what is seen, or a shape that
@@ -84,6 +85,20 @@ namespace Core::Doorway
 		const double at = a_plane.At(a_center);
 		const double reach = a_radius + kBoundSlack;
 		return at > reach ? Side::kInside : at < -reach ? Side::kOutside : Side::kCrosses;
+	}
+
+	// Wholly outside X (any plane cuts the whole bound away), wholly inside (every plane keeps it), or neither.
+	[[nodiscard]] inline Side Classify(std::span<const Plane> a_planes, const Vec3& a_center, float a_radius)
+	{
+		bool within = true;
+		for (const auto& plane : a_planes) {
+			const auto side = SideOf(plane, a_center, a_radius);
+			if (side == Side::kOutside) {
+				return Side::kOutside;
+			}
+			within &= side == Side::kInside;
+		}
+		return within ? Side::kInside : Side::kCrosses;
 	}
 
 	// A kept plane for a render clip plane (negative Distance = cut away).

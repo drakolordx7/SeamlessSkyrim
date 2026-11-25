@@ -12,16 +12,6 @@ namespace Portal::MergedCull
 		using Core::Doorway::Plane;
 		using Core::Doorway::Side;
 
-		Core::Doorway::Side SideOf(const Plane& a_plane, const RE::NiPoint3& a_center, float a_radius)
-		{
-			return Core::Doorway::SideOf(a_plane, ToCore(a_center), a_radius);
-		}
-
-		Plane EdgePlane(const RE::NiPoint3& a_eye, const RE::NiPoint3& a_edgePoint, const RE::NiPoint3& a_along, const RE::NiPoint3& a_center)
-		{
-			return Core::Doorway::EdgePlane(ToCore(a_eye), ToCore(a_edgePoint), ToCore(a_along), ToCore(a_center));
-		}
-
 		Mode                mode = Mode::kShapes;
 		std::vector<Room>   rooms;  // main thread, as is the view
 
@@ -222,15 +212,7 @@ namespace Portal::MergedCull
 			if (a_radius <= 0.0f || a_radius > kImplausible || a_center.GetDistance(doorCenter) > kImplausible) {
 				return Side::kCrosses;
 			}
-			bool within = true;
-			for (const auto& plane : current) {
-				const auto side = SideOf(plane, a_center, a_radius);
-				if (side == Side::kOutside) {
-					return Side::kOutside;
-				}
-				within &= side == Side::kInside;
-			}
-			return within ? Side::kInside : Side::kCrosses;
+			return Core::Doorway::Classify(current, ToCore(a_center), a_radius);
 		}
 
 		void WalkChildren(RE::NiAVObject* a_object);
@@ -410,7 +392,7 @@ namespace Portal::MergedCull
 					const auto& b = polygon[(i + 1) % polygon.size()];
 					// An edge in line with the camera gives no plane; leaving it out sees more.
 					if ((a - a_eye).Cross(b - a).Length() > 1.0f) {
-						through.push_back(EdgePlane(a_eye, a, b - a, middle));
+						through.push_back(Core::Doorway::EdgePlane(ToCore(a_eye), ToCore(a), ToCore(b - a), ToCore(middle)));
 					}
 				}
 				a_path.push_back(portal);
@@ -440,7 +422,7 @@ namespace Portal::MergedCull
 			for (std::size_t i = 0; i < std::size(corners); ++i) {
 				const auto& a = corners[i];
 				const auto& b = corners[(i + 1) % std::size(corners)];
-				view.push_back(EdgePlane(eye, a, b - a, eye + forward));
+				view.push_back(Core::Doorway::EdgePlane(ToCore(eye), ToCore(a), ToCore(b - a), ToCore(eye + forward)));
 			}
 			return view;
 		}
