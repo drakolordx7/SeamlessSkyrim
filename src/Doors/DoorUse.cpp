@@ -1,6 +1,7 @@
 #include "Doors/DoorUse.h"
 
 #include "Doors/Geometry.h"
+#include "Engine/SameSpace.h"
 
 namespace
 {
@@ -26,17 +27,7 @@ namespace
 	constexpr float kDoorwayReach = 130.0f;
 	constexpr float kDoorwayHeight = 200.0f;
 
-	// The same space: one interior, or anywhere in one worldspace (its cells are walked between).
-	bool SameSpace(const RE::TESObjectCELL* a_cell, const RE::TESObjectCELL* a_other)
-	{
-		if (!a_cell || !a_other) {
-			return false;
-		}
-		if (a_cell->IsInteriorCell() || a_other->IsInteriorCell()) {
-			return a_cell == a_other;
-		}
-		return a_cell->GetRuntimeData().worldSpace == a_other->GetRuntimeData().worldSpace;
-	}
+	using Engine::SameSpace;
 
 	bool InDoorway(RE::FormID a_door, const std::vector<RE::Actor*>& a_actors)
 	{

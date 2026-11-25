@@ -1,8 +1,10 @@
 #include "Portal/PortalManager.h"
 
 #include "Diag/Telemetry.h"
+#include "Engine/Fade.h"
 #include "Engine/Hooks.h"
 #include "Engine/Paths.h"
+#include "Engine/SameSpace.h"
 
 #include "Portal/CameraLimit.h"
 #include "Portal/Pristine.h"
@@ -22,6 +24,7 @@
 #include "Render/PortalRender.h"
 #include "Portal/Travel.h"
 #include "Spaces/RemoteCell.h"
+#include "Spaces/Tuning.h"
 #include "Portal/ShapeSet.h"
 #include "Portal/StreetLOD.h"
 #include "Portal/WaterReflections.h"
@@ -570,7 +573,7 @@ namespace
 	bool SpaceShown(RE::FormID a_door)
 	{
 		const auto portal = GetActive();
-		return (portal && portal->sourceDoor == a_door && (remote.merged || Portal::Manager::ReadyPortal())) || BesideDoor(a_door);
+		return (portal && portal->sourceDoor == a_door && (remote.Merged() || Portal::Manager::ReadyPortal())) || BesideDoor(a_door);
 	}
 
 	RE::FormID openDoorSwung = 0;  // the door OpenDoor swings: the source, or the linked door seen through it
@@ -681,7 +684,7 @@ namespace
 	// merged into the street.
 	bool MergedOutdoors()
 	{
-		return remote.merged && remote.Cell() && !remote.Cell()->IsInteriorCell();
+		return remote.Merged() && remote.Cell() && !remote.Cell()->IsInteriorCell();
 	}
 
 	// A door into a room has its doorway picture taken with a camera of its own
@@ -853,8 +856,7 @@ namespace
 	// cells around are walked between without a door, so their doors are as near as the cell's own).
 	bool InPlayerSpace(RE::TESObjectREFR* a_door, RE::TESObjectCELL* a_here)
 	{
-		auto* cell = a_door ? a_door->GetParentCell() : nullptr;
-		return cell && (cell == a_here || (!cell->IsInteriorCell() && !a_here->IsInteriorCell() && cell->GetRuntimeData().worldSpace == a_here->GetRuntimeData().worldSpace));
+		return Engine::SameSpace(a_door ? a_door->GetParentCell() : nullptr, a_here);
 	}
 
 	// In the player's space, or in the space merged into it (seen through a door): there a door set
@@ -862,7 +864,7 @@ namespace
 	// across it with its door closed.
 	bool InView(RE::TESObjectREFR* a_door, RE::TESObjectCELL* a_here)
 	{
-		return InPlayerSpace(a_door, a_here) || (remote.merged && a_door && std::ranges::find(remote.Cells(), a_door->GetParentCell()) != remote.Cells().end());
+		return InPlayerSpace(a_door, a_here) || (remote.Merged() && a_door && std::ranges::find(remote.Cells(), a_door->GetParentCell()) != remote.Cells().end());
 	}
 
 	void ScanStandInDoors(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_here)
@@ -896,7 +898,7 @@ namespace
 
 	void UpdateStandIns(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_here, float a_delta)
 	{
-		auto* merged = remote.merged ? remote.Cell() : nullptr;
+		auto* merged = remote.Merged() ? remote.Cell() : nullptr;
 		if ((standInScanTimer -= a_delta) <= 0.0f || a_here != standInScanCell || merged != standInScanMerged) {
 			standInScanTimer = kStandInScanSeconds;
 			standInScanCell = a_here;
@@ -1065,7 +1067,7 @@ namespace
 			return;
 		}
 		int taken = 0;
-		for (auto& node : remote.borrowedPersistent) {
+		for (auto& node : remote.BorrowedPersistent()) {
 			const bool known = std::ranges::any_of(mergedLOD->persistent, [&](const MergedLOD::Moved& a_moved) { return a_moved.node == node; });
 			// Only while it still hangs where AdoptPersistent put it. 3D we loaded (PersistentIn) can
 			// be hung into its cell by the engine afterwards (a mod's persistent references placed in
@@ -1437,7 +1439,7 @@ namespace
 	void UpdateTone(RE::TESObjectCELL* a_here, RE::TESObjectCELL* a_behindDoor, float a_interiorDepth, float a_inDoorway)
 	{
 		auto* manager = RE::ImageSpaceManager::GetSingleton();
-		if (!manager || !a_here || !a_behindDoor || a_here->IsInteriorCell() == a_behindDoor->IsInteriorCell() || (Portal::RemoteCell::debugSkip & 64)) {
+		if (!manager || !a_here || !a_behindDoor || a_here->IsInteriorCell() == a_behindDoor->IsInteriorCell() ) {
 			ClearTone();
 			return;
 		}
@@ -1565,13 +1567,13 @@ namespace
 		// furniture there yet), so not for long, even with the camera turned to look back out.
 		constexpr float kMergedMaxDepth = 250.0f;
 		// The street merged into the interior: crossing out is as without merging; the doors are the merge's.
-		const bool      merged = remote.merged && !MergedOutdoors();
+		const bool      merged = remote.Merged() && !MergedOutdoors();
 		if (!merged && !MergedOutdoors() && openDoor.door != a_portal.sourceDoor) {
 			return std::nullopt;
 		}
 		// A shut door is walked into, not through: the building behind it is left solid, and the
 		// player isn't held at the doorway's height against it.
-		if (remote.merged ? primaryRoom->swing.Shut() : openSwing.Shut()) {
+		if (remote.Merged() ? primaryRoom->swing.Shut() : openSwing.Shut()) {
 			if (!passage.empty()) {
 				ClosePassage();
 			}
@@ -1595,7 +1597,7 @@ namespace
 		// again, or the player comes near the door. Seen from inside, the doorway then always shows
 		// the game's own outdoors.
 		auto*      here = a_player->GetParentCell();
-		const bool switching = walkIntoRooms && crossCooldown <= 0.0f && !(Portal::RemoteCell::debugSkip & 2048);
+		const bool switching = walkIntoRooms && crossCooldown <= 0.0f;
 		if (merged && remote.CollisionMerged()) {
 			const bool passing = depth > -90.0f && depth < 40.0f && side < mapping.halfWidth + 30.0f;
 			remote.SetDoorwayPiecesPresent(!passing);
@@ -1620,7 +1622,7 @@ namespace
 				if ((inView && heading && -depth <= kRoomSwitchOutViewDepth) || (-depth <= kRoomSwitchOutDepth && heading)) {
 					crossCooldown = 1.0f;
 					logger::info("portal: switching outdoors {:.1f} short of the door, side {:.1f}{}", -depth, side, inView ? " (doorway in view)" : "");
-					Portal::Travel::Request(a_portal, false, 0.0f, true);
+					Portal::Travel::Request({ .portal = a_portal, .exact = true });
 					return std::nullopt;
 				}
 			}
@@ -1645,7 +1647,7 @@ namespace
 				crossCooldown = 1.0f;
 				attachHoldoff = 3.0f;
 				logger::info("portal: switching into the room at depth {:.1f}, side {:.1f}{}", depth, side, tooFar ? " (far from the door)" : upstairs ? " (upstairs)" : "");
-				Portal::Travel::Request(a_portal, false, 0.0f, true);
+				Portal::Travel::Request({ .portal = a_portal, .exact = true });
 			}
 			return std::nullopt;
 		}
@@ -1738,11 +1740,11 @@ namespace
 		}
 		const bool      cross = merged ? (depth >= 15.0f && cameraDepth >= 2.0f) || depth >= kMergedCrossDepth :
 		                                 (depth >= -lead && inDoorway && (approaching || depth >= 0.0f)) || cameraAtPicture;
-		if (crossCooldown <= 0.0f && cross && !(Portal::RemoteCell::debugSkip & 2048)) {
+		if (crossCooldown <= 0.0f && cross) {
 			crossCooldown = 1.0f;
 			attachHoldoff = 3.0f;
 			logger::info("portal: crossing at depth {:.1f}, side {:.1f}, camera depth {:.1f}{}", depth, side, cameraDepth, merged ? " (merged)" : "");
-			Portal::Travel::Request(a_portal, pullIn || merged, merged ? kMergedCameraMin : 0.0f);
+			Portal::Travel::Request({ .portal = a_portal, .limitCamera = pullIn || merged, .cameraFloor = merged ? kMergedCameraMin : 0.0f });
 		}
 		if (merged) {
 			return inDoorway || depth > 0.0f ? std::optional(kMergedCameraMin + std::max(0.0f, kMergedCrossDepth - depth)) : std::nullopt;
@@ -1777,7 +1779,7 @@ namespace
 	{
 		const auto portal = Portal::Manager::ReadyPortal();
 		auto*      roomWorld = remote.Cell() ? remote.Cell()->GetbhkWorld() : nullptr;
-		if (!portal || !remote.merged || !remote.CollisionMerged() || !roomWorld) {
+		if (!portal || !remote.Merged() || !remote.CollisionMerged() || !roomWorld) {
 			return;
 		}
 		const auto found = Portal::Doors::TryCompute(*portal);
@@ -1890,7 +1892,7 @@ namespace
 		static bool Thunk(RE::TESObjectREFR* a_ref, RE::TESObjectREFR* a_activator, std::uint8_t a_arg2, RE::TESBoundObject* a_object, std::int32_t a_count, bool a_defaultOnly)
 		{
 			const auto portal = Portal::Manager::ReadyPortal();
-			const bool inRoom = a_ref && portal && remote.merged && remote.CollisionMerged() &&
+			const bool inRoom = a_ref && portal && remote.Merged() && remote.CollisionMerged() &&
 			                    std::ranges::find(remote.Cells(), a_ref->GetParentCell()) != remote.Cells().end();
 			if (inRoom && a_activator == RE::PlayerCharacter::GetSingleton()) {
 				if (crossCooldown <= 0.0f) {
@@ -1899,7 +1901,7 @@ namespace
 					pendingUse = a_ref->GetHandle();
 					pendingUseAt = std::chrono::steady_clock::now();
 					logger::info("portal: {:08X} used in the room walked into: switching into the room first", a_ref->GetFormID());
-					Portal::Travel::Request(*portal, false, 0.0f, true);
+					Portal::Travel::Request({ .portal = *portal, .exact = true });
 				}
 				return true;
 			}
@@ -2112,9 +2114,6 @@ namespace Portal::Manager
 		Portal::Snapshot::SetPictureHeight(static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iDoorwayPictureHeight", 128, ini.c_str())));
 		walkIntoRooms = ::GetPrivateProfileIntW(L"Portals", L"bWalkIntoRooms", 0, ini.c_str()) != 0;
 		mergeOutdoors = ::GetPrivateProfileIntW(L"Portals", L"bMergeOutdoors", 1, ini.c_str()) != 0;
-		Portal::RemoteCell::slowLoadMs = static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iSlowLoadMs", 0, ini.c_str()));
-		// Diagnostics: RemoteCell::debugSkip from the start (the bridge's portal_debug sets it later).
-		Portal::RemoteCell::debugSkip = static_cast<std::uint32_t>(::GetPrivateProfileIntW(L"Portals", L"iDebugSkip", 0, ini.c_str()));
 		// 0 off, 1 the merged room left out whole when it can't be seen, 2 also shape by shape.
 		MergedCull::SetMode(static_cast<MergedCull::Mode>(std::clamp(static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iMergedCull", 2, ini.c_str())), 0, 2)));
 		// The same for the street merged into an interior, at most; off, it changes the sun's shadows
@@ -2136,9 +2135,9 @@ namespace Portal::Manager
 		const int  step = ::GetPrivateProfileIntW(L"Portals", L"iStepRemoteHavok", -1, ini.c_str());
 		const int  stepMode = step < 0 ? (precision ? 2 : 1) : step;
 		const bool stepRemote = stepMode != 0;
-		Portal::RemoteCell::stepInJob = stepMode == 1;
-		Portal::RemoteCell::stepExterior = ::GetPrivateProfileIntW(L"Portals", L"bStepExteriorFromInside", 1, ini.c_str()) != 0;
-		Portal::RemoteCell::handOverStreet = ::GetPrivateProfileIntW(L"Portals", L"bHandOverStreet", 1, ini.c_str()) != 0;
+		Spaces::tuning.stepInJob = stepMode == 1;
+		Spaces::tuning.stepExterior = ::GetPrivateProfileIntW(L"Portals", L"bStepExteriorFromInside", 1, ini.c_str()) != 0;
+		Spaces::tuning.handOverStreet = ::GetPrivateProfileIntW(L"Portals", L"bHandOverStreet", 1, ini.c_str()) != 0;
 		logger::info("portal: remote Havok stepping mode {}{}", stepMode, precision ? " (Precision is loaded)" : "");
 		// The hooks below patch engine code in the draw, cull, physics and travel paths. With
 		// portals off they did nothing yet were all there, one more thing to clash with other
@@ -2408,7 +2407,7 @@ namespace Portal::Manager
 				doors.push_back(a_linked);
 			};
 			if (const auto portal = GetActive()) {
-				if (remote.merged ? primaryRoom->swing.Amount() >= kOpen : openDoor.door == portal->sourceDoor && openSwing.Amount() >= kOpen) {
+				if (remote.Merged() ? primaryRoom->swing.Amount() >= kOpen : openDoor.door == portal->sourceDoor && openSwing.Amount() >= kOpen) {
 					add(portal->sourceDoor, portal->linkedDoor);
 				}
 			}
@@ -2452,7 +2451,7 @@ namespace Portal::Manager
 		logger::info("portal: {}", lastEvent);
 		CloseDoor();
 		ClosePassage();
-		if (remote.merged) {
+		if (remote.Merged()) {
 			const Diag::Scope scope("release: end merged");
 			EndMerged(*primaryRoom, 0);
 		}
@@ -2559,7 +2558,7 @@ namespace Portal::Manager
 			const bool keepOpen = door && linkedDoor && !off && !locked && Portal::Doors::Wanted(door, linkedDoor);
 			doorWanted = keepOpen;
 			if (end && (DoorShut() || keepOpen || reach > ReleaseRadius() + kForceReleaseBeyond)) {
-				if (better && candidate->cell == portal->cell && !remote.merged) {
+				if (better && candidate->cell == portal->cell && !remote.Merged()) {
 					// The other door leads into the same space, which is attached already: only the
 					// door pair changes. Let go and attached again, the doorway was empty for a third
 					// of a second, every time the player walked between a shop's two doors.
@@ -2638,7 +2637,7 @@ namespace Portal::Manager
 			// casts the sun's shadows, MergedCull), 2.6 ms a frame in Honningbrew Meadery's cellar.
 			auto*      shownDoor = Lookup(portal->sourceDoor);
 			const bool closeBy = shownDoor && player->GetPosition().GetDistance(shownDoor->GetPosition()) <= NearRadius();
-			const bool mergeable = !remote.merged && closeBy && remote.Healthy() && remote.FullyLoaded() && Mergeable(here, portal->cell);
+			const bool mergeable = !remote.Merged() && closeBy && remote.Healthy() && remote.FullyLoaded() && Mergeable(here, portal->cell);
 			const bool waiting = WaitForPicture(*portal, here, mergeable);
 			if (mergeable && !waiting) {
 				CloseDoor();
@@ -2668,12 +2667,10 @@ namespace Portal::Manager
 					logger::warn("portal: merge failed: {}", e.what());
 				}
 			}
-			if (remote.merged) {
+			if (remote.Merged()) {
 				PublishRooms();
 				UpdateMerged(*primaryRoom, remote, *portal, 0, doorWanted, a_delta, culls);
-				if (remote.CollisionMerged() && (Portal::RemoteCell::debugSkip & 8192)) {
-					remote.ClearStandIns();  // diagnostics: without stand-ins
-				} else if (const auto mapping = Doors::TryCompute(*portal); mapping && remote.CollisionMerged()) {
+				if (const auto mapping = Doors::TryCompute(*portal); mapping && remote.CollisionMerged()) {
 					remote.UpdateStandIns(mapping->toLinked.Invert(), here->GetbhkWorld());
 				}
 			}
@@ -2697,11 +2694,11 @@ namespace Portal::Manager
 			std::optional<LightOcclusion::RoomDoor> roomDoor;
 			if (const auto mapping = portal ? Doors::TryCompute(*portal) : std::nullopt) {
 				roomDoor = LightOcclusion::RoomDoor{ mapping->toLinked * mapping->sourceCenter, mapping->toLinked.rotate * mapping->inward, mapping->halfWidth, mapping->halfHeight };
-				if (remote.merged) {
+				if (remote.Merged()) {
 					toPhysics = mapping->toLinked;
 				}
 			}
-			if (portal && remote.merged) {
+			if (portal && remote.Merged()) {
 				// Lit from its own light scene by the patched Community Shaders, which the engine
 				// doesn't cull or fade for this view.
 				LightScene::PrepareForView();
@@ -2722,7 +2719,7 @@ namespace Portal::Manager
 					LightOcclusion::RoomDoor{ mapping->toLinked * mapping->sourceCenter, mapping->toLinked.rotate * mapping->inward, mapping->halfWidth, mapping->halfHeight }, true);
 			}
 		}
-		SetShownCells(remote.merged || ActivePortal().has_value());
+		SetShownCells(remote.Merged() || ActivePortal().has_value());
 		if (const auto portal = ReadyPortal()) {
 			NpcTravel::Update(*portal, remote.Cells());
 		} else {
@@ -2731,7 +2728,7 @@ namespace Portal::Manager
 		UpdateImageSpace();
 		bool planeSet = false;
 		if (const auto portal = ReadyPortal()) {
-			if (const auto mapping = Doors::TryCompute(*portal); mapping && (!remote.merged || MergedOutdoors())) {
+			if (const auto mapping = Doors::TryCompute(*portal); mapping && (!remote.Merged() || MergedOutdoors())) {
 				Portal::CameraLimit::SetPlane(mapping->sourceCenter - mapping->inward * mapping->halfDepth, mapping->inward, mapping->halfWidth);
 				// Short of the doorway's picture by the camera's near distance (and a unit beyond
 				// where walking in carries the player through, Approach, so that still happens).
@@ -2879,12 +2876,12 @@ namespace Portal::Manager
 
 	void SetStepExterior(bool a_step)
 	{
-		RemoteCell::stepExterior = a_step;
+		Spaces::tuning.stepExterior = a_step;
 	}
 
 	bool StepExterior()
 	{
-		return RemoteCell::stepExterior;
+		return Spaces::tuning.stepExterior;
 	}
 
 	float DoorOpenDistance()
@@ -2947,7 +2944,7 @@ namespace Portal::Manager
 
 	bool Merged()
 	{
-		return remote.merged;
+		return remote.Merged();
 	}
 
 	bool StreetMerged()
@@ -3010,7 +3007,7 @@ namespace Portal::Manager
 					{ "lightScale", 1.0f + (StreetEyeScale(a_room.door) - 1.0f) * a_room.daylight }, { "daylight", a_room.daylight } });
 			}
 		};
-		if (remote.merged) {
+		if (remote.Merged()) {
 			describe(*primaryRoom);
 		}
 		for (const auto& beside : besideRooms) {
@@ -3028,7 +3025,7 @@ namespace Portal::Manager
 	RE::FormID PictureWanted()
 	{
 		const auto portal = GetActive();
-		return portal && !remote.merged && portal->sourceDoor == pictureWanted ? pictureWanted : 0;
+		return portal && !remote.Merged() && portal->sourceDoor == pictureWanted ? pictureWanted : 0;
 	}
 
 	DoorPrompt Prompt(RE::FormID a_door)
@@ -3054,13 +3051,13 @@ namespace Portal::Manager
 
 	std::optional<Active> ActivePortal()
 	{
-		return remote.merged || (RemoteCell::debugSkip & 32) ? std::nullopt : ReadyPortal();
+		return remote.Merged() ? std::nullopt : ReadyPortal();
 	}
 
 	void SetMergeEnabled(bool a_enabled)
 	{
 		mergeEnabled = a_enabled;
-		if (!a_enabled && remote.merged) {
+		if (!a_enabled && remote.Merged()) {
 			ReleaseAll("merging turned off");
 		}
 		logger::info("portal: merging {}", a_enabled ? "on" : "off");
@@ -3088,12 +3085,7 @@ namespace Portal::Manager
 			for (auto* cell : a_space.Cells()) {
 				auto* loaded = cell->GetRuntimeData().loadedData;
 				if (auto* cell3D = loaded ? loaded->cell3D.get() : nullptr) {
-					RE::BSVisit::TraverseScenegraphObjects(cell3D, [](RE::NiAVObject* a_object) {
-						if (auto* fade = a_object->AsFadeNode()) {
-							fade->GetRuntimeData().currentFade = 1.0f;
-						}
-						return RE::BSVisit::BSVisitControl::kContinue;
-					});
+					Engine::ForceFadeIn(cell3D);
 				}
 			}
 		}
@@ -3102,7 +3094,7 @@ namespace Portal::Manager
 		// portal can be let go without a doorway left open onto nothing.
 		bool DoorShut()
 		{
-			return remote.merged ? primaryRoom->swing.Shut() : openSwing.Shut();
+			return remote.Merged() ? primaryRoom->swing.Shut() : openSwing.Shut();
 		}
 
 		// Some doorways have a second door in the same frame (Riverwood Trader: 00070E69, not a
@@ -3275,7 +3267,7 @@ namespace Portal::Manager
 				}
 			}
 			// Room 0 is a merged room's while one is.
-			if (!passage && !remote.merged && ::Render::Backend::CanMaskGate() && !a_here->IsInteriorCell()) {
+			if (!passage && !remote.Merged() && ::Render::Backend::CanMaskGate() && !a_here->IsInteriorCell()) {
 				passage = StandInGatePassage(door);
 			}
 			if (passage) {
@@ -3283,7 +3275,7 @@ namespace Portal::Manager
 				::Render::Backend::SetGatePassage(*passage);
 				gateMasked = true;
 			} else if (std::exchange(gateMasked, false)) {
-				if (!remote.merged) {
+				if (!remote.Merged()) {
 					SendMergedDoor(0, nullptr);
 				}
 				::Render::Backend::SetGatePassage(0.0f);
@@ -3317,7 +3309,7 @@ namespace Portal::Manager
 			roomsBySlot.fill(nullptr);
 			scenesBySlot.fill(nullptr);
 			streetMerged = MergedOutdoors();
-			if (remote.merged) {
+			if (remote.Merged()) {
 				roomsBySlot[0] = primaryRoom.get();
 				scenesBySlot[0] = remote.Scene();
 			}
@@ -3456,7 +3448,7 @@ namespace Portal::Manager
 			// world's shadows: its shapes don't cast any while merged. (Leaving their shadow passes out
 			// at the shader property, vfunc 0x2B, instead left the room undrawn altogether.)
 			// The street merged into an interior keeps its shadows: they are the sun's shadows on it.
-			if (!a_street && !(Portal::RemoteCell::debugSkip & 4096)) {  // 4096: diagnostics, the room's shadows kept
+			if (!a_street) {
 				for (const auto* shape : shapes) {
 					auto* property = shape->GetGeometryRuntimeData().shaderProperty.get();
 					if (property && property->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kCastShadows)) {
@@ -3880,7 +3872,7 @@ namespace Portal::Manager
 		// instead of let go. False when it can't be (walked into, the street, no room for it).
 		bool DemoteShown(RE::TESObjectCELL* a_here, const Active& a_portal)
 		{
-			if (BesideWanted() <= 0 || !remote.merged || MergedOutdoors() || a_here->IsInteriorCell() || !a_portal.cell || !a_portal.cell->IsInteriorCell() ||
+			if (BesideWanted() <= 0 || !remote.Merged() || MergedOutdoors() || a_here->IsInteriorCell() || !a_portal.cell || !a_portal.cell->IsInteriorCell() ||
 				remote.CollisionMerged() || playerInRoom || !remote.FullyLoaded()) {
 				return false;
 			}
@@ -3968,7 +3960,7 @@ namespace Portal::Manager
 				try {
 					// Paused as a room kept out of sight: the merge's update below takes its lights in.
 					pick.space->SetPaused(false);
-					if (!pick.space->merged) {
+					if (!pick.space->Merged()) {
 						if (mergedOne) {
 							continue;
 						}
@@ -4047,7 +4039,7 @@ namespace Portal::Manager
 	std::vector<RE::TESObjectCELL*> MergedCells()
 	{
 		std::vector<RE::TESObjectCELL*> cells;
-		if (remote.merged) {
+		if (remote.Merged()) {
 			cells = remote.Cells();
 		}
 		for (const auto& beside : besideRooms) {
@@ -4147,7 +4139,7 @@ namespace Portal::Manager
 		static std::optional<std::chrono::steady_clock::time_point> since;
 		const auto portal = GetActive();
 		const bool open = portal && !standIns.contains(portal->sourceDoor) &&
-		                  (remote.merged ? primaryRoom->swing.Amount() >= 1.0f : (ActivePortal() && openDoor.door == portal->sourceDoor && openSwing.Amount() >= 1.0f));
+		                  (remote.Merged() ? primaryRoom->swing.Amount() >= 1.0f : (ActivePortal() && openDoor.door == portal->sourceDoor && openSwing.Amount() >= 1.0f));
 		if (!open) {
 			since.reset();
 			return std::nullopt;
@@ -4310,7 +4302,7 @@ namespace Portal::Manager
 
 		// The space merged behind the door, drawn moved to the door.
 		const auto portal = GetActive();
-		if (portal && remote.merged) {
+		if (portal && remote.Merged()) {
 			const auto toSource = PlacementOf(*portal, Doors::Compute(*portal)).toSource;
 			auto*      linked = Lookup(portal->linkedDoor);
 			const auto linkedAt = linked->GetPosition();
@@ -4376,7 +4368,7 @@ namespace Portal::Manager
 		const auto portal = GetActive();
 		return {
 			{ "enabled", enabled },
-			{ "merged", remote.merged },
+			{ "merged", remote.Merged() },
 			{ "mergeEnabled", mergeEnabled },
 			{ "doorUse", Portal::DoorUse::Status() },
 			{ "standIns", [] {
@@ -4388,7 +4380,7 @@ namespace Portal::Manager
 				 return out;
 			 }() },
 			{ "doorwayPictures", Portal::Snapshot::Describe() },
-			{ "remoteStepping", RemoteCell::stepEnabled },
+			{ "remoteStepping", RemoteCell::SteppingEnabled() },
 			{ "active", portal ? json{ { "sourceDoor", std::format("{:08X}", portal->sourceDoor) }, { "linkedDoor", std::format("{:08X}", portal->linkedDoor) }, { "mapping", [&] {
 										 try {
 											 const auto m = Portal::Doors::Compute(*portal);
@@ -4423,7 +4415,7 @@ namespace Portal::Manager
 				 json out = json::array();
 				 for (const auto& space : warm) {
 					 out.push_back({ { "cell", Probe::DescribeCell(space.Cell()) }, { "healthy", space.Healthy() }, { "fullyLoaded", space.FullyLoaded() },
-						 { "lights", space.adoptedLights }, { "paused", space.Paused() } });
+						 { "lights", space.AdoptedLights() }, { "paused", space.Paused() } });
 				 }
 				 return json{ { "max", shownRoomsSetting }, { "distance", kWarmDistance }, { "sparse", sparse }, { "reach", warmReach }, { "activate", ActivateRadius() },
 					 { "spaces", out }, { "targets", warmTargets.size() } };
