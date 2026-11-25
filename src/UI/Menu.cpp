@@ -1,6 +1,6 @@
 #include "UI/Menu.h"
 
-#include "Doors/DoorPair.h"
+#include "Doors/Settings.h"
 #include "Doors/DoorUse.h"
 #include "Pictures/DoorwaySnapshot.h"
 #include "Portal/PortalManager.h"
@@ -57,12 +57,6 @@ namespace
 			return MakePair(at->sourceDoor, at->linkedDoor);
 		}
 		return {};
-	}
-
-	bool Outdoors(RE::TESObjectREFR* a_door)
-	{
-		auto* cell = a_door->GetParentCell();
-		return cell ? !cell->IsInteriorCell() : a_door->GetWorldspace() != nullptr;
 	}
 
 	std::string Describe(RE::TESObjectREFR* a_door)
@@ -230,7 +224,7 @@ namespace
 		if (ImGui::Checkbox("Always open (not only when used; once its doorway has a picture)", &always)) {
 			Portal::Doors::SetAlwaysOpen(pair.key->GetFormID(), always);
 		}
-		if (Outdoors(pair.source) && Outdoors(pair.linked)) {
+		if (Portal::Doors::Outdoors(pair.source) && Portal::Doors::Outdoors(pair.linked)) {
 			bool picture = Portal::Doors::PictureFromAfar(pair.key->GetFormID());
 			if (ImGui::Checkbox("Plain colour until it has a picture (a gate walled up behind)", &picture)) {
 				Portal::Doors::SetPictureFromAfar(pair.key->GetFormID(), picture);

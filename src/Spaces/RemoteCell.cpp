@@ -2,7 +2,7 @@
 
 #include "Diag/Telemetry.h"
 #include "Engine/Hooks.h"
-#include "Doors/DoorPair.h"
+#include "Doors/Hold.h"
 #include "Portal/LightScene.h"
 #include "Portal/Pristine.h"
 #include "Diag/Probe.h"

@@ -1,7 +1,7 @@
 #include "Portal/NpcTravel.h"
 
-#include "Doors/DoorPair.h"
 #include "Doors/DoorUse.h"
+#include "Doors/Pair.h"
 #include "Portal/PortalManager.h"
 
 #include "Diag/Telemetry.h"

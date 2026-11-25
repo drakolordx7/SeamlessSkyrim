@@ -4,7 +4,7 @@
 // comes near: the player opens it by using it (no loading screen), an NPC by reaching for it on
 // its way through, and it swings shut again a few seconds later, once nobody stands in it. The
 // manager decides from this, the menu's switches and the global setting what each door does
-// (Manager's Wanted).
+// (Doors::Wanted).
 namespace Portal::DoorUse
 {
 	// [Portals] iForceDoors: every door open (locked ones too), or every door shut until used
@@ -30,6 +30,11 @@ namespace Portal::DoorUse
 	[[nodiscard]] bool Used(RE::FormID a_door);
 	// Main thread: the doors used, both of each pair.
 	[[nodiscard]] std::vector<RE::FormID> UsedDoors();
+
+	// Main thread: the door's own open or close sound (its base form's), from the door of the pair
+	// in the player's space: the other one stands in a space drawn moved, or not at all, and was
+	// heard from wherever its cell has it.
+	void PlayDoorSound(RE::FormID a_door, RE::FormID a_linked, bool a_open);
 
 	// Any thread (the AI's): an NPC reached for a_door on its way through.
 	void NoteActorUse(RE::FormID a_door);

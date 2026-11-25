@@ -5,7 +5,8 @@
 #include "Engine/Hooks.h"
 
 #include "Portal/CameraLimit.h"
-#include "Doors/DoorPair.h"
+#include "Doors/Geometry.h"
+#include "Doors/Pair.h"
 #include "Pictures/DoorwaySnapshot.h"
 #include "Portal/LightOcclusion.h"
 #include "Portal/LightScene.h"
@@ -1149,7 +1150,7 @@ namespace
 	std::array<RE::NiPoint3, 4> DoorwayQuad(const Active& a_portal, const RE::NiPoint3& a_viewer)
 	{
 		const bool gate = IsGate(a_portal);
-		return Portal::Doors::Quad(Portal::Doors::Door(a_portal.sourceDoor), a_viewer, !gate, gate);
+		return Portal::Doors::Quad(Portal::Doors::Door(a_portal.sourceDoor), a_viewer, { .behindPanel = !gate, .wholeMesh = gate });
 	}
 
 	std::optional<ScreenRect> DoorwayOnScreen(const Active& a_portal)
@@ -2413,13 +2414,13 @@ namespace
 				// and Whiterun's gate was captured every other frame for good, every other frame
 				// showing the picture of the frame before (the view through it stuttered, and lagged
 				// a turn by a frame half the time).
-				const auto                     corners = Portal::Doors::Quad(Portal::Doors::Door(captureDrawn->door), viewer, !captureDrawn->gate, captureDrawn->gate);
+				const auto                     corners = Portal::Doors::Quad(Portal::Doors::Door(captureDrawn->door), viewer, { .behindPanel = !captureDrawn->gate, .wholeMesh = captureDrawn->gate });
 				const Portal::Snapshot::Source source{ DrawingTargets().color.SRV, DrawingTargets().depth.depthSRV, captureDrawn->nearClip, captureDrawn->farClip, true };
 				Portal::Snapshot::Capture(view, source, captureDrawn->door, captureDrawn->outdoors, captureDrawn->gate, corners);
 			});
 		} else if (chance && a_realShown && (!merged || (playerCamera && playerCamera->IsInFirstPerson()))) {
 			guarded([&] {
-				const auto               corners = Portal::Doors::Quad(Portal::Doors::Door(chance->door), viewer, !chance->gate, chance->gate);
+				const auto               corners = Portal::Doors::Quad(Portal::Doors::Door(chance->door), viewer, { .behindPanel = !chance->gate, .wholeMesh = chance->gate });
 				Portal::Snapshot::Source source;
 				auto*                    renderer = RE::BSGraphics::Renderer::GetSingleton();
 				if (merged) {
@@ -2457,7 +2458,7 @@ namespace
 		for (const auto& standIn : standIns) {
 			guarded([&] {
 				// Shown: an always-open door of the street merged into a room is drawn moved with it.
-				const auto corners = Portal::Doors::ShownQuad(Portal::Doors::Door(standIn.door), viewer, !standIn.gate, standIn.gate);
+				const auto corners = Portal::Doors::ShownQuad(Portal::Doors::Door(standIn.door), viewer, { .behindPanel = !standIn.gate, .wholeMesh = standIn.gate });
 				using Kind = Portal::Snapshot::Adaptation::Kind;
 				Portal::Snapshot::Adaptation adaptation{ Kind::kNone, daylight };
 				if (standIn.outdoors && hereIndoors) {
@@ -2715,7 +2716,7 @@ namespace
 					static bool capturedLastFrame = false;
 					if (const auto door = Portal::Manager::PictureWanted(); !capture && door == portal->sourceDoor && !capturedLastFrame) {
 						auto* camera = RE::Main::WorldRootCamera();
-						capture = Portal::Snapshot::CameraFor(door, Portal::Doors::Quad(Portal::Doors::Door(door), camera->world.translate, true), camera->world.translate);
+						capture = Portal::Snapshot::CameraFor(door, Portal::Doors::Quad(Portal::Doors::Door(door), camera->world.translate, { .behindPanel = true }), camera->world.translate);
 					}
 					if (capture && (file || capture->door != portal->sourceDoor)) {
 						capture.reset();
