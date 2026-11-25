@@ -10,5 +10,12 @@ namespace Bridge
 		bool mainThread = true;
 	};
 
-	const std::unordered_map<std::string, Command>& GetCommands();
+	using CommandTable = std::unordered_map<std::string, Command>;
+
+	// The commands by theme: driving the game, probing engine state, and the portal's tooling.
+	void AddGameCommands(CommandTable& a_commands);
+	void AddProbeCommands(CommandTable& a_commands);
+	void AddPortalCommands(CommandTable& a_commands);
+
+	const CommandTable& GetCommands();
 }
