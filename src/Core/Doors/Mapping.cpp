@@ -14,8 +14,8 @@ namespace Core::Doors
 			return turn;
 		}
 
-		// A marker isn't always square to its door (Solitude's gate marker faces 48 degrees up the
-		// street), so only the sign of the marker against the panel normal is used.
+		// A marker isn't always square to its door (one faces 48 degrees along the street), so only
+		// the sign of the marker against the panel normal is used.
 		float Facing(const PairDoor& a_door, float a_markerYaw)
 		{
 			const float yaw = std::atan2(a_door.panelNormal.x, a_door.panelNormal.y);

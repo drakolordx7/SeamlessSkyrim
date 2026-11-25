@@ -55,9 +55,9 @@ namespace Core::Doors
 	}
 
 	// The pair stands open whoever uses it: from afar, or set to stand open always and its space
-	// shown. The picture is only taken of a doorway seen open: from inside Understone Keep, never
-	// seen open from there, the doors stood shut for good. Such a door was seen shut until its
-	// space came, so it swings open then (what stands open from afar is shown open at once).
+	// shown. The picture is only taken of a doorway seen open, so a door never seen open from
+	// one side would stay shut for good. Such a door was seen shut until its space came, so it
+	// swings open then (what stands open from afar is shown open at once).
 	template <class HasPicture, class SpaceShown>
 	[[nodiscard]] bool StandsOpen(const PairFacts& a_facts, HasPicture&& a_hasPicture, SpaceShown&& a_spaceShown)
 	{

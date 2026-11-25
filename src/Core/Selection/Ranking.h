@@ -33,8 +33,8 @@ namespace Core::Selection
 	// Up to this many spaces behind doors within reach (or as many as are loaded at once, if more)
 	// count as few.
 	inline constexpr std::size_t kFewDoors = 3;
-	// One attach at a time, a few times a second at most: each makes a long frame (3-10 ms in
-	// Whiterun's market, more for a room whose 3D has to be loaded).
+	// One attach at a time, a few times a second at most: each makes a long frame (3-10 ms, more
+	// for a room whose 3D has to be loaded).
 	inline constexpr float kWarmAttachSeconds = 0.5f;
 	// A cell that failed to attach isn't tried again for this long.
 	inline constexpr float kRetryCooldown = 5.0f;

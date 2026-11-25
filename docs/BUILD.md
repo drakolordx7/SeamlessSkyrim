@@ -32,6 +32,19 @@ building when the game is running and the copy would fail.
   existing files (`tools/copy-in-place.ps1`), so when Vortex deploys the DLL as a hard link the
   build lands in the Vortex mod too.
 
+### Layout and Core
+
+`src/Skyrim/` is the plugin (everything that touches the engine); `src/Core/` is the
+game-independent library `SeamlessCore` (plain-float maths, ids and the decisions that need no
+engine types), linked into the DLL. Core has no CommonLib, no PCH and no Windows or D3D headers:
+`cmake/CheckCore.cmake` fails the build when a file under `src/Core` includes anything but the
+standard library or another Core header. Engine types are converted at the boundary in
+`src/Skyrim/Engine/CoreConvert.h`.
+
+The unit tests of Core are a separate executable, not part of the DLL. `toolsuild.ps1` builds
+it with everything else; run it with `build\RelWithDebInfo\SeamlessCoreTests.exe` (exit code 0 when
+all checks pass). The source is `tests/Core/CoreTests.cpp`.
+
 ## As a Vortex mod
 
 `tools/deploy-vortex-mod.ps1` puts the plugin (Release build, no PDB), its two ini files from

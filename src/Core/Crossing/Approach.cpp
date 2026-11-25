@@ -36,8 +36,7 @@ namespace Core::Crossing
 			out.closePassage = a.passageOpen;
 			return out;
 		}
-		// Only at the doorway's own height. Walking over the flat roof of Whiterun's guard house by
-		// the gate was within its door's width and depth, and carried the player inside.
+		// Only at the doorway's own height: a roof over the door is inside its width and depth too.
 		if (!FeetAtDoorway(a.player.z, doorway)) {
 			out.closePassage = a.passageOpen;
 			return out;
@@ -45,15 +44,12 @@ namespace Core::Crossing
 		out.active = true;
 		out.cameraDepth = DepthOf(doorway, a.camera);
 
-		// Only right at the threshold: the building's collision is also the porch and the steps in
-		// front of the door, and with it gone earlier the player sank into the ground on the way up.
-		// Whatever the mode: a door can stand against a wall that closes the void behind it
-		// (Riften's jail; the Hall of the Elements' door up to the Arcanaeum, 4 units behind the
-		// door's face, with nothing merged), and the player stopped short of the crossing.
-		// Only on the way in: arrived through the door at its marker 9 units in front of it, the
-		// player was held 10 units above the floor they were set down over.
-		// Facing in and moving, not getting nearer: someone already stopped by the wall gets
-		// no nearer.
+		// A passage is opened only right at the threshold: the building's collision is also the porch
+		// and the steps in front of the door, and with it gone earlier the player sinks into the
+		// ground on the way up. Whatever the mode: a door can stand against a wall that closes the
+		// void behind it, and the player would stop short of the crossing. Only on the way in: a
+		// player set down at the door's marker just in front of it would be held above the floor.
+		// Facing in and moving, not getting nearer: someone already stopped by the wall gets no nearer.
 		const bool walkingIn = a.playerMoving && std::sin(a.playerYaw) * doorway.inward.x + std::cos(a.playerYaw) * doorway.inward.y > 0.5f;
 		if (depth > -25.0f && side <= doorway.halfWidth + 20.0f && (walkingIn || a.passageOpen)) {
 			// Seconds, not frames: counted per frame it looked again twice as often at 120 fps.
