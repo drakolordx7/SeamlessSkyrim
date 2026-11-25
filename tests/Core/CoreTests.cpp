@@ -182,6 +182,7 @@ namespace
 		// A gate: outdoors on both sides stands open from afar, without asking for a picture.
 		CHECK(OpenFromAfar(f, picture));
 		CHECK(asked == 0);
+		CHECK(LockedShut(true, Force::kNone) && LockedShut(true, Force::kAllShut) && !LockedShut(true, Force::kAllOpen) && !LockedShut(false, Force::kNone));
 		// Forced open or shut wins over everything.
 		f.force = Force::kAllOpen;
 		f.doorOutdoors = false;

@@ -30,9 +30,11 @@ namespace Portal::Doors
 	// The pair's doors are to be open now: standing open, or used.
 	[[nodiscard]] bool Wanted(RE::TESObjectREFR* a_door, const Side& a_linked);
 
-	// The far end of a door the player's use is the manager's (DoorActivateHook): a seamless door,
+	// The far end of a door the player's use is the portal's (EngineHooks' DoorActivateHook): a seamless door,
 	// seen from the player's space. Null for any other.
 	[[nodiscard]] RE::TESObjectREFR* UsedPairOf(RE::TESObjectREFR* a_door);
+	// A locked door stays a door (Core::Doors::LockedShut), unless DoorUse's force opens every door.
+	[[nodiscard]] bool LockedShut(RE::TESObjectREFR* a_door);
 	// Open because the player or an NPC used it, so using it shuts it.
 	[[nodiscard]] bool ClosableDoor(RE::TESObjectREFR* a_door);
 }

@@ -71,6 +71,11 @@ namespace Portal::Doors
 		return linked.get();
 	}
 
+	bool LockedShut(RE::TESObjectREFR* a_door)
+	{
+		return Core::Doors::LockedShut(a_door->IsLocked(), DoorUse::GetForce());
+	}
+
 	bool ClosableDoor(RE::TESObjectREFR* a_door)
 	{
 		auto* linked = LinkedOf(a_door);

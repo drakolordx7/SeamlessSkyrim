@@ -91,43 +91,6 @@ namespace
 		}
 	}
 
-	// How far a door's collision reaches past its centre (a_center) towards a_inward, at a_height: a
-	// ray from that side back through the door, to the first body of a thing (not a person, not the land). Not only
-	// the door's own: a gate's thick arch may be a static of its own, and placed short of it the
-	// player was pushed out of it just the same.
-	std::optional<float> CollisionReach(RE::TESObjectREFR* a_door, const RE::NiPoint3& a_center, const RE::NiPoint3& a_inward, float a_height)
-	{
-		auto* cell = a_door ? a_door->GetParentCell() : nullptr;
-		auto* world = cell ? cell->GetbhkWorld() : nullptr;
-		if (!world) {
-			return std::nullopt;
-		}
-		constexpr float kSpan = 80.0f;
-		const float     scale = RE::bhkWorld::GetWorldScale();
-		RE::NiPoint3    from = a_center + a_inward * kSpan;
-		RE::NiPoint3    to = a_center - a_inward * kSpan;
-		from.z = to.z = a_height;
-		for (int i = 0; i < 8; ++i) {
-			RE::bhkPickData pick;
-			pick.rayInput.from = RE::hkVector4(from.x * scale, from.y * scale, from.z * scale, 0.0f);
-			pick.rayInput.to = RE::hkVector4(to.x * scale, to.y * scale, to.z * scale, 0.0f);
-			pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kCharController);
-			if (!world->PickObject(pick) || !pick.rayOutput.HasHit()) {
-				return std::nullopt;
-			}
-			const auto hit = from + (to - from) * pick.rayOutput.hitFraction;
-			auto*      ref = RE::TESHavokUtilities::FindCollidableRef(*pick.rayOutput.rootCollidable);
-			if (ref && !ref->As<RE::Actor>()) {
-				return (hit.x - a_center.x) * a_inward.x + (hit.y - a_center.y) * a_inward.y;
-			}
-			from = hit - a_inward;  // someone in the doorway, or the land rising there
-			if ((from - to).Dot(a_inward) <= 0.0f) {
-				return std::nullopt;
-			}
-		}
-		return std::nullopt;
-	}
-
 	// Queues the engine's own door teleport for the player through a_door (what activating a load door
 	// does, TESObjectDOOR::HandleOpen, ID 17926: a fade to black whose callback calls ID 17924, which
 	// queues the teleport, PlayerCharacter::queuedTargetLoc, ID 40442; doors flagged "automatic"
@@ -184,7 +147,7 @@ namespace
 		// inside the room rather than in the doorway's plane.
 		queuedPos = mapping.toLinked * player->GetPosition() + inwardInside * kArrivalStep;
 		// Carried through before reaching the door (in first person as soon as the camera reaches
-		// the doorway's picture, PortalManager's Approach), the mapped position is still short
+		// the doorway's picture, Crossing::Approach), the mapped position is still short
 		// of the far door: inside the far building's wall. A little past its plane instead.
 		constexpr float kPastFarDoor = 2.0f;
 		const auto      farCenter = mapping.toLinked * mapping.sourceCenter;
@@ -466,7 +429,7 @@ namespace
 		if (!arrival->limitCamera) {
 			return std::nullopt;
 		}
-		// Let out again as the player walks away from the doorway (see PortalManager's pull-in).
+		// Let out again as the player walks away from the doorway (see Crossing::Approach's pull-in).
 		// Only until the doorway behind is shown again: from then on the portal's own camera stop
 		// (CameraLimit::SetPlane) keeps the camera on this side of it. Held by depth alone, the
 		// camera stayed at the player's head in a small room for as long as they stood near the
@@ -497,7 +460,7 @@ namespace Portal::Travel
 		// +0x640, +0x682; AE before 1.7.99: +0x648, +0x68A); CommonLib's layout must agree, or Begin
 		// writes elsewhere.
 		auto* player = RE::PlayerCharacter::GetSingleton();
-		SEAMLESS_ASSERT(reinterpret_cast<std::uintptr_t>(&player->GetPlayerRuntimeData().queuedTargetLoc.isValid) - reinterpret_cast<std::uintptr_t>(player) == Hooks::Offset(0x682, 0x68A, 0x692));
+		SEAMLESS_ASSERT(static_cast<std::ptrdiff_t>(reinterpret_cast<std::uintptr_t>(&player->GetPlayerRuntimeData().queuedTargetLoc.isValid) - reinterpret_cast<std::uintptr_t>(player)) == Hooks::Offset(0x682, 0x68A, 0x692));
 		REL::Relocation<std::uintptr_t> site{ REL::RelocationID(35565, 36564), REL::Relocate(0x53, 0x6E) };
 		if (!Hooks::CallsTo(site.address(), REL::RelocationID(39366, 40438), "travel: teleport")) {
 			logger::error("travel: walking through doors uses the normal transition");

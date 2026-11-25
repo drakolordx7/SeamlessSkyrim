@@ -1,5 +1,7 @@
 #include "Skyrim/Portal/LightScene.h"
 
+#include "Skyrim/Render/Wire.h"
+
 namespace
 {
 	// Main thread. The scene in slot 3, and the empty one registered there while no space is shown
@@ -49,7 +51,7 @@ namespace Portal::LightScene
 		RE::NiPointer<RE::ShadowSceneNode> scene(ctor(RE::malloc(0x308), 0x100, 4, 4, 0x4000, 0x80, 0x10));
 		// Shaders look the active light scene up by this index (fog via ID 105637); only drawn once
 		// registered there (Show).
-		scene->GetRuntimeData().sceneGraphIndex = kSlot;
+		scene->GetRuntimeData().sceneGraphIndex = ::Render::kPortalSceneSlot;
 		scene->name = "SeamlessPortalScene";
 		ourName = scene->name.data();
 		return scene;
@@ -66,10 +68,10 @@ namespace Portal::LightScene
 		if (a_scene == registered) {
 			return;
 		}
-		// Slot 3 (0 world, 1 menu-3D, 2/3 free): an unregistered index crashed the first frame. On
+		// Slot 3, kPortalSceneSlot (0 world, 1 menu-3D, 2/3 free): an unregistered index crashed the first frame. On
 		// game load/reset the engine clears the lights of every registered scene (ID 13280).
 		REL::Relocation<void (*)(std::uint32_t, RE::ShadowSceneNode*)> registerScene{ REL::RelocationID(98982, 105635) };
-		registerScene(kSlot, a_scene);
+		registerScene(::Render::kPortalSceneSlot, a_scene);
 		registered = a_scene;
 	}
 

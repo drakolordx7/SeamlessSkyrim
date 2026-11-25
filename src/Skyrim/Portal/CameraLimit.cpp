@@ -60,6 +60,15 @@ namespace
 
 	void Limit(RE::ThirdPersonState* a_state);
 
+	void MoveCameraRoot(const RE::NiPoint3& a_translate)
+	{
+		if (auto* root = RE::PlayerCamera::GetSingleton()->cameraRoot.get()) {
+			root->local.translate = a_translate;
+			RE::NiUpdateData update;
+			root->Update(update);
+		}
+	}
+
 	// Horse and dragon cameras are third-person states with vtables of their own; hooked on
 	// ThirdPersonState's alone, mounted the camera went through the doorway's plane unstopped.
 	template <int Which>
@@ -107,7 +116,6 @@ namespace
 		}
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};
-
 }
 
 bool Portal::CameraLimit::InThirdPerson()
@@ -137,11 +145,7 @@ namespace
 				const auto  desired = RE::PlayerCharacter::GetSingleton()->GetPosition() + carryOffset;
 				auto&       camera = a_state->translation;
 				camera = camera + (desired - camera) * weight;
-				if (auto* root = RE::PlayerCamera::GetSingleton()->cameraRoot.get()) {
-					root->local.translate = camera;
-					RE::NiUpdateData update;
-					root->Update(update);
-				}
+				MoveCameraRoot(camera);
 			}
 		}
 		if (plane) {
@@ -158,11 +162,7 @@ namespace
 				const float t = cameraDepth - playerDepth > 0.001f ? (cameraDepth + kPlaneMargin) / (cameraDepth - playerDepth) : 1.0f;
 				camera.x += (pos.x - camera.x) * t;
 				camera.y += (pos.y - camera.y) * t;
-				if (auto* root = RE::PlayerCamera::GetSingleton()->cameraRoot.get()) {
-					root->local.translate = camera;
-					RE::NiUpdateData update;
-					root->Update(update);
-				}
+				MoveCameraRoot(camera);
 			}
 		}
 		if (!limit) {
@@ -179,11 +179,7 @@ namespace
 			const float scale = *limit / distance;
 			camera.x = pos.x + dx * scale;
 			camera.y = pos.y + dy * scale;
-			if (auto* root = RE::PlayerCamera::GetSingleton()->cameraRoot.get()) {
-				root->local.translate = camera;
-				RE::NiUpdateData update;
-				root->Update(update);
-			}
+			MoveCameraRoot(camera);
 		}
 		SetHidden(std::min(distance, *limit) < kHidePlayerBelow);
 	}

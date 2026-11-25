@@ -3,7 +3,7 @@
 #include "Core/Doors/Swing.h"
 
 // One door's swing, held by whoever draws that door open: the portal's door, a merged room's, a
-// doorway stand-in's. It runs along the door's own animation curves (SwingAmount) and, when its
+// doorway stand-in's. It runs along the door's own animation curves (SwingCurvesOf) and, when its
 // owner lets go (the space was released, the door is handed to another owner), leaves the door
 // where it is for a moment so the next owner of the same door takes it over from there.
 //

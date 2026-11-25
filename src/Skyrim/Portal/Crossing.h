@@ -40,10 +40,6 @@ namespace Portal::Crossing
 
 	// Where the camera is, from the local transform its Update just set.
 	[[nodiscard]] RE::NiPoint3 CameraPosition();
-	// The feet at the doorway's own height: no lower than a step below the panel's bottom edge, no
-	// higher than its middle. Everything that decides by where the player stands against a doorway
-	// also checks this; horizontally, a flat roof over the door is inside its width and depth.
-	[[nodiscard]] bool FeetAtDoorway(float a_feetZ, const Doors::Mapping& a_mapping);
 
 	// The building's collision back on, the player free of the passage's height hold.
 	void ClosePassage();

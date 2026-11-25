@@ -115,11 +115,6 @@ namespace Portal::StreetMerge
 		}
 	}
 
-	void HideLOD()
-	{
-		Portal::StreetLOD::Hide();
-	}
-
 	bool Merged()
 	{
 		return Manager::Space().Merged() && Manager::Space().Cell() && !Manager::Space().Cell()->IsInteriorCell();
@@ -251,7 +246,7 @@ namespace Portal::StreetMerge
 	void Hide()
 	{
 		const Diag::Scope scope("unmerge LOD");
-		HideLOD();
+		Portal::StreetLOD::Hide();
 		RestoreSkyMode();
 		if (!mergedLOD) {
 			return;

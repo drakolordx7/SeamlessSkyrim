@@ -466,24 +466,10 @@ namespace Portal::Doors
 		door3D->Update(update);
 	}
 
-	float SwingAmount(RE::TESObjectREFR* a_door, float a_t, bool a_opening)
-	{
-		std::scoped_lock lock(geometryLock);
-		const auto&      geometry = GeometryOf(a_door);
-		return geometry.curves.Amount(a_t, a_opening);
-	}
-
 	Core::Doors::SwingCurves SwingCurvesOf(RE::TESObjectREFR* a_door)
 	{
 		std::scoped_lock lock(geometryLock);
 		return GeometryOf(a_door).curves;
-	}
-
-	float SwingSeconds(RE::TESObjectREFR* a_door, bool a_opening)
-	{
-		std::scoped_lock lock(geometryLock);
-		const auto&      geometry = GeometryOf(a_door);
-		return geometry.curves.Seconds(a_opening);
 	}
 
 	void RestoreLeaves(RE::FormID a_door)

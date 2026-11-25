@@ -1,6 +1,7 @@
 #include "Skyrim/Portal/LightOcclusion.h"
 
 #include "Skyrim/Portal/MergedView.h"
+#include "Skyrim/Render/Wire.h"
 
 namespace
 {
@@ -71,7 +72,7 @@ namespace
 		std::optional<Portal::LightOcclusion::RoomDoor>      door;       // see SetWorld
 		bool                                                 interior = false;  // see SetWorld
 	};
-	std::array<Space, 4> spaces;
+	std::array<Space, ::Render::kMaxRooms> spaces;
 	// With the world, like the cache.
 	std::unordered_map<Key, ShellVerdict, KeyHash> outsideShell;  // geometry null
 	std::uint32_t                              unmeasuredThisFrame = 0;
@@ -202,9 +203,6 @@ namespace Portal::LightOcclusion
 {
 	void SetWorld(int a_slot, RE::bhkWorld* a_world, const RE::NiTransform& a_toPhysics, const std::optional<RoomDoor>& a_door, bool a_interior)
 	{
-		if (a_slot < 0 || a_slot >= static_cast<int>(spaces.size())) {
-			return;
-		}
 		spaces[a_slot] = { a_world, a_toPhysics, a_door, a_interior };
 		if (a_slot == 0) {
 			// Once per frame: slot 0 is set every frame, before the others.

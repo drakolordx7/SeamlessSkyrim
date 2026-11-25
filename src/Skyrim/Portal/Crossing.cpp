@@ -18,16 +18,13 @@ namespace Portal::Crossing
 {
 	namespace
 	{
-		// The next frame re-attached a cell right before the engine's door transition took it: the
-		// holdoff keeps it from being grabbed back while the transition is pending.
-		Core::Crossing::Timers timers;
+		Core::Crossing::Timers        timers;
 		Core::Crossing::ApproachState approach;
 
 		// Merged, the player walks into the doorway until the camera has followed them through it;
 		// but behind an exterior door is the building's own collision (its volume is solid). Whatever
 		// blocks the way in is made non-collidable while the player is in the doorway.
 		std::vector<Portal::Doors::OpenState> passage;
-		float                                 passageCheck = 0.0f;
 
 		// With the building's collision off, its floor (the threshold, often the porch too) is gone as
 		// well, and the player dropped up to 90 units onto the ground under the building. While the
@@ -81,7 +78,7 @@ namespace Portal::Crossing
 			return RE::TESHavokUtilities::FindCollidableRef(*pick.rayOutput.rootCollidable);
 		}
 
-		void OpenPassage(RE::PlayerCharacter* a_player, const Portal::Doors::Mapping& a_mapping, float a_halfHeight)
+		void OpenPassage(RE::PlayerCharacter* a_player, const Portal::Doors::Mapping& a_mapping)
 		{
 			auto* cell = a_player->GetParentCell();
 			auto* world = cell ? cell->GetbhkWorld() : nullptr;
@@ -89,7 +86,7 @@ namespace Portal::Crossing
 				return;
 			}
 			// Waist and knee height across the doorway, from just in front of it to a room's depth.
-			const float floor = a_mapping.sourceCenter.z - a_halfHeight;
+			const float floor = a_mapping.sourceCenter.z - a_mapping.halfHeight;
 			for (const float height : { 70.0f, 30.0f }) {
 				auto from = a_mapping.sourceCenter - a_mapping.inward * 20.0f;
 				auto to = a_mapping.sourceCenter + a_mapping.inward * 250.0f;
@@ -127,18 +124,11 @@ namespace Portal::Crossing
 			}
 		}
 
-		// How far the camera's near plane is from the camera, and where the doorway's picture lies
-		// (behind the panel for a swinging door, in front of it for a city gate, which keeps its
-		// picture in front of its panel, Render::PortalPass::IsGate).
+		// How far the camera's near plane is from the camera.
 		float NearPlane()
 		{
 			const auto* worldCamera = RE::Main::WorldRootCamera();
 			return worldCamera ? worldCamera->GetRuntimeData2().viewFrustum.fNear : 15.0f;
-		}
-
-		Core::Crossing::Doorway DoorwayOf(const Doors::Mapping& a_mapping)
-		{
-			return { ToCore(a_mapping.sourceCenter), ToCore(a_mapping.inward), a_mapping.halfWidth, a_mapping.halfDepth, a_mapping.halfHeight };
 		}
 	}
 
@@ -215,11 +205,6 @@ namespace Portal::Crossing
 		return root->parent ? root->parent->world * root->local.translate : root->local.translate;
 	}
 
-	bool FeetAtDoorway(float a_feetZ, const Portal::Doors::Mapping& a_mapping)
-	{
-		return Core::Crossing::FeetAtDoorway(a_feetZ, DoorwayOf(a_mapping));
-	}
-
 	// When to carry the player through, and what the camera may do meanwhile:
 	// - merged (outside, the room drawn in the world): the player walks into the doorway and the
 	//   crossing waits until the camera has followed them through it, so both are inside when the
@@ -255,7 +240,7 @@ namespace Portal::Crossing
 		const bool  firstPerson = !merged && playerCamera && playerCamera->IsInFirstPerson();
 		const auto  decision = approach.Decide({
 			.door = a_portal.sourceDoor,
-			.doorway = DoorwayOf(mapping),
+			.doorway = Doors::DoorwayOf(mapping),
 			.player = ToCore(position),
 			.playerYaw = yaw,
 			.playerMoving = a_player->IsMoving(),
@@ -275,7 +260,7 @@ namespace Portal::Crossing
 			return std::nullopt;
 		}
 		if (decision.openPassage) {
-			OpenPassage(a_player, mapping, mapping.halfHeight);
+			OpenPassage(a_player, mapping);
 		}
 		if (!passage.empty()) {
 			HoldPassageHeight(a_player, true);

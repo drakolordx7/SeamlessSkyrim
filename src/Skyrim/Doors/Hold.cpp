@@ -258,7 +258,7 @@ namespace Portal::Doors
 			CullBehindPanel(a_door, shared);
 		}
 		if (!a_options.solid && shared.walkables++ == 0) {
-			// The doorway can be walked through. Using the door is the manager's (DoorActivateHook):
+			// The doorway can be walked through. Using the door is the portal's (EngineHooks' DoorActivateHook):
 			// shut it, or nothing, never the ordinary transition with its loading screen.
 			MakeWalkable(a_door, door3D, shared);
 		}

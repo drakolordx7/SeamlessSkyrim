@@ -10,11 +10,7 @@
 // Used by the patched Community Shaders through the exported SeamlessPortal_LightVisibility.
 namespace Portal::LightOcclusion
 {
-	// Main thread, per frame: the world to cast rays in (nullptr = none). a_toPhysics maps where the
-	// remote cell is drawn to where its Havok world has it: identity for the portal pass; for a room
-	// merged into the world (its 3D moved to the door, its physics left in place) the door mapping.
-	// a_door: the room's door, in its Havok world. a_interior: the remote space is an interior,
-	// with nothing around its shell.
+	// The room's door, in its Havok world.
 	struct RoomDoor
 	{
 		RE::NiPoint3 center;    // middle of the panel
@@ -22,8 +18,12 @@ namespace Portal::LightOcclusion
 		float        halfWidth = 0;
 		float        halfHeight = 0;
 	};
-	// a_slot: the room's (Render::Backend::SetMergedDoor). 0, the shown space, is set every frame
-	// and first; the others for rooms merged beside it (a null world when there is none).
+	// Main thread, per frame: the world to cast rays in (nullptr = none). a_toPhysics maps where the
+	// remote cell is drawn to where its Havok world has it: identity for the portal pass; for a room
+	// merged into the world (its 3D moved to the door, its physics left in place) the door mapping.
+	// a_interior: the remote space is an interior, with nothing around its shell. a_slot: the
+	// room's (Render::Backend::SetMergedDoor). 0, the shown space, is set every frame and first; the
+	// others for rooms merged beside it (a null world when there is none).
 	void SetWorld(int a_slot, RE::bhkWorld* a_world, const RE::NiTransform& a_toPhysics = {},
 		const std::optional<RoomDoor>& a_door = std::nullopt, bool a_interior = false);
 

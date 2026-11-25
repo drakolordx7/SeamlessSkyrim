@@ -27,6 +27,13 @@ namespace Core::Doors
 		bool  linkedUsed = false;
 	};
 
+	// A locked door stays a door: closed, solid, to be picked or opened with its key. Unless every
+	// door is to stand open.
+	[[nodiscard]] inline bool LockedShut(bool a_locked, Force a_force)
+	{
+		return a_locked && a_force != Force::kAllOpen;
+	}
+
 	// A door out of a building (a door indoors, its pair outdoors) shows the street only live,
 	// never a picture of it: the street's pictures, taken from inside and drawn with their depth,
 	// broke up into streaks seen from beside the doorway. So such a door opens from inside only once

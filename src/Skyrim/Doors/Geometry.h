@@ -43,14 +43,10 @@ namespace Portal::Doors
 	// marker puts whoever comes through): the box that hides the void behind a closed door.
 	std::vector<RE::NiPointer<RE::BSGeometry>> BehindPanel(RE::TESObjectREFR* a_door);
 
-	// Main thread: how far open (TurnLeaves's a_amount) the door's own animation has it at swing
-	// progress a_t (0 shut .. 1 open; shutting runs it down), opening or shutting, and how long each
-	// takes: a door the portal swings moves as the game moves it. The game plays its "Open" and
-	// "Close", not one backwards.
-	// The door's own opening and shutting curves, for a swing to step along.
+	// Main thread: the door's own opening and shutting curves (how far open, TurnLeaves's a_amount,
+	// and how long each takes), for a swing to step along: a door the portal swings moves as the
+	// game moves it. The game plays its "Open" and "Close", not one backwards.
 	[[nodiscard]] Core::Doors::SwingCurves SwingCurvesOf(RE::TESObjectREFR* a_door);
-	[[nodiscard]] float SwingAmount(RE::TESObjectREFR* a_door, float a_t, bool a_opening);
-	[[nodiscard]] float SwingSeconds(RE::TESObjectREFR* a_door, bool a_opening);
 	// Main thread: the door's leaves swung open around their hinges, a_amount from 0 (closed) to 1
 	// (open), towards a_room (a horizontal world direction: the side it opens into); its frame
 	// stays. Placement and everything derived from it keep using the closed door. a_settings: the

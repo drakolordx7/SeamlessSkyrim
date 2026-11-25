@@ -1,5 +1,8 @@
 #include "Skyrim/Portal/StandIns.h"
 
+#include "Core/Crossing/Approach.h"
+
+#include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Engine/SameSpace.h"
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Doors/Geometry.h"
@@ -345,14 +348,11 @@ namespace Portal::StandIns
 				if (standIn.handedOver || standIn.swing.Amount() < 0.5f || !ref || !ref->Get3D() || !InPlayerSpace(ref, a_here) || ref->IsLocked()) {
 					continue;
 				}
-				const auto  center = Portal::Doors::Center(ref);
-				const auto  size = Portal::Doors::Size(ref);
-				const auto  inward = AwayFrom(ref, position);
-				const auto  offset = position - center;
-				const float d = offset.x * inward.x + offset.y * inward.y;  // < 0: in front
-				const float side = std::abs(offset.x * inward.y - offset.y * inward.x);
-				const float bottom = center.z - size.halfHeight;
-				if (d >= -(size.halfDepth + kReach) && side <= size.halfWidth && position.z >= bottom - 64.0f && position.z <= bottom + size.halfHeight &&
+				const auto size = Portal::Doors::Size(ref);
+				const auto inward = AwayFrom(ref, position);
+				const Core::Crossing::Doorway doorway{ ToCore(Portal::Doors::Center(ref)), ToCore(inward), size.halfWidth, size.halfDepth, size.halfHeight };
+				const float d = Core::Crossing::DepthOf(doorway, ToCore(position));  // < 0: in front
+				if (d >= -(size.halfDepth + kReach) && Core::Crossing::SideOf(doorway, ToCore(position)) <= size.halfWidth && Core::Crossing::FeetAtDoorway(position.z, doorway) &&
 					facing.Dot(inward) > 0.5f) {
 					door = id;
 					depth = d;

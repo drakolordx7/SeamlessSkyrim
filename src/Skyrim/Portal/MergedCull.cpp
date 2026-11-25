@@ -165,8 +165,8 @@ namespace Portal::MergedCull
 				// Also when ProcessHook has already switched the merged cell to ignoring multibounds:
 				// passed on as it was, the room culled its children but not what straddles its
 				// portals, and Mistveil Keep's hall stood without walls and ceiling.
-				const auto mode = process.cullMode.get();
-				if ((mode != Type::kNormal && mode != Type::kIgnoreMultiBounds) || !IsMergedRoom(a_room)) {
+				const auto cullMode = process.cullMode.get();
+				if ((cullMode != Type::kNormal && cullMode != Type::kIgnoreMultiBounds) || !IsMergedRoom(a_room)) {
 					func(a_room, a_process, a_alphaGroupIndex);
 					return;
 				}
@@ -186,7 +186,7 @@ namespace Portal::MergedCull
 						cull(shared, a_process, static_cast<std::uint32_t>(a_alphaGroupIndex));
 					}
 				}
-				process.cullMode = mode;
+				process.cullMode = cullMode;
 			}
 			static inline REL::Relocation<decltype(Thunk)> func;
 		};

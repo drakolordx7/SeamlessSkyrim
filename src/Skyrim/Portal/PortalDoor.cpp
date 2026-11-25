@@ -33,9 +33,6 @@ namespace Portal::PortalDoor
 
 	void Update(RE::TESObjectREFR* a_door, const RE::NiPoint3& a_inward, float a_delta)
 	{
-		if (!a_door) {
-			return;
-		}
 		// A door swings open into the space it opens into (Doors::SwingingDoor): the one the player
 		// is in, off the portal image on its face (with the panel left in place, the two fought over
 		// the same pixels), or the space behind, the linked door swung in the portal's picture and

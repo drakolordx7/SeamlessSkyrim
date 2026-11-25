@@ -1,5 +1,8 @@
 #include "Skyrim/Portal/MergedView.h"
 
+#include "Core/Crossing/Approach.h"
+#include "Core/Render/DoorwayPlanes.h"
+
 #include "Skyrim/Diag/Probe.h"
 #include "Skyrim/Diag/Telemetry.h"
 #include "Skyrim/Doors/DoorUse.h"
@@ -23,7 +26,6 @@
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Portal/StreetMerge.h"
 #include "Skyrim/Render/Backend.h"
-#include "Core/Render/DoorwayPlanes.h"
 #include "Skyrim/Render/Frame.h"
 #include "Skyrim/Render/SceneMeter.h"
 #include "Skyrim/Render/SceneQuery.h"
@@ -182,7 +184,7 @@ namespace Portal::MergedView
 				auto* mergedNode = holder->parent;
 				if (cellNode && mergedNode && object->parent == mergedNode) {
 					// The same slot as the holder's in its own cell (the node of the actors).
-					std::uint32_t slot = 0;
+					std::uint16_t slot = 0;
 					for (auto& child : mergedNode->GetChildren()) {
 						if (child.get() == holder.get()) {
 							break;
@@ -454,8 +456,7 @@ namespace Portal::MergedView
 			if (offset.x * a_inward.x + offset.y * a_inward.y >= 0.0f) {
 				return 0.0f;
 			}
-			const float t = std::clamp((offset.Length() - kNear) / (kFar - kNear), 0.0f, 1.0f);
-			return t * t * (3.0f - 2.0f * t);
+			return Core::SmoothStep(std::clamp((offset.Length() - kNear) / (kFar - kNear), 0.0f, 1.0f));
 		}
 
 		// The slot (1..3) a room merged beside the shown one is in, by its kept space's cell; 0 when
@@ -571,18 +572,15 @@ namespace Portal::MergedView
 			// Only the shown room is walked into; the camera is never in one merged beside it.
 			bool cameraInside = false;
 			if (primary) {
-				const auto depthOf = [&](const RE::NiPoint3& a_point) {
-					return (a_point.x - mapping.sourceCenter.x) * mapping.inward.x + (a_point.y - mapping.sourceCenter.y) * mapping.inward.y;
-				};
-				const auto sideOf = [&](const RE::NiPoint3& a_point) {
-					return std::abs((a_point.x - mapping.sourceCenter.x) * mapping.inward.y - (a_point.y - mapping.sourceCenter.y) * mapping.inward.x);
-				};
+				const auto doorway = Doors::DoorwayOf(mapping);
+				const auto depthOf = [&](const RE::NiPoint3& a_point) { return Core::Crossing::DepthOf(doorway, ToCore(a_point)); };
+				const auto sideOf = [&](const RE::NiPoint3& a_point) { return Core::Crossing::SideOf(doorway, ToCore(a_point)); };
 				const auto  camera = Crossing::CameraPosition();
 				const auto  player = RE::PlayerCharacter::GetSingleton()->GetPosition();
 				const float cameraDepth = depthOf(camera), playerDepth = depthOf(player);
 				if (cameraDepth > 0.0f) {
 					if (playerDepth >= 0.0f) {
-						cameraInside = sideOf(player) <= mapping.halfWidth + 40.0f && playerDepth <= 320.0f && Crossing::FeetAtDoorway(player.z, mapping);
+						cameraInside = sideOf(player) <= mapping.halfWidth + 40.0f && playerDepth <= 320.0f && Core::Crossing::FeetAtDoorway(player.z, doorway);
 					} else {
 						// Where the line from the camera to the player passes the door plane: in the
 						// doorway's opening, not above it.
@@ -782,9 +780,8 @@ namespace Portal::MergedView
 			if (!mapping) {
 				return true;
 			}
-			const auto      offset = camera->world.translate - mapping->sourceCenter;
 			constexpr float kBehindSlack = 10.0f;
-			return offset.x * mapping->inward.x + offset.y * mapping->inward.y < kBehindSlack && DoorwayInView(*mapping, kSeenMargin);
+			return Core::Crossing::DepthOf(Doors::DoorwayOf(*mapping), ToCore(camera->world.translate)) < kBehindSlack && DoorwayInView(*mapping, kSeenMargin);
 		}
 
 		// Paused, the room keeps everything it is drawn with (doors swung, shapes listed, its
@@ -850,9 +847,6 @@ namespace Portal::MergedView
 		return mergeEnabled && ::Render::Backend::CanMerge();
 	}
 
-	// Merging puts an interior into the exterior's scene. The other way round (the street, its land
-	// and the distant LOD put into an interior's scene) is the mergeOutdoors prototype: indoors the
-	// LOD stays loaded, only hidden, and the sky's dome stays in the scene (bridge outdoors_probe).
 	bool Mergeable(const RE::TESObjectCELL* a_here, const RE::TESObjectCELL* a_behindDoor)
 	{
 		if (!MergeSupported() || !a_here || !a_behindDoor) {
@@ -943,7 +937,7 @@ namespace Portal::MergedView
 			const auto* target = Selection::TargetOf(cell->GetFormID());
 			auto*       door = target ? RE::TESForm::LookupByID<RE::TESObjectREFR>(target->door) : nullptr;
 			auto*       linked = target ? RE::TESForm::LookupByID<RE::TESObjectREFR>(target->linked) : nullptr;
-			if (!door || !linked || !door->Get3D() || !linked->Get3D() || (door->IsLocked() && DoorUse::GetForce() != DoorUse::Force::kAllOpen)) {
+			if (!door || !linked || !door->Get3D() || !linked->Get3D() || Portal::Doors::LockedShut(door)) {
 				continue;
 			}
 			// Drawn while its door is to be open (Wanted), and on while it swings shut.
@@ -1152,10 +1146,13 @@ namespace Portal::MergedView
 	{
 		// Merged, the room is drawn at the door (RemoteCell::Merge moves its 3D by the inverse
 		// door mapping) while its Havok world stays where the cell has it.
+		const auto roomDoorOf = [](const Doors::Mapping& a_mapping) {
+			return LightOcclusion::RoomDoor{ a_mapping.toLinked * a_mapping.sourceCenter, a_mapping.toLinked.rotate * a_mapping.inward, a_mapping.halfWidth, a_mapping.halfHeight };
+		};
 		RE::NiTransform                         toPhysics;
 		std::optional<LightOcclusion::RoomDoor> roomDoor;
 		if (const auto mapping = a_ready ? Doors::TryCompute(*a_ready) : std::nullopt) {
-			roomDoor = LightOcclusion::RoomDoor{ mapping->toLinked * mapping->sourceCenter, mapping->toLinked.rotate * mapping->inward, mapping->halfWidth, mapping->halfHeight };
+			roomDoor = roomDoorOf(*mapping);
 			if (Manager::Space().Merged()) {
 				toPhysics = mapping->toLinked;
 			}
@@ -1175,8 +1172,7 @@ namespace Portal::MergedView
 				LightOcclusion::SetWorld(slot, nullptr);
 				continue;
 			}
-			LightOcclusion::SetWorld(slot, rooms[slot]->beside.cell->GetbhkWorld(), mapping->toLinked,
-				LightOcclusion::RoomDoor{ mapping->toLinked * mapping->sourceCenter, mapping->toLinked.rotate * mapping->inward, mapping->halfWidth, mapping->halfHeight }, true);
+			LightOcclusion::SetWorld(slot, rooms[slot]->beside.cell->GetbhkWorld(), mapping->toLinked, roomDoorOf(*mapping), true);
 		}
 	}
 

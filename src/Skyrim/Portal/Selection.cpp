@@ -2,7 +2,7 @@
 
 #include "Skyrim/Diag/Probe.h"
 #include "Skyrim/Diag/Telemetry.h"
-#include "Skyrim/Doors/DoorUse.h"
+#include "Skyrim/Doors/Policy.h"
 #include "Skyrim/Doors/Settings.h"
 #include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Portal/Gates.h"
@@ -108,9 +108,7 @@ namespace Portal::Selection
 			return Candidate{ best->door, best->linked->GetFormID(), cell, best->distance, best->rank };
 		}
 
-		// The scan above walks every reference within ActivateRadius; doors don't come and go that
-		// fast, so it runs a few times a second and the result is looked up again in between.
-		constexpr float kScanSeconds = 0.2f;
+		// The scan above runs Core::Selection::kScanSeconds apart; in between the result is looked up again.
 		float           scanTimer = 0.0f;
 		struct ScannedDoor
 		{
@@ -129,7 +127,7 @@ namespace Portal::Selection
 		std::optional<DoorPair> NearestDoorPair(float a_radius)
 		{
 			auto* player = RE::PlayerCharacter::GetSingleton();
-			auto* here = player ? player->GetParentCell() : nullptr;
+			auto* here = player->GetParentCell();
 			if (!here) {
 				return std::nullopt;
 			}
@@ -212,11 +210,8 @@ namespace Portal::Selection
 	// within one worldspace aren't: both ends are in the scene already.
 	RE::NiPointer<RE::TESObjectREFR> PortalLink(RE::TESObjectREFR* a_ref, RE::TESObjectCELL* a_here)
 	{
-		auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;
-		// A locked door stays a door: closed, solid, to be picked or opened with its key. Unless
-		// every door is to stand open (DoorUse's force).
-		const bool locked = a_ref && a_ref->IsLocked() && Portal::DoorUse::GetForce() != Portal::DoorUse::Force::kAllOpen;
-		if (!base || !base->Is(RE::FormType::Door) || a_ref->IsDisabled() || !a_ref->Get3D() || locked) {
+		auto* base = a_ref->GetBaseObject();
+		if (!base || !base->Is(RE::FormType::Door) || a_ref->IsDisabled() || !a_ref->Get3D() || Doors::LockedShut(a_ref)) {
 			return nullptr;
 		}
 		// A marker door is no doorway: unseen, used by scripts (Riften's prison marker, which takes
@@ -243,7 +238,7 @@ namespace Portal::Selection
 	std::optional<Candidate> CandidateDoor(RE::PlayerCharacter* a_player, float a_delta)
 	{
 		if ((scanTimer -= a_delta) <= 0.0f) {
-			scanTimer = kScanSeconds;
+			scanTimer = Core::Selection::kScanSeconds;
 			const auto found = NearestPortalDoor(a_player);
 			scanned = found ? std::optional(ScannedDoor{ found->door->GetFormID(), found->linkedDoor, found->cell->GetFormID() }) : std::nullopt;
 			return found;

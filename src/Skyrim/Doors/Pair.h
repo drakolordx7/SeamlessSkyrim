@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Core/Crossing/Approach.h"
 #include "Skyrim/Doors/Door.h"
+#include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Portal/Active.h"
 
 // How space in front of the source door of a pair maps to space in front of its linked door:
@@ -18,6 +20,12 @@ namespace Portal::Doors
 		float           halfDepth = 0; // half the door's thickness: a city gate's is a step's worth
 		float           halfHeight = 0;
 	};
+
+	// The doorway as the rules in Core (approach, image space) take it.
+	[[nodiscard]] inline Core::Crossing::Doorway DoorwayOf(const Mapping& a_mapping)
+	{
+		return { ToCore(a_mapping.sourceCenter), ToCore(a_mapping.inward), a_mapping.halfWidth, a_mapping.halfDepth, a_mapping.halfHeight };
+	}
 
 	// Throws if a door has no 3D or no teleport marker.
 	Mapping Compute(RE::TESObjectREFR* a_source, RE::TESObjectREFR* a_linked);

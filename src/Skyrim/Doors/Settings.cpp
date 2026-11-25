@@ -173,6 +173,24 @@ namespace Portal::Doors
 			logger::info("portal: {} door turn(s), {} door shift(s), {} swing angle(s), {} portal(s) off, {} opening inward, {} always open, {} gate(s) with a picture from afar loaded; {} door(s) tuned by the player",
 				corrections.size(), shifts.size(), swingDegrees.size(), portalsOff.size(), opensInward.size(), alwaysOpen.size(), farPicture.size(), tuned.size());
 		}
+
+		bool Has(const std::unordered_set<RE::FormID>& a_doors, RE::FormID a_door)
+		{
+			std::scoped_lock lock(correctionsLock);
+			LoadCorrections();
+			return a_doors.contains(a_door);
+		}
+
+		void Set(std::unordered_set<RE::FormID>& a_doors, RE::FormID a_door, bool a_on)
+		{
+			std::scoped_lock lock(correctionsLock);
+			LoadCorrections();
+			if (a_on) {
+				a_doors.insert(a_door);
+			} else {
+				a_doors.erase(a_door);
+			}
+		}
 	}
 
 	RE::TESObjectREFR* CorrectionDoor(RE::TESObjectREFR* a_source, RE::TESObjectREFR* a_linked)
@@ -255,56 +273,32 @@ namespace Portal::Doors
 
 	bool PortalOff(RE::FormID a_door)
 	{
-		std::scoped_lock lock(correctionsLock);
-		LoadCorrections();
-		return portalsOff.contains(a_door);
+		return Has(portalsOff, a_door);
 	}
 
 	void SetPortalOff(RE::FormID a_door, bool a_off)
 	{
-		std::scoped_lock lock(correctionsLock);
-		LoadCorrections();
-		if (a_off) {
-			portalsOff.insert(a_door);
-		} else {
-			portalsOff.erase(a_door);
-		}
+		Set(portalsOff, a_door, a_off);
 	}
 
 	bool OpensInward(RE::FormID a_door)
 	{
-		std::scoped_lock lock(correctionsLock);
-		LoadCorrections();
-		return opensInward.contains(a_door);
+		return Has(opensInward, a_door);
 	}
 
 	void SetOpensInward(RE::FormID a_door, bool a_inward)
 	{
-		std::scoped_lock lock(correctionsLock);
-		LoadCorrections();
-		if (a_inward) {
-			opensInward.insert(a_door);
-		} else {
-			opensInward.erase(a_door);
-		}
+		Set(opensInward, a_door, a_inward);
 	}
 
 	bool AlwaysOpen(RE::FormID a_door)
 	{
-		std::scoped_lock lock(correctionsLock);
-		LoadCorrections();
-		return alwaysOpen.contains(a_door);
+		return Has(alwaysOpen, a_door);
 	}
 
 	void SetAlwaysOpen(RE::FormID a_door, bool a_open)
 	{
-		std::scoped_lock lock(correctionsLock);
-		LoadCorrections();
-		if (a_open) {
-			alwaysOpen.insert(a_door);
-		} else {
-			alwaysOpen.erase(a_door);
-		}
+		Set(alwaysOpen, a_door, a_open);
 	}
 
 	std::vector<RE::FormID> AlwaysOpenDoors()
@@ -316,20 +310,12 @@ namespace Portal::Doors
 
 	bool PictureFromAfar(RE::FormID a_door)
 	{
-		std::scoped_lock lock(correctionsLock);
-		LoadCorrections();
-		return farPicture.contains(a_door);
+		return Has(farPicture, a_door);
 	}
 
 	void SetPictureFromAfar(RE::FormID a_door, bool a_picture)
 	{
-		std::scoped_lock lock(correctionsLock);
-		LoadCorrections();
-		if (a_picture) {
-			farPicture.insert(a_door);
-		} else {
-			farPicture.erase(a_door);
-		}
+		Set(farPicture, a_door, a_picture);
 	}
 
 	float SwingDegrees(RE::FormID a_door)

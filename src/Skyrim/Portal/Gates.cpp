@@ -1,5 +1,7 @@
 #include "Skyrim/Portal/Gates.h"
 
+#include "Core/Render/DoorwayPlanes.h"
+
 #include "Skyrim/Doors/Geometry.h"
 #include "Skyrim/Doors/Hold.h"
 #include "Skyrim/Doors/Pair.h"
@@ -8,7 +10,6 @@
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Render/Backend.h"
-#include "Core/Render/DoorwayPlanes.h"
 #include "Skyrim/Render/Wire.h"
 #include "Skyrim/Spaces/RemoteCell.h"
 

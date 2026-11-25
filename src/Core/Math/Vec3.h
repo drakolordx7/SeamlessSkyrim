@@ -11,7 +11,8 @@ namespace Core
 	inline constexpr float kPi = std::numbers::pi_v<float>;
 
 	[[nodiscard]] inline float DegToRad(float a_degrees) { return a_degrees * (kPi / 180.0f); }
-	[[nodiscard]] inline float RadToDeg(float a_radians) { return a_radians * (180.0f / kPi); }
+	// 0 to 1 over a_t in 0..1, easing in and out.
+	[[nodiscard]] inline float SmoothStep(float a_t) { return a_t * a_t * (3.0f - 2.0f * a_t); }
 
 	struct Vec3
 	{
@@ -32,7 +33,6 @@ namespace Core
 		[[nodiscard]] Vec3  Cross(const Vec3& a_rhs) const { return { y * a_rhs.z - z * a_rhs.y, z * a_rhs.x - x * a_rhs.z, x * a_rhs.y - y * a_rhs.x }; }
 		[[nodiscard]] float SqrLength() const { return x * x + y * y + z * z; }
 		[[nodiscard]] float Length() const { return std::sqrt(SqrLength()); }
-		[[nodiscard]] float DistanceTo(const Vec3& a_rhs) const { return (*this - a_rhs).Length(); }
 
 		// Scaled to length 1; a vector too short to have a direction becomes zero. Returns the old length.
 		float Unitize()

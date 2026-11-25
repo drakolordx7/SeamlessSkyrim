@@ -75,9 +75,7 @@ namespace Portal::ImageSpaceBlend
 			// blend itself. Taken from it, every frame blended the last frame's blend again, and when
 			// the blend switched off the picture jumped back: the whole screen flashed near a doorway
 			// (in first person, whose camera stays in the blend's range).
-			// The outdoors' own only once the player has been out a while: taken in the first frames of the
-			// first walk outdoors in a session, they were the engine's in-between values, and the blend
-			// made of them darkened the street to near black for a second after it.
+			// The outdoors' own only once the player has been out a while (kOutdoorsSettledFrames).
 			static int framesOutdoors = 0;
 			framesOutdoors = inside ? 0 : framesOutdoors + 1;
 			if (!ours && runtime.currentBaseData && (inside || framesOutdoors > Core::ImageSpace::kOutdoorsSettledFrames)) {
@@ -102,7 +100,6 @@ namespace Portal::ImageSpaceBlend
 			const auto* outdoorsData = Outdoors();
 			const float t = Core::ImageSpace::Weight(a_interiorDepth, a_inDoorway, inside);
 			const bool  snapAdapt = !inside && framesOutdoors <= Core::ImageSpace::kAdaptSnapFrames;
-			constexpr float kSnapSpeed = Core::ImageSpace::kSnapSpeed;
 			if (!indoors || !outdoorsData || Core::ImageSpace::Settled(t, inside)) {
 				if (snapAdapt && (outdoorsData || ours || runtime.currentBaseData)) {
 					if (outdoorsData) {
@@ -110,7 +107,7 @@ namespace Portal::ImageSpaceBlend
 					} else if (!ours) {
 						toneBlend = *runtime.currentBaseData;
 					}
-					toneBlend.hdr.eyeAdaptSpeed = kSnapSpeed;
+					toneBlend.hdr.eyeAdaptSpeed = Core::ImageSpace::kSnapSpeed;
 					runtime.overrideBaseData = &toneBlend;
 					return;
 				}
@@ -123,7 +120,7 @@ namespace Portal::ImageSpaceBlend
 			constexpr std::size_t keep[] = { offsetof(RE::ImageSpaceBaseData::HDR, eyeAdaptSpeed) / sizeof(float), offsetof(RE::ImageSpaceBaseData::HDR, eyeAdaptStrength) / sizeof(float) };
 			Core::ImageSpace::Mix({ reinterpret_cast<float*>(&toneBlend), kFloats }, { reinterpret_cast<const float*>(outdoorsData), kFloats }, { reinterpret_cast<const float*>(indoors), kFloats }, t, keep);
 			if (snapAdapt) {
-				toneBlend.hdr.eyeAdaptSpeed = kSnapSpeed;
+				toneBlend.hdr.eyeAdaptSpeed = Core::ImageSpace::kSnapSpeed;
 			}
 			runtime.overrideBaseData = &toneBlend;
 		}
@@ -131,9 +128,6 @@ namespace Portal::ImageSpaceBlend
 
 	const RE::ImageSpaceBaseData* Outdoors()
 	{
-		// The hour only counts indoors: outdoors it is taken every frame, except while our own blend
-		// is on (UpdateTone), and standing at a doorway for half an hour mustn't swap it for the
-		// weather's.
 		const bool indoors = RE::PlayerCharacter::GetSingleton()->GetParentCell()->IsInteriorCell();
 		const bool holds = toneOutdoorsWeather && Core::ImageSpace::OutdoorsHolds(toneOutdoorsWeather == RE::Sky::GetSingleton()->currentWeather, indoors,
 		                                                                       RE::Calendar::GetSingleton()->GetHoursPassed() - toneOutdoorsHour);
@@ -144,16 +138,13 @@ namespace Portal::ImageSpaceBlend
 	{
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		auto* here = player ? player->GetParentCell() : nullptr;
-		bool  toned = false;
 		if (const auto mapping = a_ready && here ? Doors::TryCompute(*a_ready) : std::nullopt) {
-			const auto doorway = Core::Crossing::Doorway{ ToCore(mapping->sourceCenter), ToCore(mapping->inward), mapping->halfWidth, mapping->halfDepth, mapping->halfHeight };
+			const auto doorway = Doors::DoorwayOf(*mapping);
 			const auto camera = ToCore(Crossing::CameraPosition());
 			const bool inside = here->IsInteriorCell();
 			const float inDoorway = Core::ImageSpace::InDoorway(doorway, camera);
 			UpdateTone(here, a_ready->cell, Core::ImageSpace::InteriorDepth(doorway, camera, inside), inDoorway);
-			toned = true;
-		}
-		if (!toned) {
+		} else {
 			Clear();
 		}
 	}

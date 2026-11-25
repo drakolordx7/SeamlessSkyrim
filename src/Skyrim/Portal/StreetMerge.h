@@ -18,8 +18,6 @@ namespace Portal::StreetMerge
 	// a_portal, shown from an interior: the street's distant LOD is placed for it (StreetLOD) from
 	// now on, not from the merge, as its picture is drawn before. a_here: the player's cell.
 	void PlaceLOD(const Active& a_portal, RE::TESObjectCELL* a_here);
-	// The street's distant LOD let go (StreetLOD), merged or not.
-	void HideLOD();
 
 	// a_door: the interior's door the street is seen through. The distant LOD shown in the
 	// interior and moved with the street (a_toSource), the interior's sky dome given if it has none.

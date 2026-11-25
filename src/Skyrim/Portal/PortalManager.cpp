@@ -64,7 +64,7 @@ namespace Portal::Manager
 				auto* door = RE::TESForm::LookupByID<RE::TESObjectREFR>(id);
 				auto* linked = Portal::Doors::LinkedOf(door);
 				auto* base = door ? door->GetBaseObject() : nullptr;
-				const bool locked = door && door->IsLocked() && Portal::DoorUse::GetForce() != Portal::DoorUse::Force::kAllOpen;
+				const bool locked = door && Portal::Doors::LockedShut(door);
 				if (!linked || !base || static_cast<RE::TESObject*>(base)->IsMarker() || locked || Doors::PortalOff(id) || Doors::PortalOff(linked->GetFormID())) {
 					continue;
 				}
@@ -117,7 +117,7 @@ namespace Portal::Manager
 			PortalDoor::Close();
 			Crossing::ClosePassage();
 			MergedView::EndShown();
-			StreetMerge::HideLOD();
+			StreetLOD::Hide();
 			SetActive(std::nullopt);
 			MergedView::PublishShownCells(false);
 			remote.Release(a_handOver);
@@ -158,7 +158,7 @@ namespace Portal::Manager
 			                     a_candidate->rank + Selection::kSwitchMargin < (door && linkedDoor ? Selection::Rank(a_player->GetPosition(), door, linkedDoor) : FLT_MAX);
 			// A shop closing for the night locks its door.
 			const bool  off = Portal::Doors::PortalOff(portal->sourceDoor) || Portal::Doors::PortalOff(portal->linkedDoor);
-			const bool  locked = door && door->IsLocked() && Portal::DoorUse::GetForce() != Portal::DoorUse::Force::kAllOpen;
+			const bool  locked = door && Portal::Doors::LockedShut(door);
 			const char* end = reach > Selection::ReleaseRadius() ? "player walked away" : better ? "a closer door" : locked ? "door locked" :
 			                  off                                ? "portal switched off for this door" :
 			                                                       nullptr;

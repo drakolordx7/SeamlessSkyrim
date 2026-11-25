@@ -2,14 +2,12 @@
 
 // A remote space's own light scene: a ShadowSceneNode that is also the private scene-graph root the
 // space is attached under. Culling it from the portal camera assigns *its* lights to the space's
-// geometry, and the CS patch reads the one registered in BSShaderManager::State slot 3.
+// geometry, and the CS patch reads the one registered in BSShaderManager::State slot Render::kPortalSceneSlot.
 //
 // Every space kept attached has a scene of its own (interiors share coordinates: two rooms in one
 // scene would light each other), and only the shown one is registered.
 namespace Portal::LightScene
 {
-	inline constexpr std::uint32_t kSlot = 3;
-
 	// A new scene to attach a space under, not registered (not drawn) until Show.
 	[[nodiscard]] RE::NiPointer<RE::ShadowSceneNode> Create();
 

@@ -53,8 +53,7 @@ namespace Core::ImageSpace
 	// The share of the interior's image space: 0 is the outdoors' alone, 1 the interior's.
 	[[nodiscard]] inline float Weight(float a_interiorDepth, float a_inDoorway, bool a_playerInside)
 	{
-		float t = std::clamp((a_interiorDepth - kFrom) / (kTo - kFrom), 0.0f, 1.0f);
-		t = t * t * (3.0f - 2.0f * t);
+		const float t = SmoothStep(std::clamp((a_interiorDepth - kFrom) / (kTo - kFrom), 0.0f, 1.0f));
 		return a_playerInside ? 1.0f - (1.0f - t) * a_inDoorway : t * a_inDoorway;
 	}
 
