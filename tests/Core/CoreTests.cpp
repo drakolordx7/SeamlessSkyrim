@@ -16,6 +16,7 @@
 #include "Core/Pictures/Camera.h"
 #include "Core/Render/DoorwayPlanes.h"
 #include "Core/Selection/Ranking.h"
+#include "GraphTests.h"
 
 namespace
 {
@@ -541,6 +542,7 @@ int main()
 	Run("panel, leaf swing and doorway planes", PanelAndPlanes);
 	Run("blend weights and picture cache rules", Rules);
 	Run("picture camera geometry", PictureCamera);
+	failures += RunGraphTests();
 	std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
 	return failures ? 1 : 0;
 }
