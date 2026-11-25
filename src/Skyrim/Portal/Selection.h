@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Selection/Ranking.h"
 #include "Skyrim/Plugin/Settings.h"
 #include "Skyrim/Portal/Active.h"
 #include "Skyrim/Spaces/RemoteCell.h"
@@ -8,17 +9,10 @@
 // sight ("warm") so that their doorway opens at once when it becomes the nearest.
 namespace Portal::Selection
 {
-	// The other side starts loading this much further out than the door opens (time to load it
-	// while walking up) and is let go kReleaseBeyond further out still (hysteresis, so standing at
-	// the boundary doesn't attach/detach every frame). Both follow the door distance: loading at a
-	// fixed 1200 units, a shop merely walked past was loaded and held while the door walked to
-	// waited.
-	inline constexpr float kLoadAhead = 300.0f;
-	inline constexpr float kReleaseBeyond = 400.0f;
-	// A different door must be this much closer before we switch portals.
-	inline constexpr float kSwitchMargin = 200.0f;
-	// Rooms behind doors this near (at most) are kept loaded.
-	inline constexpr float kWarmDistance = 2000.0f;
+	using Core::Selection::kLoadAhead;
+	using Core::Selection::kReleaseBeyond;
+	using Core::Selection::kSwitchMargin;
+	using Core::Selection::kWarmDistance;
 	inline constexpr int   kMaxShownRooms = Plugin::Settings::Of(Plugin::Settings::Id::kShownRooms).max;
 
 	// The reach of a door ([Portals] iDoorOpenDistance) and the shown-rooms count ([Portals]
@@ -82,14 +76,7 @@ namespace Portal::Selection
 
 	// The interiors behind portal doors within reach of the last scan, best ranked first, each once
 	// (several doors can lead into one inn). Only collected outdoors, while spaces are kept warm.
-	struct WarmTarget
-	{
-		RE::FormID cell;
-		float      distance;
-		float      rank;    // see Rank
-		RE::FormID door;    // the nearest door into it, in the player's space
-		RE::FormID linked;  // its other end, in the cell
-	};
+	using WarmTarget = Core::Selection::WarmTarget;
 	[[nodiscard]] const WarmTarget* TargetOf(RE::FormID a_cell);
 	[[nodiscard]] std::size_t       TargetCount();
 	// Few doors around the player (the last scan): nothing competes for what is loaded, so rooms
@@ -97,16 +84,7 @@ namespace Portal::Selection
 	[[nodiscard]] bool  Sparse();
 	[[nodiscard]] float WarmReach();
 
-	// A cell that failed to attach isn't tried again for a few seconds.
-	struct AttachRetry
-	{
-		void Failed(RE::FormID a_cell);
-		[[nodiscard]] bool Blocks(RE::FormID a_cell) const { return a_cell == cell && cooldown > 0.0f; }
-		void               Tick(float a_delta) { cooldown -= a_delta; }
-
-		RE::FormID cell = 0;
-		float      cooldown = 0.0f;
-	};
+	using AttachRetry = Core::Selection::AttachRetry;
 
 	struct WarmContext
 	{

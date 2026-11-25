@@ -4,6 +4,7 @@
 #include "Skyrim/Diag/Telemetry.h"
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Doors/Settings.h"
+#include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Portal/Gates.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
@@ -22,32 +23,16 @@ namespace Portal::Selection
 		float           farActivate = 0.0f;
 		float           warmReach = kWarmDistance;
 		int             shownRoomsSetting = Plugin::Settings::Of(Plugin::Settings::Id::kShownRooms).def;
-		// Half the switch margin: turning round between two doors equally far changes their order by
-		// twice this, which by itself must not swap what is loaded.
-		constexpr float kHeadingNudge = kSwitchMargin / 2.0f;
-		RE::NiPoint3    heading;
-		RE::NiPoint3    headingFrom;
+		Core::Selection::HeadingTracker headingTracker;
 
-		// A room kept loaded is let go only kWarmMargin further out, so walking along that boundary
-		// doesn't attach and let go of the same room over and over.
-		constexpr float       kWarmMargin = 400.0f;
-		// With few doors around (sparse), rooms are kept from this many times as far: warmReach.
-		constexpr float       kSparseReach = 2.0f;
-		// Up to this many spaces behind doors within reach (or as many as are loaded at once, if more)
-		// count as few.
-		constexpr std::size_t kFewDoors = 3;
-		// One attach at a time, a few times a second at most: each makes a long frame (3-10 ms in
-		// Whiterun's market, more for a room whose 3D has to be loaded).
-		constexpr float       kWarmAttachSeconds = 0.5f;
-		float                 warmAttachTimer = 0.0f;
-		constexpr float       kRetryCooldown = 5.0f;
+		float warmAttachTimer = 0.0f;
 
-		std::vector<WarmTarget> warmTargets;
+		Core::Selection::WarmTargets warmTargets;
 		std::vector<RemoteCell> warm;
 
 		std::optional<Candidate> NearestPortalDoor(RE::PlayerCharacter* a_player)
 		{
-			warmTargets.clear();
+			warmTargets.Clear();
 			struct Found
 			{
 				RE::TESObjectREFR* door;
@@ -62,8 +47,8 @@ namespace Portal::Selection
 			const auto         origin = a_player->GetPosition();
 			const bool         outdoors = !here->IsInteriorCell();
 			const bool         collectWarm = shownRoomsSetting > 1 && outdoors;
-			const float        farReach = outdoors ? kWarmDistance * kSparseReach : kWarmDistance;
-			RE::TES::GetSingleton()->ForEachReferenceInRange(a_player, farReach + kWarmMargin, [&](RE::TESObjectREFR* a_ref) {
+			const float        farReach = Core::Selection::FarReach(outdoors);
+			RE::TES::GetSingleton()->ForEachReferenceInRange(a_player, farReach + Core::Selection::kWarmMargin, [&](RE::TESObjectREFR* a_ref) {
 				auto linked = PortalLink(a_ref, here);
 				if (!linked) {
 					return RE::BSContainer::ForEachResult::kContinue;
@@ -87,47 +72,24 @@ namespace Portal::Selection
 					}
 					return ids.size();
 				};
-				// Between the reach and the scan's margin beyond it, as it was: a door at the edge
-				// doesn't change the reach, and with it what is loaded, back and forth.
-				const auto few = std::max(kFewDoors, static_cast<std::size_t>(outdoors ? shownRoomsSetting : 1));
-				if (spaces(farReach) > few) {
-					sparse = false;
-				} else if (spaces(FLT_MAX) <= few) {
-					sparse = true;
-				}
-				// Outdoors a kept room stands in for loading the shown one early, but only interiors are
-				// kept: a city gate's worldspace was loaded at the near reach, its low-detail stand-in seen
-				// through the open gate until then.
 				const bool worldDoor = std::ranges::any_of(found, [&](const Found& a_door) {
 					return a_door.distance <= farReach && (!a_door.cell || !a_door.cell->IsInteriorCell());
 				});
-				farActivate = sparse && (!outdoors || worldDoor) ? farReach : 0.0f;
-				warmReach = sparse && outdoors ? farReach : kWarmDistance;
+				const auto crowd = Core::Selection::Assess(sparse, outdoors, spaces(farReach), spaces(FLT_MAX), Core::Selection::FewDoors(outdoors, shownRoomsSetting), worldDoor, farReach);
+				sparse = crowd.sparse;
+				farActivate = crowd.farActivate;
+				warmReach = crowd.warmReach;
 			}
 			const Found* best = nullptr;
 			for (const auto& door : found) {
 				if (collectWarm && door.cell && door.cell->IsInteriorCell()) {
-					// A room with two doors: which room is kept goes by the better rank of the two, but
-					// the door it is shown through is the nearer one. Taken by rank as well, the door
-					// changed as the player turned on the spot, to one out of reach, and the room's open
-					// doorway in front of them went shut.
-					const auto room = std::ranges::find(warmTargets, door.cell->GetFormID(), &WarmTarget::cell);
-					if (room == warmTargets.end()) {
-						warmTargets.push_back({ door.cell->GetFormID(), door.distance, door.rank, door.door->GetFormID(), door.linked->GetFormID() });
-					} else {
-						room->rank = std::min(room->rank, door.rank);
-						if (door.distance < room->distance) {
-							room->distance = door.distance;
-							room->door = door.door->GetFormID();
-							room->linked = door.linked->GetFormID();
-						}
-					}
+					warmTargets.Note({ door.cell->GetFormID(), door.distance, door.rank, door.door->GetFormID(), door.linked->GetFormID() });
 				}
 				if (door.reach <= ActivateRadius() && (!best || door.rank < best->rank)) {
 					best = &door;
 				}
 			}
-			std::ranges::sort(warmTargets, {}, &WarmTarget::rank);
+			warmTargets.Sort();
 			if (!best) {
 				return std::nullopt;
 			}
@@ -158,35 +120,10 @@ namespace Portal::Selection
 		};
 		std::optional<ScannedDoor> scanned;
 
-		// The interiors to keep warm: the nearest of warmTargets within a_reach, as many as there is
-		// room for beside the shown space, not that one.
 		std::vector<RE::FormID> WarmWanted(float a_reach)
 		{
-			std::vector<RE::FormID> wanted;
-			const auto              shown = Manager::CurrentPortal();
-			for (const auto& target : warmTargets) {
-				if (std::cmp_greater_equal(wanted.size() + 1, shownRoomsSetting)) {
-					break;
-				}
-				if (target.distance <= a_reach && (!shown || shown->cell->GetFormID() != target.cell)) {
-					wanted.push_back(target.cell);
-				}
-			}
-			return wanted;
-		}
-
-		// How far the nearest door into a_cell was at the last scan (beyond any reach if none was).
-		float WarmDistanceOf(RE::FormID a_cell)
-		{
-			const auto target = std::ranges::find(warmTargets, a_cell, &WarmTarget::cell);
-			return target != warmTargets.end() ? target->distance : FLT_MAX;
-		}
-
-		// The same by Rank: which of two rooms is kept.
-		float WarmRankOf(RE::FormID a_cell)
-		{
-			const auto target = std::ranges::find(warmTargets, a_cell, &WarmTarget::cell);
-			return target != warmTargets.end() ? target->rank : FLT_MAX;
+			const auto shown = Manager::CurrentPortal();
+			return warmTargets.Wanted(a_reach, shown ? shown->cell->GetFormID() : 0, shownRoomsSetting);
 		}
 
 		std::optional<DoorPair> NearestDoorPair(float a_radius)
@@ -242,43 +179,32 @@ namespace Portal::Selection
 
 	float NearRadius()
 	{
-		return doorOpenRadius + kLoadAhead;
+		return Core::Selection::NearRadius(doorOpenRadius);
 	}
 
 	float ActivateRadius()
 	{
-		return std::max(NearRadius(), farActivate);
+		return Core::Selection::ActivateRadius(doorOpenRadius, farActivate);
 	}
 
 	float ReleaseRadius()
 	{
-		return ActivateRadius() + kReleaseBeyond;
+		return Core::Selection::ReleaseRadius(doorOpenRadius, farActivate);
 	}
 
 	void TrackHeading(const RE::NiPoint3& a_position)
 	{
-		auto step = a_position - headingFrom;
-		step.z = 0.0f;
-		const float length = step.Length();
-		// Over a few frames' worth of walking: a frame's step is too short to give a direction.
-		if (length < 32.0f) {
-			return;
-		}
-		headingFrom = a_position;
-		// A jump is a teleport or a crossing into another space's coordinates, no direction.
-		heading = length > 500.0f ? RE::NiPoint3() : step / length;
+		headingTracker.Track(ToCore(a_position));
 	}
 
 	float Reach(const RE::NiPoint3& a_origin, RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
 	{
-		const float distance = a_origin.GetDistance(a_door->GetPosition());
-		return Portal::Doors::Outdoors(a_door) && Portal::Doors::Outdoors(a_linked) ? distance * Gates::kReachWeight : distance;
+		return Core::Selection::Reach(a_origin.GetDistance(a_door->GetPosition()), Portal::Doors::Outdoors(a_door) && Portal::Doors::Outdoors(a_linked));
 	}
 
 	float Rank(const RE::NiPoint3& a_origin, RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
 	{
-		const auto to = a_door->GetPosition() - a_origin;
-		return Reach(a_origin, a_door, a_linked) - kHeadingNudge * heading.Dot(to) / std::max(to.Length(), 1.0f);
+		return Core::Selection::Rank(Reach(a_origin, a_door, a_linked), headingTracker.Heading(), ToCore(a_door->GetPosition() - a_origin));
 	}
 
 	// Portal doors are load doors into another space: outside -> interior, interior -> outside or
@@ -364,13 +290,12 @@ namespace Portal::Selection
 
 	const WarmTarget* TargetOf(RE::FormID a_cell)
 	{
-		const auto target = std::ranges::find(warmTargets, a_cell, &WarmTarget::cell);
-		return target != warmTargets.end() ? &*target : nullptr;
+		return warmTargets.Find(a_cell);
 	}
 
 	std::size_t TargetCount()
 	{
-		return warmTargets.size();
+		return warmTargets.Count();
 	}
 
 	bool Sparse()
@@ -383,12 +308,6 @@ namespace Portal::Selection
 		return warmReach;
 	}
 
-	void AttachRetry::Failed(RE::FormID a_cell)
-	{
-		cell = a_cell;
-		cooldown = kRetryCooldown;
-	}
-
 	void UpdateWarm(RE::TESObjectCELL* a_here, float a_delta, WarmContext a_context)
 	{
 		if (shownRoomsSetting <= 1 || a_here->IsInteriorCell()) {
@@ -399,13 +318,13 @@ namespace Portal::Selection
 		}
 		// Fewer kept than before (changed in the menu): the farthest go first.
 		while (std::cmp_greater_equal(warm.size(), shownRoomsSetting)) {
-			LetGoKept(std::ranges::max_element(warm, {}, [](const Portal::RemoteCell& a_space) { return WarmRankOf(a_space.Cell()->GetFormID()); }),
+			LetGoKept(std::ranges::max_element(warm, {}, [](const Portal::RemoteCell& a_space) { return warmTargets.RankOf(a_space.Cell()->GetFormID()); }),
 				"fewer kept");
 		}
 		for (auto it = warm.begin(); it != warm.end();) {
 			if (!it->Healthy()) {
 				it = LetGoKept(it, "no longer attached under its scene");
-			} else if (WarmDistanceOf(it->Cell()->GetFormID()) > warmReach + kWarmMargin) {
+			} else if (warmTargets.DistanceOf(it->Cell()->GetFormID()) > warmReach + Core::Selection::kWarmMargin) {
 				it = LetGoKept(it, "out of reach");
 			} else {
 				// Merged beside the shown one and seen, it is drawn; any other kept room is out of sight.
@@ -434,13 +353,13 @@ namespace Portal::Selection
 		// Running along a street the order changes all the time; let go for every change, rooms
 		// were attached and let go again a fifth of a second later.
 		if (std::cmp_greater_equal(warm.size() + 1, shownRoomsSetting)) {
-			const auto farthest = std::ranges::max_element(warm, {}, [](const Portal::RemoteCell& a_space) { return WarmRankOf(a_space.Cell()->GetFormID()); });
-			if (farthest == warm.end() || WarmRankOf(*next) + kSwitchMargin >= WarmRankOf(farthest->Cell()->GetFormID())) {
+			const auto farthest = std::ranges::max_element(warm, {}, [](const Portal::RemoteCell& a_space) { return warmTargets.RankOf(a_space.Cell()->GetFormID()); });
+			if (farthest == warm.end() || !Core::Selection::MakesWayFor(warmTargets.RankOf(*next), warmTargets.RankOf(farthest->Cell()->GetFormID()))) {
 				return;
 			}
 			LetGoKept(farthest, "a nearer door");
 		}
-		warmAttachTimer = kWarmAttachSeconds;
+		warmAttachTimer = Core::Selection::kWarmAttachSeconds;
 		const auto started = std::chrono::steady_clock::now();
 		RemoteCell space;
 		bool       attachedKept = false;

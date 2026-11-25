@@ -1,6 +1,8 @@
 #include "Skyrim/Portal/ImageSpaceBlend.h"
 
+#include "Core/ImageSpace/Blend.h"
 #include "Skyrim/Doors/Pair.h"
+#include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Portal/Crossing.h"
 
 namespace Portal::ImageSpaceBlend
@@ -29,8 +31,20 @@ namespace Portal::ImageSpaceBlend
 				return nullptr;
 			}
 			using Time = RE::TESWeather::ColorTime;
-			const float hour = sky->currentGameHour;
-			const auto  time = hour < 5.0f || hour >= 21.0f ? Time::kNight : hour < 8.0f ? Time::kSunrise : hour < 17.0f ? Time::kDay : Time::kSunset;
+			using Core::ImageSpace::WeatherTime;
+			const auto time = [&] {
+				switch (Core::ImageSpace::WeatherTimeOf(sky->currentGameHour)) {
+				case WeatherTime::kNight:
+					return Time::kNight;
+				case WeatherTime::kSunrise:
+					return Time::kSunrise;
+				case WeatherTime::kDay:
+					return Time::kDay;
+				case WeatherTime::kSunset:
+					return Time::kSunset;
+				}
+				std::unreachable();
+			}();
 			auto*       imageSpace = weather->imageSpaces[time];
 			return imageSpace ? &imageSpace->data : nullptr;
 		}
@@ -66,7 +80,7 @@ namespace Portal::ImageSpaceBlend
 			// made of them darkened the street to near black for a second after it.
 			static int framesOutdoors = 0;
 			framesOutdoors = inside ? 0 : framesOutdoors + 1;
-			if (!ours && runtime.currentBaseData && (inside || framesOutdoors > 30)) {
+			if (!ours && runtime.currentBaseData && (inside || framesOutdoors > Core::ImageSpace::kOutdoorsSettledFrames)) {
 				if (inside) {
 					toneIndoors = *runtime.currentBaseData;
 					toneIndoorsCell = a_here;
@@ -86,17 +100,10 @@ namespace Portal::ImageSpaceBlend
 			}
 			const auto* indoors = inside ? (toneIndoorsCell == a_here ? &toneIndoors : CellImageSpace(a_here)) : CellImageSpace(a_behindDoor);
 			const auto* outdoorsData = Outdoors();
-			constexpr float kFrom = -150.0f, kTo = 120.0f;
-			float           t = std::clamp((a_interiorDepth - kFrom) / (kTo - kFrom), 0.0f, 1.0f);
-			t = t * t * (3.0f - 2.0f * t);
-			t = inside ? 1.0f - (1.0f - t) * a_inDoorway : t * a_inDoorway;
-			// The eye adaptation walked out with was the room's: the street came in far too bright and
-			// took seconds to settle. A load door starts it afresh behind its loading screen; here it is
-			// let catch up with the street at once in the first frames outdoors.
-			constexpr int kAdaptSnapFrames = 15;
-			const bool    snapAdapt = !inside && framesOutdoors <= kAdaptSnapFrames;
-			constexpr float kSnapSpeed = 1000.0f;  // times the frame time: past 1, the shader's step is the whole way
-			if (!indoors || !outdoorsData || (inside ? t >= 1.0f : t <= 0.0f)) {
+			const float t = Core::ImageSpace::Weight(a_interiorDepth, a_inDoorway, inside);
+			const bool  snapAdapt = !inside && framesOutdoors <= Core::ImageSpace::kAdaptSnapFrames;
+			constexpr float kSnapSpeed = Core::ImageSpace::kSnapSpeed;
+			if (!indoors || !outdoorsData || Core::ImageSpace::Settled(t, inside)) {
 				if (snapAdapt && (outdoorsData || ours || runtime.currentBaseData)) {
 					if (outdoorsData) {
 						toneBlend = *outdoorsData;
@@ -110,22 +117,11 @@ namespace Portal::ImageSpaceBlend
 				Clear();
 				return;
 			}
-			const auto mix = [t](float a_out, float a_in) { return a_out + (a_in - a_out) * t; };
 			toneBlend = inside ? *indoors : *outdoorsData;  // depth of field and the like: the current space's
-			const float* outdoors = reinterpret_cast<const float*>(outdoorsData);
-			const float* in = reinterpret_cast<const float*>(indoors);
-			float*       blend = reinterpret_cast<float*>(&toneBlend);
 			// HDR, cinematic and tint are plain floats (0x40 bytes).
-			for (std::size_t i = 0; i < offsetof(RE::ImageSpaceBaseData, depthOfField) / sizeof(float); ++i) {
-				// Eye adaptation's speed and strength stay the current space's own. On the first walk outdoors
-				// of a session the engine starts its adaptation afresh (the white frame FrameHooks' flash
-				// guard replaces), and with these blended it then settled near black for a second.
-				const bool adapt = i == offsetof(RE::ImageSpaceBaseData::HDR, eyeAdaptSpeed) / sizeof(float) || i == offsetof(RE::ImageSpaceBaseData::HDR, eyeAdaptStrength) / sizeof(float);
-				if (adapt) {
-					continue;
-				}
-				blend[i] = mix(outdoors[i], in[i]);
-			}
+			constexpr std::size_t kFloats = offsetof(RE::ImageSpaceBaseData, depthOfField) / sizeof(float);
+			constexpr std::size_t keep[] = { offsetof(RE::ImageSpaceBaseData::HDR, eyeAdaptSpeed) / sizeof(float), offsetof(RE::ImageSpaceBaseData::HDR, eyeAdaptStrength) / sizeof(float) };
+			Core::ImageSpace::Mix({ reinterpret_cast<float*>(&toneBlend), kFloats }, { reinterpret_cast<const float*>(outdoorsData), kFloats }, { reinterpret_cast<const float*>(indoors), kFloats }, t, keep);
 			if (snapAdapt) {
 				toneBlend.hdr.eyeAdaptSpeed = kSnapSpeed;
 			}
@@ -138,10 +134,9 @@ namespace Portal::ImageSpaceBlend
 		// The hour only counts indoors: outdoors it is taken every frame, except while our own blend
 		// is on (UpdateTone), and standing at a doorway for half an hour mustn't swap it for the
 		// weather's.
-		constexpr float kHoldsForHours = 0.5f;
-		const bool      indoors = RE::PlayerCharacter::GetSingleton()->GetParentCell()->IsInteriorCell();
-		const bool      holds = toneOutdoorsWeather && toneOutdoorsWeather == RE::Sky::GetSingleton()->currentWeather &&
-		                        (!indoors || std::abs(RE::Calendar::GetSingleton()->GetHoursPassed() - toneOutdoorsHour) < kHoldsForHours);
+		const bool indoors = RE::PlayerCharacter::GetSingleton()->GetParentCell()->IsInteriorCell();
+		const bool holds = toneOutdoorsWeather && Core::ImageSpace::OutdoorsHolds(toneOutdoorsWeather == RE::Sky::GetSingleton()->currentWeather, indoors,
+		                                                                       RE::Calendar::GetSingleton()->GetHoursPassed() - toneOutdoorsHour);
 		return holds ? &toneOutdoors : WeatherImageSpace();
 	}
 
@@ -151,18 +146,11 @@ namespace Portal::ImageSpaceBlend
 		auto* here = player ? player->GetParentCell() : nullptr;
 		bool  toned = false;
 		if (const auto mapping = a_ready && here ? Doors::TryCompute(*a_ready) : std::nullopt) {
-			const auto offset = Crossing::CameraPosition() - mapping->sourceCenter;
-			const float depth = offset.x * mapping->inward.x + offset.y * mapping->inward.y;
-			// Only in front of the doorway: by depth alone, anyone level with the door's plane
-			// (walking along the street past an open door, or teleported along it) had the whole
-			// outdoors drawn with the interior's image space: a white flash.
-			const float side = std::abs(offset.x * mapping->inward.y - offset.y * mapping->inward.x);
-			const float above = std::abs(offset.z) - mapping->halfHeight;
-			const auto  fade = [](float a_beyond) { return 1.0f - std::clamp(a_beyond / 100.0f, 0.0f, 1.0f); };
-			const float inDoorway = fade(side - mapping->halfWidth) * fade(above);
-			// The source door's "inward" points away from the player's space: into the interior
-			// from outside, out of it from inside.
-			UpdateTone(here, a_ready->cell, here->IsInteriorCell() ? -depth : depth, inDoorway);
+			const auto doorway = Core::Crossing::Doorway{ ToCore(mapping->sourceCenter), ToCore(mapping->inward), mapping->halfWidth, mapping->halfDepth, mapping->halfHeight };
+			const auto camera = ToCore(Crossing::CameraPosition());
+			const bool inside = here->IsInteriorCell();
+			const float inDoorway = Core::ImageSpace::InDoorway(doorway, camera);
+			UpdateTone(here, a_ready->cell, Core::ImageSpace::InteriorDepth(doorway, camera, inside), inDoorway);
 			toned = true;
 		}
 		if (!toned) {

@@ -9,8 +9,6 @@ namespace Pictures::Cache
 {
 	namespace
 	{
-		constexpr std::uint32_t kMagic = 0x57445353;  // "SSDW"
-
 		std::unordered_map<std::string, Picture> pictures;
 		std::vector<Readback>                    readbacks;
 
@@ -23,12 +21,10 @@ namespace Pictures::Cache
 			auto* form = RE::TESForm::LookupByID(a_door);
 			auto* file = form ? form->GetFile(0) : nullptr;
 			if (!file) {
-				return std::format("{:08X}", a_door);
+				return Core::Pictures::DoorKeyWithoutPlugin(a_door);
 			}
-			return std::format("{}|{:06X}", file->GetFilename(), file->IsLight() ? (a_door & 0xFFF) : (a_door & 0xFFFFFF));
+			return Core::Pictures::DoorKey(file->GetFilename(), a_door, file->IsLight());
 		}
-
-		constexpr std::array<const char*, 4> kParts{ "night", "dawn", "day", "dusk" };
 
 		std::filesystem::path Folder()
 		{
@@ -37,38 +33,26 @@ namespace Pictures::Cache
 
 		std::filesystem::path FileOf(const std::string& a_key)
 		{
-			std::string name = a_key;
-			for (auto& c : name) {
-				if (c == '|' || c == '#' || c == '\\' || c == '/' || c == ':') {
-					c = '_';
-				}
-			}
-			return Folder() / Paths::Widen(name + ".ssdw");
+			return Folder() / Paths::Widen(Core::Pictures::FileStem(a_key) + ".ssdw");
 		}
-
-		// Below the darkest a texel is counted as: black (an unlit corner) would pull the mean to 0.
-		constexpr float kDarkest = 1e-3f;
 
 		// RoomBrightness of a picture's texels (RGBA16F, alpha how far behind the doorway).
 		float Brightness(const void* a_texels, UINT a_width, UINT a_height, std::size_t a_rowPitch, float a_lightScale)
 		{
 			using DirectX::PackedVector::XMConvertHalfToFloat;
-			double      sum = 0.0;
-			std::size_t count = 0;
+			Core::Pictures::BrightnessMean mean;
 			for (UINT y = 0; y < a_height; ++y) {
 				const auto* row = reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(a_texels) + y * a_rowPitch);
 				for (UINT x = 0; x < a_width; ++x) {
 					const auto* texel = row + x * 4;
 					// Nothing there (no wall of the room's beyond the capture camera's edge): not part of it.
-					if (XMConvertHalfToFloat(texel[3]) >= 20000.0f) {
+					if (XMConvertHalfToFloat(texel[3]) >= Core::Pictures::kNothingThere) {
 						continue;
 					}
-					const float luminance = 0.2126f * XMConvertHalfToFloat(texel[0]) + 0.7152f * XMConvertHalfToFloat(texel[1]) + 0.0722f * XMConvertHalfToFloat(texel[2]);
-					sum += std::log(std::max(luminance, kDarkest));
-					++count;
+					mean.Add(Core::Pictures::Luminance(XMConvertHalfToFloat(texel[0]), XMConvertHalfToFloat(texel[1]), XMConvertHalfToFloat(texel[2])));
 				}
 			}
-			return count ? static_cast<float>(std::exp(sum / count)) / a_lightScale : 0.0f;
+			return mean.Result(a_lightScale);
 		}
 
 		// Pictures of doors not looked at for a while are let go; they are on disk for the next time.
@@ -76,18 +60,16 @@ namespace Pictures::Cache
 		// at the largest size took gigabytes of video memory.
 		void ForgetUnused()
 		{
-			constexpr auto kKeptUnused = std::chrono::seconds(60);
-			constexpr auto kLookedAtEvery = std::chrono::seconds(5);
 			static std::chrono::steady_clock::time_point lookedAt;
 			const auto                                   now = std::chrono::steady_clock::now();
-			if (now - lookedAt < kLookedAtEvery) {
+			if (now - lookedAt < Core::Pictures::kLookedAtEvery) {
 				return;
 			}
 			lookedAt = now;
 			std::erase_if(pictures, [&](auto& a_entry) {
 				auto& picture = a_entry.second;
 				// One just taken is still being read back for its file.
-				if (now - picture.used < kKeptUnused || std::ranges::contains(readbacks, a_entry.first, &Readback::key)) {
+				if (!Core::Pictures::ShouldForget(now - picture.used, std::ranges::contains(readbacks, a_entry.first, &Readback::key))) {
 					return false;
 				}
 				ReleaseTexture(picture);
@@ -116,13 +98,12 @@ namespace Pictures::Cache
 	int PartOfDay()
 	{
 		auto*       calendar = RE::Calendar::GetSingleton();
-		const float hour = calendar ? calendar->GetHour() : 12.0f;
-		return hour < 5.0f || hour >= 21.0f ? 0 : hour < 8.0f ? 1 : hour < 18.0f ? 2 : 3;
+		return Core::Pictures::PartOfDay(calendar ? calendar->GetHour() : 12.0f);
 	}
 
 	std::string KeyOf(RE::FormID a_door, bool a_outdoors, int a_part)
 	{
-		return DoorKey(a_door) + "#" + (a_outdoors ? kParts[a_part] : "inside");
+		return Core::Pictures::KeyOf(DoorKey(a_door), a_outdoors, a_part);
 	}
 
 	Picture& Entry(const std::string& a_key)
@@ -165,7 +146,7 @@ namespace Pictures::Cache
 		ForgetAllIfDeleted();
 		ForgetUnused();
 		const int          part = PartOfDay();
-		std::array<int, 4> order{ part, (part + 1) % 4, (part + 3) % 4, (part + 2) % 4 };
+		const auto order = Core::Pictures::SearchOrder(part);
 		for (int i = 0; i < (a_outdoors ? 4 : 1); ++i) {
 			const auto key = KeyOf(a_door, a_outdoors, order[i]);
 			auto&      picture = pictures[key];
@@ -178,11 +159,10 @@ namespace Pictures::Cache
 				// No larger than the largest ever written, the capture camera's at the largest size: a
 				// damaged file's header asked for gigabytes of texels before its read could fail.
 				const auto [widest, highest] = Camera::SizeFor(Camera::kRoomCamera.extent, Camera::kMaxHeight, Camera::kWidest);  // the room's is the wider
-				if (file.read(reinterpret_cast<char*>(header), sizeof(header)) && header[0] == kMagic && header[1] >= 1 && header[1] <= kVersion && header[2] >= 1 &&
-					header[2] <= widest && header[3] >= 1 && header[3] <= highest) {
+				if (file.read(reinterpret_cast<char*>(header), sizeof(header)) && Core::Pictures::HeaderValid(header, widest, highest)) {
 					float          place[4]{};
 					Camera::Extent extent = Camera::kDoorwayOnly;
-					const bool     depth = header[1] >= 2;
+					const bool     depth = Core::Pictures::HasDepth(header[1]);
 					if (!depth || (file.read(reinterpret_cast<char*>(place), sizeof(place)) && file.read(reinterpret_cast<char*>(extent.data()), sizeof(extent)))) {
 						std::vector<std::uint16_t> texels(std::size_t{ header[2] } * header[3] * 4);
 						if (file.read(reinterpret_cast<char*>(texels.data()), texels.size() * sizeof(std::uint16_t)) && MakeView(a_device, picture, texels.data(), header[2], header[3])) {
@@ -235,7 +215,7 @@ namespace Pictures::Cache
 				std::error_code error;
 				std::filesystem::create_directories(path.parent_path(), error);
 				std::ofstream       file(path, std::ios::binary | std::ios::trunc);
-				const std::uint32_t header[4]{ kMagic, kVersion, it->width, it->height };
+				const std::uint32_t header[4]{ Core::Pictures::kMagic, kVersion, it->width, it->height };
 				const float         place[4]{ it->takenFrom[0], it->takenFrom[1], it->takenFrom[2], it->lightScale };
 				file.write(reinterpret_cast<const char*>(header), sizeof(header));
 				file.write(reinterpret_cast<const char*>(place), sizeof(place));
@@ -267,15 +247,13 @@ namespace Pictures::Cache
 		}
 		// A room merged beside the shown one may never have had its picture taken: as bright as
 		// the rooms that have, rather than as from inside.
-		double sum = 0.0;
-		int    count = 0;
+		std::vector<float> known;
 		for (const auto& [key, other] : pictures) {
 			if (other.brightness > 0.0f) {
-				sum += std::log(other.brightness);
-				++count;
+				known.push_back(other.brightness);
 			}
 		}
-		return count ? std::optional(static_cast<float>(std::exp(sum / count))) : std::nullopt;
+		return known.empty() ? std::nullopt : std::optional(Core::Pictures::GeometricMean(known));
 	}
 
 	int DeleteAll()

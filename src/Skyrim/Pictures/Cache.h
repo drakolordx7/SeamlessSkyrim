@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Pictures/CacheRules.h"
 #include "Skyrim/Pictures/Camera.h"
 
 #include <d3d11.h>
@@ -8,14 +9,8 @@
 // versioned), and what is waiting to be written there.
 namespace Pictures::Cache
 {
-	// 2: alpha is how far behind the doorway each texel's surface is, and the header is followed by
-	// where the picture was taken from and the part of the door's plane it covers. A version 1
-	// picture is drawn flat until it is taken again. 3: as 2, taken without the room's people. 4:
-	// without the room's front wall (a capture camera's of an older version is taken again). 5: the
-	// sky left out of a texel's average where anything else is in it; a gate's from further back.
-	inline constexpr std::uint32_t kVersion = 5;
-	// A picture is taken again at most this often (the room changes; the light outdoors does).
-	inline constexpr auto kRetake = std::chrono::seconds(20);
+	inline constexpr std::uint32_t kVersion = Core::Pictures::kVersion;
+	inline constexpr auto          kRetake = Core::Pictures::kRetake;
 
 	struct Picture
 	{

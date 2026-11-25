@@ -1,6 +1,9 @@
 #include "Skyrim/Portal/Crossing.h"
 
+#include "Core/Crossing/Approach.h"
+
 #include "Skyrim/Doors/Geometry.h"
+#include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Doors/Hold.h"
 #include "Skyrim/Portal/CameraLimit.h"
 #include "Skyrim/Portal/Gates.h"
@@ -15,10 +18,10 @@ namespace Portal::Crossing
 {
 	namespace
 	{
-		float crossCooldown = 0.0f;
-		// After handing a cell to the engine's door transition, don't grab it back while the
-		// transition is still pending (the next frame re-attached it right before the engine took it).
-		float attachHoldoff = 0.0f;
+		// The next frame re-attached a cell right before the engine's door transition took it: the
+		// holdoff keeps it from being grabbed back while the transition is pending.
+		Core::Crossing::Timers timers;
+		Core::Crossing::ApproachState approach;
 
 		// Merged, the player walks into the doorway until the camera has followed them through it;
 		// but behind an exterior door is the building's own collision (its volume is solid). Whatever
@@ -133,49 +136,47 @@ namespace Portal::Crossing
 			return worldCamera ? worldCamera->GetRuntimeData2().viewFrustum.fNear : 15.0f;
 		}
 
-		float PictureDepth(const Doors::Mapping& a_mapping, bool a_gate)
+		Core::Crossing::Doorway DoorwayOf(const Doors::Mapping& a_mapping)
 		{
-			return a_gate ? -(a_mapping.halfDepth + 2.0f) : a_mapping.halfDepth + 2.0f;
+			return { ToCore(a_mapping.sourceCenter), ToCore(a_mapping.inward), a_mapping.halfWidth, a_mapping.halfDepth, a_mapping.halfHeight };
 		}
 	}
 
 	void Tick(float a_delta)
 	{
-		crossCooldown -= a_delta;
-		attachHoldoff -= a_delta;
+		timers.Tick(a_delta);
 	}
 
 	bool Ready()
 	{
-		return crossCooldown <= 0.0f;
+		return timers.Ready();
 	}
 
 	bool AttachHeld()
 	{
-		return attachHoldoff > 0.0f;
+		return timers.AttachHeld();
 	}
 
 	void HoldAttach(float a_seconds)
 	{
-		attachHoldoff = std::max(attachHoldoff, a_seconds);
+		timers.HoldAttach(a_seconds);
 	}
 
 	void EndHoldoff(float a_seconds)
 	{
-		attachHoldoff = a_seconds;
+		timers.EndHoldoff(a_seconds);
 		Selection::ScanNow();
 	}
 
 	void Request(const Travel::CrossingRequest& a_request)
 	{
-		crossCooldown = 1.0f;
-		attachHoldoff = 3.0f;
+		timers.CrossingRequested();
 		Travel::Request(a_request);
 	}
 
 	void ThroughDoor(RE::TESObjectREFR* a_door)
 	{
-		crossCooldown = 1.0f;
+		timers.EngineTripBegins();
 		BeforeEngineTrip(a_door);
 		Travel::ThroughDoor(a_door);
 	}
@@ -186,7 +187,7 @@ namespace Portal::Crossing
 	{
 		const auto portal = Manager::CurrentPortal();
 		if (portal && a_door->GetFormID() == portal->sourceDoor) {
-			attachHoldoff = 3.0f;
+			timers.EngineTripThroughPortal();
 			Portal::Manager::ReleaseAll("player took the portal door the engine's way");
 		}
 		// A door into a space kept out of sight leads the engine into a cell attached under our
@@ -216,8 +217,7 @@ namespace Portal::Crossing
 
 	bool FeetAtDoorway(float a_feetZ, const Portal::Doors::Mapping& a_mapping)
 	{
-		const float bottom = a_mapping.sourceCenter.z - a_mapping.halfHeight;
-		return a_feetZ >= bottom - 64.0f && a_feetZ <= bottom + a_mapping.halfHeight;
+		return Core::Crossing::FeetAtDoorway(a_feetZ, DoorwayOf(a_mapping));
 	}
 
 	// When to carry the player through, and what the camera may do meanwhile:
@@ -231,15 +231,7 @@ namespace Portal::Crossing
 	//   so it is pulled in to reach the doorway together with the player (Portal::CameraLimit).
 	std::optional<float> Approach(RE::PlayerCharacter* a_player, const Active& a_portal, float a_delta)
 	{
-		// In portal mode the camera must still be in front of the portal quad (2 units in front of
-		// the panel) when the crossing is carried out.
-		constexpr float kCrossLead = 4.0f;
-		constexpr float kPullInDistance = 400.0f;
-		// Merged, the player behind the doorway is on the exterior's physics (no interior floor or
-		// furniture there yet), so not for long, even with the camera turned to look back out.
-		constexpr float kMergedMaxDepth = 250.0f;
-		// The street merged into the interior: crossing out is as without merging; the doors are the merge's.
-		const bool      merged = Manager::Space().Merged() && !StreetMerge::Merged();
+		const bool merged = Manager::Space().Merged() && !StreetMerge::Merged();
 		if (!merged && !StreetMerge::Merged() && !PortalDoor::Holds(a_portal.sourceDoor)) {
 			return std::nullopt;
 		}
@@ -256,101 +248,43 @@ namespace Portal::Crossing
 			return std::nullopt;
 		}
 		const auto& mapping = *found;
-		const auto  DepthOf = [&](const RE::NiPoint3& a_point) {
-			const auto offset = a_point - mapping.sourceCenter;
-			return offset.x * mapping.inward.x + offset.y * mapping.inward.y;  // < 0: in front
-		};
-		const auto  offset = a_player->GetPosition() - mapping.sourceCenter;
-		const float depth = DepthOf(a_player->GetPosition());
-		const float side = std::abs(offset.x * mapping.inward.y - offset.y * mapping.inward.x);
-		// Behind the door plane counts too: someone who got past it while a crossing wasn't
-		// possible yet (the cooldown) is standing in the void behind the doorway and must still be
-		// carried through.
-		if (depth < -kPullInDistance || depth > kMergedMaxDepth + 50.0f || side > mapping.halfWidth + 150.0f) {
-			// Walked off the passage sideways: its building's collision back on under them.
-			if (!passage.empty()) {
-				ClosePassage();
-			}
-			return std::nullopt;
-		}
-		// Only at the doorway's own height. Walking over the flat roof of Whiterun's guard house by
-		// the gate was within its door's width and depth, and carried the player inside. (In the
-		// passage the player is held at the height they entered it with, HoldPassageHeight.)
-		if (!FeetAtDoorway(a_player->GetPositionZ(), mapping)) {
-			// A passage through the building (OpenPassage) must not stay open, its collision off,
-			// under someone who isn't at the doorway.
-			if (!passage.empty()) {
-				ClosePassage();
-			}
-			return std::nullopt;
-		}
-		const float cameraDepth = DepthOf(CameraPosition());
-		const bool  pullIn = !merged && !MergedView::Mergeable(a_portal.cell, a_player->GetParentCell());
-		// Only right at the threshold: the building's collision is also the porch and the steps in
-		// front of the door, and with it gone earlier the player sank into the ground on the way up.
-		// Whatever the mode: a door can stand against a wall that closes the void behind it
-		// (Riften's jail; the Hall of the Elements' door up to the Arcanaeum, 4 units behind the
-		// door's face, with nothing merged), and the player stopped short of the crossing.
-		// Only on the way in: arrived through the door at its marker 9 units in front of it, the
-		// player was held 10 units above the floor they were set down over (HoldPassageHeight).
-		// Facing in and moving, not getting nearer: someone already stopped by the wall gets
-		// no nearer.
-		const float yaw = a_player->GetAngleZ();
-		const bool  walkingIn = a_player->IsMoving() && std::sin(yaw) * mapping.inward.x + std::cos(yaw) * mapping.inward.y > 0.5f;
-		if (depth > -25.0f && side <= mapping.halfWidth + 20.0f && (walkingIn || !passage.empty())) {
-			// Seconds, not frames: counted per frame it looked again twice as often at 120 fps.
-			if (passage.empty() || (passageCheck -= a_delta) <= 0.0f) {
-				passageCheck = 1.0f / 6.0f;  // what the per-frame count came to at 60 fps
-				OpenPassage(a_player, mapping, mapping.halfHeight);
-			}
-		} else if (!passage.empty() && depth < -45.0f) {
+		auto*       playerCamera = RE::PlayerCamera::GetSingleton();
+		const auto  position = a_player->GetPosition();
+		const auto  cameraPosition = CameraPosition();
+		const auto  yaw = a_player->GetAngleZ();
+		const bool  firstPerson = !merged && playerCamera && playerCamera->IsInFirstPerson();
+		const auto  decision = approach.Decide({
+			.door = a_portal.sourceDoor,
+			.doorway = DoorwayOf(mapping),
+			.player = ToCore(position),
+			.playerYaw = yaw,
+			.playerMoving = a_player->IsMoving(),
+			.camera = ToCore(cameraPosition),
+			.delta = a_delta,
+			.merged = merged,
+			.pullIn = !merged && !MergedView::Mergeable(a_portal.cell, a_player->GetParentCell()),
+			.firstPerson = firstPerson,
+			.gate = firstPerson && Gates::IsGate(a_player->GetParentCell(), a_portal.cell),
+			.nearPlane = firstPerson ? NearPlane() : 0.0f,
+			.passageOpen = !passage.empty(),
+		});
+		if (decision.closePassage && !passage.empty()) {
 			ClosePassage();
+		}
+		if (!decision.active) {
+			return std::nullopt;
+		}
+		if (decision.openPassage) {
+			OpenPassage(a_player, mapping, mapping.halfHeight);
 		}
 		if (!passage.empty()) {
 			HoldPassageHeight(a_player, true);
 		}
-		const bool  inDoorway = side <= mapping.halfWidth + 20.0f;
-		// Merged: behind the door plane the player walks on the exterior's ground inside the
-		// building's shell (it sinks or rises there), so only a short way; the camera is eased in
-		// on the last steps so that it is through the doorway by then, never closer than
-		// kMergedCameraMin (the player stays in the picture).
-		constexpr float kMergedCrossDepth = 60.0f;
-		constexpr float kMergedCameraMin = 55.0f;
-		// The portal quad lies on the door's face, half its thickness in front of the centre the
-		// depth is measured from: a thick door (a city gate) is crossed that much earlier, or the
-		// camera would be through the quad, looking at the gate's planks, before the player is.
-		const float     lead = kCrossLead + mapping.halfDepth;
-		// A gate's arrival marker can be within that distance of it: the player, just arrived and
-		// standing there, was carried straight back, every two seconds. Only someone walking
-		// towards the doorway is carried through.
-		static RE::FormID lastDoor = 0;
-		static float      lastDepth = 0.0f;
-		const bool        approaching = lastDoor == a_portal.sourceDoor && depth > lastDepth + 0.05f;
-		lastDoor = a_portal.sourceDoor;
-		lastDepth = depth;
-		// In first person nothing holds the camera back from the doorway (the stop at its plane,
-		// CameraLimit, is the third-person camera's), and it is at the head, a little ahead of the
-		// body and bobbing with each step: it got to the doorway's picture before the player did,
-		// and from beyond it the room's own view showed the door from its far side, flashing with
-		// every step close to the door. The player is carried through as soon as the camera's near
-		// plane would reach the picture (behind the panel for a swinging door, in front for a gate).
-		bool cameraAtPicture = false;
-		if (auto* playerCamera = RE::PlayerCamera::GetSingleton(); !merged && playerCamera && playerCamera->IsInFirstPerson()) {
-			const float pictureDepth = PictureDepth(mapping, Gates::IsGate(a_player->GetParentCell(), a_portal.cell));
-			const auto  cameraOffset = CameraPosition() - mapping.sourceCenter;
-			const float cameraSide = std::abs(cameraOffset.x * mapping.inward.y - cameraOffset.y * mapping.inward.x);
-			cameraAtPicture = cameraDepth + NearPlane() + 2.0f >= pictureDepth && cameraSide <= mapping.halfWidth + 20.0f && inDoorway && approaching;
+		if (Ready() && decision.cross) {
+			logger::info("portal: crossing at depth {:.1f}, side {:.1f}, camera depth {:.1f}{}", decision.depth, decision.side, decision.cameraDepth, merged ? " (merged)" : "");
+			Request({ .portal = a_portal, .limitCamera = decision.limitCamera, .cameraFloor = decision.cameraFloor });
 		}
-		const bool      cross = merged ? (depth >= 15.0f && cameraDepth >= 2.0f) || depth >= kMergedCrossDepth :
-		                                 (depth >= -lead && inDoorway && (approaching || depth >= 0.0f)) || cameraAtPicture;
-		if (Ready() && cross) {
-			logger::info("portal: crossing at depth {:.1f}, side {:.1f}, camera depth {:.1f}{}", depth, side, cameraDepth, merged ? " (merged)" : "");
-			Request({ .portal = a_portal, .limitCamera = pullIn || merged, .cameraFloor = merged ? kMergedCameraMin : 0.0f });
-		}
-		if (merged) {
-			return inDoorway || depth > 0.0f ? std::optional(kMergedCameraMin + std::max(0.0f, kMergedCrossDepth - depth)) : std::nullopt;
-		}
-		return pullIn ? std::optional(std::max(0.0f, -depth - lead)) : std::nullopt;
+		return decision.cameraLimit;
 	}
 
 	void ClosePassage()
@@ -376,8 +310,8 @@ namespace Portal::Crossing
 				Portal::CameraLimit::SetPlane(mapping->sourceCenter - mapping->inward * mapping->halfDepth, mapping->inward, mapping->halfWidth);
 				// Short of the doorway's picture by the camera's near distance (and a unit beyond
 				// where walking in carries the player through, Approach, so that still happens).
-				const float pictureDepth = PictureDepth(*mapping, Gates::IsGate(a_here, a_ready->cell));
-				Portal::CameraLimit::SetFirstPersonStop(mapping->sourceCenter, mapping->inward, mapping->halfWidth, pictureDepth - NearPlane() - 1.0f);
+				const float pictureDepth = Core::Crossing::PictureDepth(mapping->halfDepth, Gates::IsGate(a_here, a_ready->cell));
+				Portal::CameraLimit::SetFirstPersonStop(mapping->sourceCenter, mapping->inward, mapping->halfWidth, Core::Crossing::FirstPersonStop(pictureDepth, NearPlane()));
 				return;
 			}
 		}

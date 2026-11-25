@@ -1,0 +1,88 @@
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
+
+// The rules of the doorway picture cache that don't depend on how a picture is stored: which file
+// and key a door's picture lives under, which pictures count as valid, how bright a room is read
+// off its texels, and which pictures are let go of.
+namespace Core::Pictures
+{
+	// 2: alpha is how far behind the doorway each texel's surface is, and the header is followed by
+	// where the picture was taken from and the part of the door's plane it covers. A version 1
+	// picture is drawn flat until it is taken again. 3: as 2, taken without the room's people. 4:
+	// without the room's front wall (a capture camera's of an older version is taken again). 5: the
+	// sky left out of a texel's average where anything else is in it; a gate's from further back.
+	inline constexpr std::uint32_t kVersion = 5;
+	inline constexpr std::uint32_t kMagic = 0x57445353;  // "SSDW"
+
+	// A picture is taken again at most this often (the room changes; the light outdoors does).
+	inline constexpr auto kRetake = std::chrono::seconds(20);
+	// Pictures of doors not looked at for this long are let go; they are on disk for the next time.
+	inline constexpr auto kKeptUnused = std::chrono::seconds(60);
+	inline constexpr auto kLookedAtEvery = std::chrono::seconds(5);
+
+	// "Skyrim.esm|01A6FB": the same door whatever the load order. Without a plugin to name, the bare ID.
+	[[nodiscard]] std::string DoorKey(std::string_view a_plugin, std::uint32_t a_formId, bool a_lightPlugin);
+	[[nodiscard]] std::string DoorKeyWithoutPlugin(std::uint32_t a_formId);
+
+	// The outdoors is told apart by the part of the day it is seen in, an interior looks the same
+	// at any hour.
+	inline constexpr int kParts = 4;
+	[[nodiscard]] int PartOfDay(float a_hour);
+	// a_part first, then the one after, the one before, the one across: another part's picture when
+	// this one was never taken (a door first passed at night).
+	[[nodiscard]] std::array<int, kParts> SearchOrder(int a_part);
+	[[nodiscard]] std::string             KeyOf(std::string_view a_doorKey, bool a_outdoors, int a_part);
+	// The key as a file name stem.
+	[[nodiscard]] std::string FileStem(std::string_view a_key);
+
+	// The file: four 32-bit words, magic, version, width, height. The widest and highest a picture
+	// was ever written at bound what a damaged header can ask for.
+	[[nodiscard]] bool HeaderValid(const std::uint32_t (&a_header)[4], std::uint32_t a_widest, std::uint32_t a_highest);
+	// Version 2 on: where the picture was taken from and what it covers follow the header.
+	[[nodiscard]] inline bool HasDepth(std::uint32_t a_version) { return a_version >= 2; }
+
+	// How bright a room is, from its texels: the geometric mean of their luminance (a texel with
+	// nothing there is not part of the room), as the room's own light scaled it.
+	inline constexpr float kNothingThere = 20000.0f;  // alpha: how far behind the doorway
+	[[nodiscard]] inline float Luminance(float a_red, float a_green, float a_blue)
+	{
+		return 0.2126f * a_red + 0.7152f * a_green + 0.0722f * a_blue;
+	}
+
+	class BrightnessMean
+	{
+	public:
+		// Below the darkest a texel is counted as: black (an unlit corner) would pull the mean to 0.
+		static constexpr float kDarkest = 1e-3f;
+
+		void Add(float a_luminance)
+		{
+			sum += std::log(std::max(a_luminance, kDarkest));
+			++count;
+		}
+		// 0 when nothing was added.
+		[[nodiscard]] float Result(float a_lightScale) const { return count ? static_cast<float>(std::exp(sum / count)) / a_lightScale : 0.0f; }
+
+	private:
+		double      sum = 0.0;
+		std::size_t count = 0;
+	};
+
+	// The geometric mean of the rooms' brightness that are known, none when none is.
+	[[nodiscard]] float GeometricMean(const std::vector<float>& a_values);
+
+	// A picture is let go of when it hasn't been used for kKeptUnused and isn't still being read
+	// back for its file.
+	[[nodiscard]] inline bool ShouldForget(std::chrono::steady_clock::duration a_sinceUsed, bool a_beingWritten)
+	{
+		return a_sinceUsed >= kKeptUnused && !a_beingWritten;
+	}
+}

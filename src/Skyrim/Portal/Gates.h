@@ -9,13 +9,6 @@
 // there. What the other modules do differently for a gate is here, with the numbers tuned together.
 namespace Portal::Gates
 {
-	// A city gate seen from far down the road counts as nearer than it is, in which door is shown
-	// and in how far out its space loads and is let go. Not by a fixed amount: a house door must
-	// still win when walked up to near a gate (it has to be the shown one to be walked through), and
-	// at a quarter of the distance it does unless it stands within four times the switch margin of
-	// the gate (Selection::kSwitchMargin / kReachWeight).
-	inline constexpr float kReachWeight = 0.25f;
-
 	// The two cells are outdoors both: what is behind the door is another worldspace.
 	[[nodiscard]] bool IsGate(const RE::TESObjectCELL* a_here, const RE::TESObjectCELL* a_behind);
 
