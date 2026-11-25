@@ -24,10 +24,8 @@ namespace Portal::Selection
 	[[nodiscard]] float DoorOpenDistance();
 	void                SetDoorOpenDistance(float a_distance);
 	// Outdoors, how many rooms behind doors are active at once, the nearest door's included
-	// (1 = that one only): the others are the rooms behind the nearest other doors, kept loaded so
-	// they open at once, and those whose door is open are drawn in it, merged beside the shown one,
-	// as many as the render backend can mask (Render::Backend::Interface::MergedRooms: 1 on the game's own
-	// shaders, where the others stay loaded out of sight).
+	// (1 = that one only): the others are the rooms behind the nearest other doors, kept loaded out
+	// of sight so they open at once.
 	[[nodiscard]] int ShownRooms();
 	void              SetShownRooms(int a_count);
 
@@ -96,12 +94,11 @@ namespace Portal::Selection
 	// sight, lets go of those out of reach.
 	void UpdateWarm(RE::TESObjectCELL* a_here, float a_delta, WarmContext a_context);
 
-	// The spaces kept attached out of sight; those whose door is open are also merged beside the
-	// shown room (MergedView).
+	// The spaces kept attached out of sight.
 	[[nodiscard]] std::vector<Spaces::RemoteCell>&          Kept();
 	[[nodiscard]] Spaces::RemoteCell*                       KeptSpace(const RE::TESObjectCELL* a_cell);
 	[[nodiscard]] std::vector<Spaces::RemoteCell>::iterator FindKept(const RE::TESObjectCELL* a_cell);
-	// A kept space let go (its room merged beside the shown one is ended first).
+	// A kept space let go.
 	std::vector<Spaces::RemoteCell>::iterator LetGoKept(std::vector<Spaces::RemoteCell>::iterator a_space, std::string_view a_why);
 	void                              ReleaseWarm(std::string_view a_reason);
 }

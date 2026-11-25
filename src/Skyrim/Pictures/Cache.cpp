@@ -240,8 +240,8 @@ namespace Pictures::Cache
 		if (picture && picture->brightness > 0.0f) {
 			return picture->brightness;
 		}
-		// A room merged beside the shown one may never have had its picture taken: as bright as
-		// the rooms that have, rather than as from inside.
+		// A room that never had its picture taken: as bright as the rooms that have, rather than as
+		// from inside.
 		std::vector<float> known;
 		for (const auto& [key, other] : pictures) {
 			if (other.brightness > 0.0f) {

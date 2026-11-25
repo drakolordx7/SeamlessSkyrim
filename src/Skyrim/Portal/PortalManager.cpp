@@ -85,9 +85,6 @@ namespace Portal::Manager
 					add(portal->sourceDoor, portal->linkedDoor);
 				}
 			}
-			for (const auto& [door, linked] : MergedView::OpenBesideDoors(kOpen)) {
-				add(door, linked);
-			}
 			for (const auto& [id, standIn] : StandIns::Doorways()) {
 				if (!standIn.handedOver && standIn.swing.Amount() >= kOpen) {
 					add(id, standIn.linked);
@@ -118,23 +115,6 @@ namespace Portal::Manager
 			MergedView::PublishShownCells(false);
 			remote.Release(a_handOver);
 			MergedView::Publish();
-		}
-
-		// The shown room, merged, left for a nearer door: kept and drawn on beside the next one
-		// instead of let go. False when it can't be.
-		bool Demote(RE::TESObjectCELL* a_here, const Active& a_portal)
-		{
-			const int slot = MergedView::ReserveBesideSlot(a_here, a_portal);
-			if (!slot) {
-				return false;
-			}
-			PortalDoor::Close();
-			Crossing::ClosePassage();
-			SetActive(std::nullopt);
-			MergedView::MoveShownBeside(slot, a_portal);
-			lastEvent = std::format("{} goes on beside the nearer door", Probe::DescribeCell(a_portal.cell));
-			logger::info("portal: {}", lastEvent);
-			return true;
 		}
 
 		// The portal let go when the player walked away, a closer door took over, the door was locked
@@ -175,7 +155,7 @@ namespace Portal::Manager
 					StreetMerge::PlaceLOD(*CurrentPortal(), a_here);
 					lastEvent = std::format("switched to door {:08X} into the same space", a_candidate->door->GetFormID());
 					logger::info("portal: {}", lastEvent);
-				} else if (!(better && Demote(a_here, *portal))) {
+				} else {
 					ReleaseShown(end);
 				}
 			}
@@ -188,11 +168,8 @@ namespace Portal::Manager
 			bool       attached = false;
 			if (const auto kept = Selection::FindKept(a_candidate->cell); kept != Selection::Kept().end()) {
 				// Attached out of sight already (Selection::UpdateWarm): only its light scene becomes the drawn one.
-				// Merged beside the shown one already, it is drawn on as it was.
-				MergedView::TakeBeside(a_candidate->cell);
 				std::swap(remote, *kept);
 				Selection::Kept().erase(kept);
-				remote.SetParked(false);
 				remote.SetPaused(false);
 				remote.Show();
 				attached = true;
@@ -256,7 +233,7 @@ namespace Portal::Manager
 
 		// The shown portal's space, every frame: loaded, its door swung, merged when it is time, drawn
 		// merged, and the crossing watched.
-		void UpdateShown(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_here, float a_delta, std::vector<MergedCull::Room>& a_culls)
+		void UpdateShown(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_here, float a_delta, std::optional<MergedCull::Room>& a_cull)
 		{
 			const auto portal = CurrentPortal();
 			if (!portal) {
@@ -268,8 +245,7 @@ namespace Portal::Manager
 				PortalDoor::Update(RE::TESForm::LookupByID<RE::TESObjectREFR>(portal->sourceDoor), mapping->inward, a_delta);
 			}
 			// Loaded from further out than usual (farActivate), the space is only merged where it would
-			// have been loaded: the street merged into an interior is drawn whole, seen or not (it
-			// casts the sun's shadows, MergedCull), 2.6 ms a frame in Honningbrew Meadery's cellar.
+			// have been loaded: the street merged into an interior is drawn whole, seen or not (MergedCull), 2.6 ms a frame in Honningbrew Meadery's cellar.
 			auto*      shownDoor = RE::TESForm::LookupByID<RE::TESObjectREFR>(portal->sourceDoor);
 			const bool closeBy = shownDoor && a_player->GetPosition().GetDistance(shownDoor->GetPosition()) <= Selection::NearRadius();
 			const bool mergeable = !remote.Merged() && closeBy && remote.Healthy() && remote.FullyLoaded() && MergedView::Mergeable(a_here, portal->cell);
@@ -279,7 +255,7 @@ namespace Portal::Manager
 			}
 			if (remote.Merged()) {
 				MergedView::Publish();
-				MergedView::UpdateShown(*portal, PortalDoor::Wanted(), a_delta, a_culls);
+				MergedView::UpdateShown(*portal, PortalDoor::Wanted(), a_delta, a_cull);
 			}
 			approachLimit = Crossing::Approach(a_player, *portal, a_delta);
 		}
@@ -363,11 +339,10 @@ namespace Portal::Manager
 			AttachCandidate(here, candidate);
 		}
 		Selection::UpdateWarm(here, a_delta, { retry, Crossing::AttachHeld(), CurrentPortal() && !(remote.Healthy() && remote.FullyLoaded()) });
-		std::vector<MergedCull::Room> culls;
-		UpdateShown(player, here, a_delta, culls);
+		std::optional<MergedCull::Room> cull;
+		UpdateShown(player, here, a_delta, cull);
 		Gates::UpdateMask(here);
-		MergedView::UpdateBeside(here, a_delta, culls);
-		MergedCull::Set(std::move(culls));
+		MergedCull::Set(std::move(cull));
 		MergedView::Publish();
 		Crossing::EndFrame(player);
 		const auto ready = ReadyPortal();
@@ -444,7 +419,7 @@ namespace Portal::Manager
 	bool SpaceShown(RE::FormID a_door)
 	{
 		const auto portal = CurrentPortal();
-		return (portal && portal->sourceDoor == a_door && (remote.Merged() || ReadyPortal())) || MergedView::BesideDoor(a_door);
+		return portal && portal->sourceDoor == a_door && (remote.Merged() || ReadyPortal());
 	}
 
 	bool Merged()

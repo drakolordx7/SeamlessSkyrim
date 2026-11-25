@@ -163,7 +163,7 @@ namespace
 				RE::BSVisit::TraverseScenegraphGeometries(object, [&](RE::BSGeometry* a_geometry) {
 					++shapes;
 					culledShapes += a_geometry->GetAppCulled() ? 1 : 0;
-					mergedShapes += (Portal::MergedView::RoomOf(a_geometry) >= 0) ? 1 : 0;
+					mergedShapes += (Portal::MergedView::IsMergedShape(a_geometry)) ? 1 : 0;
 					if (auto* shader = a_geometry->GetGeometryRuntimeData().shaderProperty.get()) {
 						skins.push_back(std::format("{}: flags {:X} shader alpha {:.2f} material alpha {:.2f}", a_geometry->name.c_str(), a_geometry->GetFlags().underlying(),
 							shader->alpha, shader->QMaterialAlpha()));
@@ -265,7 +265,7 @@ namespace
 				if (node) {
 					RE::BSVisit::TraverseScenegraphGeometries(node, [&](RE::BSGeometry* a_shape) {
 						++total;
-						marked += (Portal::MergedView::RoomOf(a_shape) >= 0) ? 1 : 0;
+						marked += (Portal::MergedView::IsMergedShape(a_shape)) ? 1 : 0;
 						auto* property = a_shape->GetGeometryRuntimeData().shaderProperty.get();
 						++properties[property ? property->GetRTTI() ? property->GetRTTI()->name : "?" : "none"];
 						return RE::BSVisit::BSVisitControl::kContinue;

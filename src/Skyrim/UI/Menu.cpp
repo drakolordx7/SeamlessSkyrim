@@ -9,7 +9,7 @@
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Portal/Selection.h"
-#include "Skyrim/Render/Backend.h"
+#include "Skyrim/Render/Native/Native.h"
 
 #include "SKSEMenuFramework.h"
 
@@ -84,9 +84,8 @@ namespace
 		bool enabled = Portal::Manager::Enabled();
 		const bool available = Plugin::HooksInstalled();
 
-		ImGui::TextWrapped("Rendering: %s", Render::Backend::Current().Name());
-		if (available && !Render::Backend::Current().CanMerge()) {
-			ImGui::TextWrapped("Rooms aren't drawn into the world with this renderer (see [Render] sBackend in %s).", Plugin::Settings::kShippedFile);
+		if (available && !Render::Native::Ready()) {
+			ImGui::TextWrapped("Rooms aren't drawn into the world: the renderer could not be hooked (see the plugin log).");
 		}
 
 		ImGui::NewLine();
@@ -119,24 +118,20 @@ namespace
 			Portal::Selection::SetShownRooms(shown);
 		}
 		SaveWhenReleased(Id::kShownRooms, shown);
-		ImGui::TextWrapped("Outdoors, the rooms behind the nearest doors are loaded, so a doorway opens at once when you walk up, "
-						   "and each open door shows its own room. Counts the room you're at; 1 = only that one. Each costs "
-						   "memory, a short frame when it loads, frame time while its doorway is on screen, and its people "
-						   "are simulated.");
-		if (Render::Backend::Current().MergedRooms() < 2) {
-			ImGui::TextWrapped("This renderer draws one room at a time: the others stay loaded out of sight, and their open doors "
-							   "show a picture.");
-		}
+		ImGui::TextWrapped("Outdoors, the rooms behind the nearest doors are loaded, so a doorway opens at once when you walk up. "
+						   "Counts the room you're at; 1 = only that one. One room at a time is drawn into the world: the others "
+						   "stay loaded out of sight, and their open doors show a picture. Each costs memory, a short frame "
+						   "when it loads, and its people are simulated.");
 
 		ImGui::NewLine();
 
 		bool pause = Portal::MergedView::PauseUnseenRooms();
-		if (ImGui::Checkbox("Pause rooms nobody can see", &pause)) {
+		if (ImGui::Checkbox("Pause rooms kept out of sight", &pause)) {
 			Portal::MergedView::SetPauseUnseenRooms(pause);
 			Plugin::Settings::SaveUser(Id::kPauseUnseenRooms, pause);
 		}
-		ImGui::TextWrapped("A loaded room whose doorway is out of view isn't simulated or drawn until it comes into view; "
-						   "the room at the door you're at always runs.");
+		ImGui::TextWrapped("A room only kept loaded for later isn't simulated or drawn; the room at the door you're at "
+						   "always runs.");
 
 		ImGui::NewLine();
 

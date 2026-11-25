@@ -5,7 +5,6 @@
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Portal/StreetLOD.h"
 #include "Skyrim/Portal/WaterReflections.h"
-#include "Skyrim/Render/Backend.h"
 #include "Skyrim/Spaces/Placement.h"
 #include "Skyrim/Spaces/RemoteCell.h"
 
@@ -93,19 +92,6 @@ namespace Portal::StreetMerge
 	void EveryFrame()
 	{
 		Portal::WaterReflections::Update();
-		// Community Shaders' skylighting starts afresh around the street (its probes are kept by
-		// position, and the player's jumps from the interior's coordinates to the street's) and
-		// fades in over seconds: the street under roofs and porches was far too bright, darkening
-		// slowly. A load door hides that behind its loading screen; here it is settled at once.
-		auto*       cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
-		static bool wasInside = false;
-		const bool  inside = cell && cell->IsInteriorCell();
-		if (cell && wasInside && !inside) {
-			::Render::Backend::Current().SettleSkylighting();
-		}
-		if (cell) {
-			wasInside = inside;
-		}
 	}
 
 	void PlaceLOD(const Active& a_portal, RE::TESObjectCELL* a_here)

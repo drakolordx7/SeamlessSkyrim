@@ -19,7 +19,7 @@ namespace Core::Doorway
 	using Door = Render::DoorRect;
 
 	// Within this of the door plane a pixel stays with the camera's space (the two spaces' door
-	// frames stand in the same place and would z-fight). The Community Shaders fork uses the same.
+	// frames stand in the same place and would z-fight).
 	inline constexpr double kMargin = 5.0;
 	// Bounds are trusted only this far: a shape counts as wholly on one side of a plane only when
 	// its bounding sphere is clear of it by more than this.

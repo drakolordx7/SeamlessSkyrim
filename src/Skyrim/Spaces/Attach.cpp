@@ -454,27 +454,6 @@ namespace Spaces
 		});
 	}
 
-	void RemoteCell::SetParked(bool a_parked)
-	{
-		if (!a_parked) {
-			for (auto& object : parked) {
-				object->SetAppCulled(false);
-			}
-			parked.clear();
-			return;
-		}
-		if (!merged || !parked.empty()) {
-			return;
-		}
-		for (auto* cell : cells) {
-			// Only what isn't hidden already, so that showing it again undoes nothing of the engine's.
-			if (auto* cell3D = Cell3D(cell); cell3D && !cell3D->GetAppCulled()) {
-				cell3D->SetAppCulled(true);
-				parked.emplace_back(cell3D);
-			}
-		}
-	}
-
 	void RemoteCell::HangAlwaysRender(RE::TESObjectCELL* a_cell)
 	{
 		auto* loaded = a_cell->GetRuntimeData().loadedData;
@@ -546,8 +525,6 @@ namespace Spaces
 		if (cells.empty()) {
 			return;
 		}
-		// Hidden, the cell would stay so once the engine has it again (the player walking in).
-		SetParked(false);
 		// Before the cells go: handed over, they are the player's own again.
 		RestorePassage();
 		UnhangAlwaysRender();
@@ -857,8 +834,8 @@ namespace Spaces
 	{
 		// Lights adopted while the scene wasn't registered wait in its add queue; registered, the
 		// engine takes them in on its next light update. (Their light-geometry pairs stay empty,
-		// unlike a space attached shown; merged rooms are lit by distance in the CS patch, and
-		// looked the same.)
+		// unlike a space attached shown; merged rooms are lit by distance by the native lighting,
+		// and looked the same.)
 		Portal::LightScene::Show(scene.get());
 	}
 

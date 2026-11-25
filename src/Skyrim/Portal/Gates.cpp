@@ -10,8 +10,8 @@
 #include "Skyrim/Engine/Havok.h"
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Portal/StandIns.h"
-#include "Skyrim/Render/Backend.h"
-#include "Skyrim/Render/Wire.h"
+#include "Skyrim/Render/Native/Native.h"
+#include "Skyrim/Render/Types.h"
 #include "Skyrim/Spaces/RemoteCell.h"
 
 namespace Portal::Gates
@@ -133,7 +133,7 @@ namespace Portal::Gates
 		std::optional<float> passage;
 		Render::DoorRect     door;
 		const auto           portal = Manager::ActivePortal();
-		if (portal && ::Render::Backend::Current().CanMaskGate() && IsGate(a_here, portal->cell)) {
+		if (portal && Render::Native::Ready() && IsGate(a_here, portal->cell)) {
 			if (const auto mapping = Doors::TryCompute(*portal)) {
 				const auto  farGate = mapping->toLinked * mapping->sourceCenter - mapping->sourceCenter;
 				const float depth = farGate.x * mapping->inward.x + farGate.y * mapping->inward.y;
@@ -145,18 +145,18 @@ namespace Portal::Gates
 			}
 		}
 		// Room 0 is a merged room's while one is.
-		if (!passage && !Manager::Space().Merged() && ::Render::Backend::Current().CanMaskGate() && !a_here->IsInteriorCell()) {
+		if (!passage && !Manager::Space().Merged() && Render::Native::Ready() && !a_here->IsInteriorCell()) {
 			passage = StandInGatePassage(door);
 		}
 		if (passage) {
-			::Render::Backend::Current().SetMergedDoor(0, door);
-			::Render::Backend::Current().SetGatePassage(*passage);
+			Render::Native::SetDoor(door);
+			Render::Native::SetGatePassage(*passage);
 			gateMasked = true;
 		} else if (std::exchange(gateMasked, false)) {
 			if (!Manager::Space().Merged()) {
-				::Render::Backend::Current().SetMergedDoor(0, std::nullopt);
+				Render::Native::SetDoor(std::nullopt);
 			}
-			::Render::Backend::Current().SetGatePassage(0.0f);
+			Render::Native::SetGatePassage(0.0f);
 		}
 	}
 

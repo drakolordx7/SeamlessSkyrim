@@ -226,8 +226,8 @@ namespace Pictures
 		constants.params[2] = picture ? 1.0f / picture->height : 0.0f;
 		const auto          eye = ToCore(a_view.eye);
 		const Camera::Frame frame(ToCore(a_corners), eye);
-		const auto          takenFrom = picture && picture->depth ? picture->takenFrom : Camera::kPlainEye;
-		PutCorner(constants.origin, frame.origin - eye, picture && picture->depth ? 1.0f : 0.0f);
+		const auto          takenFrom = picture ? picture->takenFrom : Camera::kPlainEye;
+		PutCorner(constants.origin, frame.origin - eye, picture ? 1.0f : 0.0f);
 		PutCorner(constants.across, frame.across, 1.0f / frame.across.SqrLength());
 		PutCorner(constants.up, frame.up, 1.0f / frame.up.SqrLength());
 		PutCorner(constants.inward, frame.inward, takenFrom[2]);

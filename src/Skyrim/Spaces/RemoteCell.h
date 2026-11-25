@@ -28,10 +28,6 @@ namespace Spaces
 		[[nodiscard]] bool Shown() const { return Portal::LightScene::Shown(scene.get()); }
 		// The light scene this space's lights are in (registered or not).
 		[[nodiscard]] RE::ShadowSceneNode* Scene() const { return scene.get(); }
-		// Merged and not drawn: its cells left out of every cull until shown again (a room merged
-		// beside the shown one whose doorway is no longer among those shown). Release shows it.
-		void SetParked(bool a_parked);
-		[[nodiscard]] bool Parked() const { return !parked.empty(); }
 		// Set by the manager every frame for a kept space nobody can see: once loaded, Update leaves
 		// its Havok world unstepped and its lights unanimated and not taken in (see Update).
 		void SetPaused(bool a_paused) { paused = a_paused; }
@@ -179,7 +175,6 @@ namespace Spaces
 		std::uint32_t                              generation = 0;
 		float                                      quietRequired = kQuietSecondsRequired;
 		bool                                       paused = false;
-		std::vector<RE::NiPointer<RE::NiAVObject>> parked;  // cells' 3D hidden by SetParked
 
 		// Readiness, per attach.
 		int   adoptedLights = 0;

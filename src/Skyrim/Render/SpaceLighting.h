@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Lighting/Ambient.h"
-#include "Skyrim/Render/Wire.h"
+#include "Skyrim/Render/Types.h"
 
 // The light of a space seen from another: its sun, directional ambient, fog and sky, worked out
 // from the engine's own data (the cell's lighting, the weather, what the world was lit with last)
@@ -78,8 +78,6 @@ namespace Render::SpaceLighting
 	// The same for a room merged into the street: the interior's own fog (its lighting, or its
 	// lighting template's where it inherits).
 	[[nodiscard]] std::optional<Render::SpaceFog> CellFog(RE::TESObjectCELL* a_cell);
-	// The outdoors' directional ambient for a surface facing a_normal (world), from the weather.
-	[[nodiscard]] std::optional<RE::NiColor> OutdoorAmbient(const RE::NiPoint3& a_normal);
 
 	// Diagnostics: the outdoors' light as the last snapshot holds it and as worked out from the weather.
 	json OutdoorLightingProbe();
@@ -91,8 +89,8 @@ namespace Render::SunDirections
 	// The way the light travels in an interior, as the engine lit it while the player was in it
 	// (Observe) or else by the formula.
 	[[nodiscard]] RE::NiPoint3 OfCell(RE::TESObjectCELL* a_cell);
-	// Outdoors. a_synced: set to whether Community Shaders' Sky Sync gave it (the light outdoors).
-	[[nodiscard]] RE::NiPoint3 Outdoors(bool* a_synced = nullptr);
+	// Outdoors.
+	[[nodiscard]] RE::NiPoint3 Outdoors();
 
 	// Render thread, before the world is drawn: the formulas against the engine's own light in the
 	// space the player is in, once per space, so a mistake in them shows in the log. What it sees in

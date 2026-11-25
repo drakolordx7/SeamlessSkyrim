@@ -26,7 +26,6 @@ namespace Plugin::Settings
 		kStepExteriorFromInside,
 		kHandOverStreet,
 		kProfileCrossingsTo,
-		kBackend,
 		kCount,
 	};
 
@@ -72,7 +71,6 @@ namespace Plugin::Settings
 		{ Id::kHandOverStreet, L"Portals", L"bHandOverStreet", Type::kBool, 1 },
 		// Agent sessions: a folder every crossing's main-thread samples are written to.
 		{ Id::kProfileCrossingsTo, L"Portals", L"sProfileCrossingsTo", Type::kString, 0, 0, 0, L"" },
-		{ Id::kBackend, L"Render", L"sBackend", Type::kString, 0, 0, 0, L"auto" },
 	} };
 
 	[[nodiscard]] constexpr const Entry& Of(Id a_id)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Skyrim/Render/Wire.h"
+#include "Skyrim/Render/Types.h"
 
 // The engine's fog property (what BSShaderManager's light scenes hold, ID 105637 by scene index),
 // as the lighting shader's technique setup (ID 107320) and the SSAO composite read it.

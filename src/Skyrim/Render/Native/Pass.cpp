@@ -2,7 +2,7 @@
 
 #include "Skyrim/Render/Native/Native.h"
 #include "Skyrim/Render/SceneQuery.h"
-#include "Skyrim/Render/Wire.h"
+#include "Skyrim/Render/Types.h"
 
 namespace Render::Native::Pass
 {

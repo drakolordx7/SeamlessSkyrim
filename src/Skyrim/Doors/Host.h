@@ -13,8 +13,8 @@ namespace Portal::Doors
 		// The doorway of a_door (a_linkedOutdoors: the space behind it) has a picture of what is
 		// behind it (Policy: such a door may stand open from afar).
 		bool (*hasPicture)(RE::FormID a_door, bool a_linkedOutdoors) = nullptr;
-		// The space behind a_door is drawn in its doorway (merged, the portal ready, or a room beside),
-		// not a stand-in's picture.
+		// The space behind a_door is drawn in its doorway (merged or the portal ready), not a
+		// stand-in's picture.
 		bool (*spaceShown)(RE::FormID a_door) = nullptr;
 		// The door at the other end of a_door when it would be a portal door, seen from a_here, the
 		// menu's switch aside.

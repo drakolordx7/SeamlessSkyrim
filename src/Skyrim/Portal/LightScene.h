@@ -2,7 +2,7 @@
 
 // A remote space's own light scene: a ShadowSceneNode that is also the private scene-graph root the
 // space is attached under. Culling it from the portal camera assigns *its* lights to the space's
-// geometry, and the CS patch reads the one registered in BSShaderManager::State slot Render::kPortalSceneSlot.
+// geometry, and the native lighting reads the one registered in BSShaderManager::State slot Render::kPortalSceneSlot.
 //
 // Every space kept attached has a scene of its own (interiors share coordinates: two rooms in one
 // scene would light each other), and only the shown one is registered.
@@ -38,14 +38,9 @@ namespace Portal::LightScene
 	[[nodiscard]] std::vector<RE::NiPointer<RE::BSLight>> WorldLights();
 
 	// The engine culls and fades lights against the main camera only; for the portal view, and for a
-	// room merged into the world (lit from this scene by the patched Community Shaders), every light
-	// of the shown scene must count as visible and unfaded.
+	// room merged into the world (lit from this scene by the native lighting), every light of the
+	// shown scene must count as visible and unfaded.
 	void PrepareForView();
-	// The same for a scene that isn't registered (a room merged into the world beside the shown
-	// one, lit from its own scene by the patched Community Shaders), and what the engine's light
-	// update does for registered scenes only: the lights adopted into it wait in its add queue
-	// until that update takes them in. Main thread, right before the player's view.
-	void PrepareUnshownForView(RE::ShadowSceneNode* a_scene);
 
 	json Describe(RE::ShadowSceneNode* a_scene, const RE::NiAVObject* a_cell3D);
 	json DescribeAll(const RE::NiAVObject* a_cell3D);

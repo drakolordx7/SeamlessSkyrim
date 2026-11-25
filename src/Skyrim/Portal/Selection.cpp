@@ -322,8 +322,8 @@ namespace Portal::Selection
 			} else if (warmTargets.DistanceOf(it->Cell()->GetFormID()) > warmReach + Core::Selection::kWarmMargin) {
 				it = LetGoKept(it, "out of reach");
 			} else {
-				// Merged beside the shown one and seen, it is drawn; any other kept room is out of sight.
-				it->SetPaused(MergedView::KeptRoomPaused(it->Cell()));
+				// A kept room is out of sight.
+				it->SetPaused(MergedView::KeptRoomPaused());
 				it->Update(a_delta);
 				++it;
 			}
@@ -390,7 +390,6 @@ namespace Portal::Selection
 
 	std::vector<Spaces::RemoteCell>::iterator LetGoKept(std::vector<Spaces::RemoteCell>::iterator a_space, std::string_view a_why)
 	{
-		MergedView::HideBesideOf(a_space->Cell(), a_why);
 		logger::info("portal: let go of {}, kept behind its door ({})", Probe::DescribeCell(a_space->Cell()), a_why);
 		a_space->Release();
 		return warm.erase(a_space);

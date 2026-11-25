@@ -24,7 +24,7 @@
 // - the portal pass (its accumulator draws with the portal light scene, State slot 3): the engine
 //   pairs lights with shapes against the main camera only, and most of the portal's shapes came
 //   with no point light at all (docs/ENGINE.md, "Light scenes"). They get the nearest lights of the portal
-//   scene that reach them, as the fork's strict-light path does.
+//   scene that reach them.
 // - shapes of a room merged into the world: lit by the room's lights (they stay in the portal
 //   scene, so they don't light the street), and by the room's own sun and ambient when the
 //   manager sends them (SetMergedLighting), scaled down as seen from outdoors.
@@ -208,7 +208,7 @@ namespace Render::Native
 			s.lights[0] = a_pass->sceneLights[0];
 			const int count = PickLights(portalScene, a_pass->geometry, s.lights + 1);
 			// No shadow maps for these: a shadow-casting light would shine through walls, so it is
-			// dimmed by how much of it reaches the shape (LightOcclusion), as the fork does.
+			// dimmed by how much of it reaches the shape (LightOcclusion).
 			for (int i = 0; i < count; ++i) {
 				auto* ni = s.lights[1 + i]->light.get();
 				float factor = scale;
@@ -302,7 +302,7 @@ namespace Render::Native
 	void InstallLightingHooks()
 	{
 		REL::Relocation<std::uintptr_t> site{ REL::RelocationID(100520, 107245), REL::Relocate(0xC37, 0xD26) };
-		if (Hooks::CallsTo(site.address(), REL::RelocationID(98984, 105637), "native backend: SSAO composite's fog")) {
+		if (Hooks::CallsTo(site.address(), REL::RelocationID(98984, 105637), "native renderer: SSAO composite's fog")) {
 			CompositeFogHook::func = SKSE::GetTrampoline().write_call<5>(site.address(), CompositeFogHook::Thunk);
 		}
 	}

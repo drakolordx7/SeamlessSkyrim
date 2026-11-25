@@ -1,7 +1,6 @@
 #include "Skyrim/Render/SpaceLighting.h"
 
 #include "Skyrim/Engine/Fog.h"
-#include "Skyrim/Render/Backend.h"
 
 namespace Render::SpaceLighting
 {
@@ -18,8 +17,7 @@ namespace Render::SpaceLighting
 			return Inherits(a_cell, a_what) ? a_cell->GetRuntimeData().lightingTemplate->data : *a_cell->GetLighting();
 		}
 
-		// A space's own colours, through the engine (and Community Shaders' hook on it, which adjusts
-		// them as it does for the engine's own calls).
+		// A space's own colours, through the engine.
 		void ApplyAmbient(const AmbientState& a_state)
 		{
 			static REL::Relocation<void (*)(const float*, const float*, float)> setAmbient{ REL::RelocationID(98989, 105643) };
@@ -41,7 +39,7 @@ namespace Render::SpaceLighting
 
 		// The directional ambient transform ID 105643 builds from six colours, worked out the same way
 		// without calling it: a room merged into the world got its own by setting the engine's global
-		// ambient to the room's for a moment, through Community Shaders' hook, and the outdoors
+		// ambient to the room's for a moment, and the outdoors
 		// flashed white when a room was merged in. K is the engine's globals ID 410515..410517.
 		Core::Transform AmbientTransform(const AmbientState& a_state)
 		{
@@ -154,9 +152,8 @@ namespace Render::SunDirections
 	// climate's sunrise and sunset (their middles, widened by half of fSunAlphaTransTime on each
 	// side): from east (+1) to west (-1) by day, and back by night. The light travels along
 	// (-fSunDirXExtreme x, -fSunDirXExtreme * fSunYExtreme / fSunXExtreme, fSunZExtreme), the
-	// settings read where Sun::Update reads them. a_synced: Sky Sync's direction (below), which is
-	// the light outdoors.
-	RE::NiPoint3 Outdoors(bool* a_synced)
+	// settings read where Sun::Update reads them.
+	RE::NiPoint3 Outdoors()
 	{
 		auto* sky = RE::Sky::GetSingleton();
 		auto* calendar = RE::Calendar::GetSingleton();
@@ -174,20 +171,6 @@ namespace Render::SunDirections
 		const float rise = 0.5f * (sky->GetSunriseBegin() + sky->GetSunriseEnd()) - widen;
 		const float set = 0.5f * (sky->GetSunsetBegin() + sky->GetSunsetEnd()) + widen;
 		const float x = Core::Lighting::SunArc(hour, day, rise, set);
-		// Community Shaders' Sky Sync turns the light toward the sun's place in the sky (the
-		// position Sun::Update gives it, from the same x) instead: ~13 degrees steeper by day than
-		// the light above, and the street's shadows seen from indoors fell shorter than outside.
-		if (a_synced) {
-			*a_synced = false;
-		}
-		const float position[3] = { x * *xExtreme, *yExtreme, std::abs(*xExtreme) - std::abs(x * *xExtreme) };
-		float       towardSun[3]{};
-		if (::Render::Backend::Current().OutdoorSunDirection(hour, position, towardSun)) {
-			if (a_synced) {
-				*a_synced = true;
-			}
-			return RE::NiPoint3{ -towardSun[0], -towardSun[1], -towardSun[2] };
-		}
 		RE::NiPoint3 direction{ -*dirXExtreme * x, -*dirXExtreme * *yExtreme / *xExtreme, *zExtreme };
 		direction.Unitize();
 		return direction;
@@ -401,15 +384,12 @@ namespace Render::SpaceLighting
 
 	namespace
 	{
-		// The way the light travels outdoors: Sky Sync's direction when it gives one, which moves with
-		// the hour; otherwise the snapshot's, which stands still from the moment the player came in
-		// (half an hour old at most); otherwise the computed one. The same for the portal pass and the
-		// merged street, or the shadows jump at the hand-over.
+		// The way the light travels outdoors: the snapshot's, which stands still from the moment the
+		// player came in (half an hour old at most); otherwise the computed one. The same for the
+		// portal pass and the merged street, or the shadows jump at the hand-over.
 		RE::NiPoint3 OutdoorLightDirection(const OutdoorSnapshot* a_recent)
 		{
-			bool       synced = false;
-			const auto computed = SunDirections::Outdoors(&synced);
-			return synced || !a_recent ? computed : a_recent->sunDirection;
+			return a_recent ? a_recent->sunDirection : SunDirections::Outdoors();
 		}
 
 		// A space's light for a room merged into the world: its ambient turned from the space's own
@@ -513,17 +493,6 @@ namespace Render::SpaceLighting
 		return Render::SpaceFog{ fogNear, std::max(fogFar, fogNear + 1.0f), Interior(a_cell, Inherit::kFogPower).fogPower, most,
 			{ colors.fogColorNear.red / 255.0f, colors.fogColorNear.green / 255.0f, colors.fogColorNear.blue / 255.0f },
 			{ colors.fogColorFar.red / 255.0f, colors.fogColorFar.green / 255.0f, colors.fogColorFar.blue / 255.0f } };
-	}
-
-	std::optional<RE::NiColor> OutdoorAmbient(const RE::NiPoint3& a_normal)
-	{
-		const auto weather = WeatherLighting();
-		if (!weather) {
-			return std::nullopt;
-		}
-		const auto ambient = AmbientTransform(weather->ambient);
-		const auto color = ambient.rotate * ToCore(a_normal) + ambient.translate;
-		return RE::NiColor{ std::max(color.x, 0.0f), std::max(color.y, 0.0f), std::max(color.z, 0.0f) };
 	}
 
 	json OutdoorLightingProbe()
