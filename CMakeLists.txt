@@ -48,8 +48,14 @@ if(MSVC)
 endif()
 
 # Unit tests of Core; run build/<config>/SeamlessCoreTests.exe. Not part of the plugin DLL.
-add_executable(SeamlessCoreTests tests/Core/CoreTests.cpp)
-target_link_libraries(SeamlessCoreTests PRIVATE SeamlessCore)
+# The graph tests read the door census JSON (tools/census) with nlohmann_json; the path is also
+# read from the environment (SEAMLESS_CENSUS_JSON) and the test is skipped when there is no file.
+find_package(nlohmann_json CONFIG REQUIRED)
+set(SEAMLESS_CENSUS_JSON "D:/AI/Active/SeamlessSkyrim/.weaver/scratch/census/census.json"
+	CACHE FILEPATH "Door census output the graph tests load if it exists.")
+add_executable(SeamlessCoreTests tests/Core/CoreTests.cpp tests/Core/GraphTests.cpp)
+target_link_libraries(SeamlessCoreTests PRIVATE SeamlessCore nlohmann_json::nlohmann_json)
+target_compile_definitions(SeamlessCoreTests PRIVATE SEAMLESS_CENSUS_JSON="${SEAMLESS_CENSUS_JSON}")
 if(MSVC)
 	target_compile_options(SeamlessCoreTests PRIVATE /W4 /permissive- /utf-8)
 endif()
