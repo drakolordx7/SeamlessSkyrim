@@ -4,15 +4,20 @@
 
 // Pictures of doorways, for a door that swings open before the space behind it has loaded
 // (StandIns). Whenever a doorway stands fully open on the real space, what is seen through
-// it is copied out of the frame, small, and kept per door (on disk, in SeamlessSkyrim_Doorways);
-// for a door to the outdoors one per part of the day. Shown blurred, so that what changed since
-// (people, light, the angle it is seen from) doesn't show, and faded out once the real space is
-// there. A door never seen open gets a plain colour instead.
+// it is copied out of the frame and kept per door (on disk, in SeamlessSkyrim_Doorways); for a
+// door to the outdoors one per part of the day. Faded out once the real space is there. A door
+// never seen open gets a plain colour instead.
 //
 // Each texel also keeps how far behind the doorway its surface was, and the picture where it was
 // taken from: drawn flat on the doorway it read as a board standing in it, nothing behind it
 // moving as the player did. It is drawn as the room in relief instead, the eye's ray marched
 // through it.
+//
+// Two tiers (Tiers.h is how a scheduler asks for them): the image tier is the one picture, taken
+// from in front of the doorway at the size set (Settings, 512 texels by default) and drawn sharp;
+// the depth image tier is one to three views from just inside the doorway, colour and depth, a
+// layered depth image (Core/Pictures/Layers.h) marched in parallax, with the image tier where the
+// layers don't reach.
 namespace Pictures
 {
 	// The main view as the doorway is drawn with (Render::MainView).
@@ -58,8 +63,11 @@ namespace Pictures
 	// frame with it into the targets not on screen (the doorway keeps the last picture for that frame).
 	struct CaptureCamera
 	{
-		RE::FormID                         door;
+		RE::FormID            door;
 		Camera::CaptureCamera camera;
+		// -1: the image tier's picture; 0 and up: that view of the door's depth image (Layers.h),
+		// taken by CaptureLayer.
+		int layer = -1;
 	};
 
 	// Render (main thread), after the world is drawn into the main target and before first person:
@@ -75,7 +83,17 @@ namespace Pictures
 	std::optional<CaptureCamera> TakeCaptureRequest();
 
 	// The capture camera for a room door's doorway (a_corners as Capture's; a_eye the side it is seen from).
-	CaptureCamera CameraFor(RE::FormID a_door, const Corners& a_corners, const RE::NiPoint3& a_eye);
+	// a_gate: a city gate's, from further back.
+	CaptureCamera CameraFor(RE::FormID a_door, const Corners& a_corners, const RE::NiPoint3& a_eye, bool a_gate = false);
+
+	// The camera of the door's depth image's view a_layer (of Cache::Layered's layers), looking in
+	// from just inside the doorway (a_corners and a_eye as CameraFor's).
+	CaptureCamera LayerCameraFor(RE::FormID a_door, int a_layer, const Corners& a_corners, const RE::NiPoint3& a_eye);
+
+	// Render, after the portal pass drew with a LayerCameraFor camera (Source::captureCamera, its
+	// portal clip distances): takes that view into the door's depth image for this part of the day, and
+	// writes the image to disk when its last layer is in. a_layer as the camera's.
+	void CaptureLayer(const View& a_view, const Source& a_source, RE::FormID a_door, bool a_outdoors, int a_layer, const Corners& a_corners);
 
 	// Once, at kDataLoaded: the shaders compiled behind the startup screen, not on the first
 	// doorway of a session.
@@ -107,9 +125,19 @@ namespace Pictures
 		float lightScale = 1.0f;  // the room's own lights, as Source::lightScale, right now
 	};
 
+	struct DrawOptions
+	{
+		// Marched against the door's depth image's layers where it has them all (the image tier's
+		// picture draws where they don't cover the ray, or the door has none).
+		bool depthImage = false;
+		// The colour as the viewer's eye sees it (Core::Pictures::Exposure), on top of the adaptation's.
+		float exposure = 1.0f;
+	};
+
 	// Render, as Capture: draws the door's picture (or a_plain, without one) into the doorway,
 	// with a_alpha. Through a gate (a_gate) the picture's sky is left to the player's own.
-	void Draw(const View& a_view, RE::FormID a_door, bool a_outdoors, bool a_gate, const Corners& a_corners, float a_alpha, const RE::NiColor& a_plain, const Adaptation& a_adaptation);
+	void Draw(const View& a_view, RE::FormID a_door, bool a_outdoors, bool a_gate, const Corners& a_corners, float a_alpha, const RE::NiColor& a_plain, const Adaptation& a_adaptation,
+		const DrawOptions& a_options = {});
 
 	// Render, every frame: pictures taken a few frames ago written to disk. Left to Capture and
 	// Draw, a picture taken just before turning to third person or walking through waited for the

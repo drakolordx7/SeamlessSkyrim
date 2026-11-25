@@ -17,6 +17,8 @@ namespace Plugin::Settings
 		kForceDoors,
 		kDoorOpenDistance,
 		kDoorwayPictureHeight,
+		kDoorwayCacheMegabytes,
+		kDoorwayDepthLayers,
 		kShownRooms,
 		kPauseUnseenRooms,
 		kMerge,
@@ -58,7 +60,11 @@ namespace Plugin::Settings
 		// Game units: the reach of a door; its space loads Selection::kLoadAhead further out.
 		{ Id::kDoorOpenDistance, L"Portals", L"iDoorOpenDistance", Type::kInt, 450, 150, 1000 },
 		// A doorway picture's height in texels (a multiple of 4 is used).
-		{ Id::kDoorwayPictureHeight, L"Portals", L"iDoorwayPictureHeight", Type::kInt, 128, 32, 512 },
+		{ Id::kDoorwayPictureHeight, L"Portals", L"iDoorwayPictureHeight", Type::kInt, 512, 32, 1024 },
+		// The doorway pictures kept on disk are held to this many megabytes; the least recently used go first.
+		{ Id::kDoorwayCacheMegabytes, L"Portals", L"iDoorwayCacheMB", Type::kInt, 2048, 64, 32768 },
+		// The depth image tier: views inside each doorway (0 = no depth images, the image tier alone).
+		{ Id::kDoorwayDepthLayers, L"Portals", L"iDoorwayDepthLayers", Type::kInt, 3, 0, 3 },
 		{ Id::kShownRooms, L"Portals", L"iShownRooms", Type::kInt, 2, 1, 4 },
 		{ Id::kPauseUnseenRooms, L"Portals", L"bPauseUnseenRooms", Type::kBool, 1 },
 		{ Id::kMerge, L"Portals", L"bMerge", Type::kBool, 1 },

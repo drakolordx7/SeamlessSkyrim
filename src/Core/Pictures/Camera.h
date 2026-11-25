@@ -53,7 +53,8 @@ namespace Core::Pictures::Camera
 	// a_eyeUp: the eye's height in the doorway's heights (Frame::PlaceOf).
 	[[nodiscard]] DoorwayPlace PlaceOf(const CameraShape& a_shape, float a_eyeUp);
 
-	// Half-float RGBA, in video memory and on disk.
+	// Half-float RGBA, in video memory and on disk: colour, and in alpha how far behind the door's
+	// plane the surface seen there is.
 	inline constexpr int kBytesPerTexel = 8;
 	// A doorway's shape: three quarters as wide as high, or wider (a double door, a city gate: at
 	// three quarters its picture had a third or less of the texels across that it had up, the
@@ -91,7 +92,11 @@ namespace Core::Pictures::Camera
 	{
 		Transform transform;  // in the player's space, as an NiCamera's (looking along its rotation's first column)
 		float     left = 0.0f, right = 0.0f, bottom = 0.0f, top = 0.0f;  // the frustum at distance 1
-		float     toDoorway = 0.0f;  // the door plane's distance ahead, in the player's space
+		float     toDoorway = 0.0f;  // the door plane's distance ahead, in the player's space (negative: the camera is behind it)
+		// Its near plane's distance, in the player's space; 0 = just past the door plane (the picture
+		// taken from in front of the doorway cuts the wall and frame there). A camera inside the
+		// doorway (a depth image's layer, Layers.h) has no door plane to cut at.
+		float nearClip = 0.0f;
 	};
 
 	// Looking along the doorway's normal, so its plane is parallel to the image: the picture's
@@ -100,4 +105,7 @@ namespace Core::Pictures::Camera
 
 	// Where a place on the door's plane is in the capture camera's image, in clip space.
 	[[nodiscard]] std::array<float, 4> Clip(const CaptureCamera& a_camera, const Frame& a_frame, float a_across, float a_up);
+
+	// Where any point in front of the camera is in its image, in clip space.
+	[[nodiscard]] std::array<float, 4> ClipOfPoint(const CaptureCamera& a_camera, const Vec3& a_point);
 }

@@ -12,8 +12,12 @@
 #include "Core/Doors/Policy.h"
 #include "Core/Doors/Swing.h"
 #include "Core/ImageSpace/Blend.h"
+#include "Core/Pictures/Budget.h"
 #include "Core/Pictures/CacheRules.h"
 #include "Core/Pictures/Camera.h"
+#include "Core/Pictures/Exposure.h"
+#include "Core/Pictures/FileFormat.h"
+#include "Core/Pictures/Layers.h"
 #include "Core/Render/DoorwayPlanes.h"
 #include "Core/Selection/Ranking.h"
 #include "GraphTests.h"
@@ -507,6 +511,8 @@ namespace
 		CHECK(P::ShouldForget(P::kKeptUnused, false) && !P::ShouldForget(P::kKeptUnused, true) && !P::ShouldForget(P::kKeptUnused / 2, false));
 	}
 
+#include "PictureTests.h"
+
 	void PictureCamera()
 	{
 		namespace C = Core::Pictures::Camera;
@@ -542,6 +548,8 @@ int main()
 	Run("panel, leaf swing and doorway planes", PanelAndPlanes);
 	Run("blend weights and picture cache rules", Rules);
 	Run("picture camera geometry", PictureCamera);
+	Run("depth image layers: march, votes, camera", LayeredDepthImages);
+	Run("picture exposure, budget, load order, files", ExposureBudgetAndFiles);
 	failures += RunGraphTests();
 	std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
 	return failures ? 1 : 0;

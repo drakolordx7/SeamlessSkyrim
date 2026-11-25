@@ -1,5 +1,6 @@
 #include "Skyrim/Pictures/Gpu.h"
 
+#include "Skyrim/Pictures/LayerHlsl.h"
 #include "Skyrim/Render/D3D.h"
 
 namespace Pictures::Gpu
@@ -30,9 +31,10 @@ namespace Pictures::Gpu
 			bool                     failed = false;
 		} pipeline;
 
-		// Capture: each texel of the picture is the doorway's rectangle at that place, as the frame
-		// shows it, averaged over 4x4 points (at the default size the doorway covers
-		// dozens of pixels per texel). Alpha: how far behind the doorway the surface seen there is.
+		// Capture: each texel of the picture is the doorway's rectangle at that place (a depth image's
+		// layer: the view's own image), as the frame shows it, averaged over 4x4 points (a texel
+		// covers about a pixel at the default size). Alpha: how far behind the doorway the surface
+		// seen there is.
 		constexpr char kCaptureDeclarations[] = R"(
 			Texture2D<float4> Scene : register(t0);
 			Texture2D<float>  Depth : register(t1);
@@ -52,7 +54,8 @@ namespace Pictures::Gpu
 				float4 Origin;   // the doorway's bottom corner, camera-relative
 				float4 Inward;   // the doorway's normal, away from the eye
 				// x, y: the portal pass's near and far; z: 1 = Depth is the portal pass's; w: the capture
-				// camera's distance to the doorway (looking along its normal), 0 = the player's view
+				// camera's distance to the doorway (looking along its normal; negative: from behind it, a
+				// depth image's view), 0 = the player's view
 				float4 Portal;
 			};
 )";
@@ -76,7 +79,7 @@ namespace Pictures::Gpu
 					if (depth >= 1)
 						return kFar;
 					float  viewDistance = PortalViewDistance(depth, Portal.x, Portal.y);
-					if (Portal.w > 0)
+					if (Portal.w != 0)
 						return clamp(viewDistance - Portal.w, 1, kFar);
 					float4 p = mul(float4(ndc, 0.5, 1), InverseViewProj);
 					p.xyz /= p.w;
@@ -94,7 +97,7 @@ namespace Pictures::Gpu
 			{
 				float3 sum = 0;
 				float3 nearSum = 0;
-				float  nearness = 0;
+				float  nearest = kFar;
 				float  count = 0;
 				[unroll] for (int i = 0; i < 4; ++i)
 				[unroll] for (int j = 0; j < 4; ++j) {
@@ -107,7 +110,7 @@ namespace Pictures::Gpu
 					sum += color;
 					if (behind < kFar) {
 						nearSum += color;
-						nearness += 1 / behind;
+						nearest = min(nearest, behind);
 						++count;
 					}
 				}
@@ -115,18 +118,21 @@ namespace Pictures::Gpu
 					return float4(max(sum / 16, 0), kFar);
 				// The sky left out where anything else is: through a gate the real sky is shown where
 				// the picture has none (Draw), and a roof's edge averaged with the portal pass's flat
-				// sky colour stood in it as a blue fringe. Averaged as nearness: a lamp in front of a
-				// wall far behind it isn't pulled away to the wall.
-				return float4(max(nearSum / count, 0), count / nearness);
+				// sky colour stood in it as a blue fringe. The nearest of a texel's surfaces is its depth,
+				// not their mean: an edge's texel is the thing in front, as the sharp picture has it, and
+				// a lamp in front of a wall far behind it isn't pulled away to the wall.
+				return float4(max(nearSum / count, 0), nearest);
 			}
 )";
 
-		// Draw: the picture blurred (or the plain colour) in the doorway, as the space behind it in
-		// relief. The doorway's own depth is kept (written, so what is drawn later is hidden behind
-		// it as by a wall there); the motion is the surface's seen through it.
+		// Draw: the doorway's picture (or the plain colour) in the doorway, as the space behind it in
+		// relief. The image tier marches the eye's ray against the one picture's depth; the depth
+		// image tier (LayerInfo.x layers) against the layers', and where it finds nothing the image
+		// tier's answer stands. The doorway's own depth is kept (written, so what is drawn later is
+		// hidden behind it as by a wall there); the motion is the surface's seen through it.
 		constexpr char kDrawDeclarations[] = R"(
 				Texture2D<float4> Picture : register(t0);
-				SamplerState      Linear : register(s0);
+				SamplerState      Linear : register(s0);  // anisotropic
 				cbuffer Draw : register(b0)
 				{
 					row_major float4x4 ViewProj;          // as drawn (jittered)
@@ -143,9 +149,13 @@ namespace Pictures::Gpu
 					float4             Up;                // xyz: its side going up; w: 1 / its length squared
 					float4             Inward;            // xyz: its normal, away from the eye; w: how far behind it the picture was taken from (negative)
 					float4             TakenFrom;         // xyz: where, camera-relative; w: how far behind the doorway the plain colour stands
-					float4             Look;              // x: Adaptation::Kind; y: daylight; z: 1 = the outdoors behind; w: the picture's light now against when taken
+					float4             Look;              // x: Adaptation::Kind; y: daylight; z: 1 = the outdoors behind; w: the colour's scale (exposure, light now against when taken)
 					float4             Extent;            // the part of the door's plane the picture covers, as Extent
 					float4             Gate;              // x: 1 = a city gate (the same sky on both sides)
+					float4             LayerInfo;         // x: layers of the depth image (0 = none); yz: a layer's size in texels
+					float4             AxisAcross;        // xyz: the doorway's bottom edge, unit; w: its width in units
+					float4             AxisUp;            // xyz: its side going up, unit; w: its height in units
+					float4             LayerPos[3];       // xyz: each view's place in the doorway's units
 				};
 )";
 		constexpr char kDrawCode[] = R"(
@@ -161,38 +171,14 @@ namespace Pictures::Gpu
 				return v;
 			}
 			struct Pixel { float4 color : SV_Target0; float2 motion : SV_Target1; };
-			// Cubic B-spline filtering from four bilinear reads (GPU Gems 2, ch. 20). Bilinear alone,
-			// magnified ten times and more, showed every texel as a patch with creases at its edges;
-			// the B-spline is smooth across them.
-			// At mip a_level (fractional: the B-spline of the two around it, blended).
-			float3 SampleSmoothAt(float2 uv, float a_level)
-			{
-				float2 texel = Params.yz * exp2(a_level);
-				float2 p = uv / texel - 0.5;
-				float2 i = floor(p);
-				float2 f = p - i;
-				float2 w0 = (1 - f) * (1 - f) * (1 - f) / 6;
-				float2 w1 = (4 - 6 * f * f + 3 * f * f * f) / 6;
-				float2 w3 = f * f * f / 6;
-				float2 w2 = 1 - w0 - w1 - w3;
-				float2 g0 = w0 + w1;
-				float2 g1 = w2 + w3;
-				float2 t0 = (i + 0.5 - 1 + w1 / g0) * texel;
-				float2 t1 = (i + 0.5 + 1 + w3 / g1) * texel;
-				return g0.y * (g0.x * Picture.SampleLevel(Linear, t0, a_level).rgb + g1.x * Picture.SampleLevel(Linear, float2(t1.x, t0.y), a_level).rgb) +
-				       g1.y * (g0.x * Picture.SampleLevel(Linear, float2(t0.x, t1.y), a_level).rgb + g1.x * Picture.SampleLevel(Linear, t1, a_level).rgb);
-			}
-			float3 SampleSmooth(float2 uv, float a_level)
-			{
-				float below = floor(a_level);
-				return lerp(SampleSmoothAt(uv, below), SampleSmoothAt(uv, below + 1), a_level - below);
-			}
 			float2 PictureUV(float3 p)
 			{
 				float3 d = p - Origin.xyz;
 				float2 inDoorway = float2(dot(d, Across.xyz) * Across.w, dot(d, Up.xyz) * Up.w);
 				return float2((inDoorway.x - Extent.x) / (Extent.y - Extent.x), 1 - (inDoorway.y - Extent.z) / (Extent.w - Extent.z));
 			}
+			// The nearest texel's: a depth read between a wall's and a chair's made a slope between them
+			// that rays landed on, in streaks along every edge.
 			float StoredBehind(float2 uv)
 			{
 				if (Plain.w < 0.5)
@@ -200,11 +186,7 @@ namespace Pictures::Gpu
 				// A picture without depth: everything at the doorway, drawn flat as before.
 				if (Origin.w < 0.5)
 					return 0;
-				// Through a gate a roof or an arch stands against the sky: read between them, the
-				// depth made a slope to the sky that rays landed on, in dashes along every edge.
-				if (Gate.x > 0.5)
-					return Picture.Load(int3(clamp(uv / Params.yz, 0, 1 / Params.yz - 1), 0)).a;
-				return Picture.SampleLevel(Linear, uv, 0).a;
+				return Picture.Load(int3(clamp(uv / Params.yz, 0, 1 / Params.yz - 1), 0)).a;
 			}
 			// Along the eye's ray past the doorway, the place its points are seen at from where the
 			// picture was taken moves in a straight line across the picture: from where the ray
@@ -216,6 +198,8 @@ namespace Pictures::Gpu
 			{
 				Pixel  p;
 				float3 dir = normalize(v.world);
+				// The angle a pixel spans, for the depth image's mip.
+				float  pixelAngle = 0.5 * (length(ddx(dir)) + length(ddy(dir)));
 				// Grazing the doorway, infinitely far is off any picture; it is cut off at the sides anyway.
 				float  facing = max(dot(dir, Inward.xyz), 0.05);
 				float2 uvNear = PictureUV(v.world);
@@ -273,25 +257,9 @@ namespace Pictures::Gpu
 
 				float3 color;
 				if (Plain.w > 0.5) {
-					// How stretched the picture is here: across the screen the texels it reads run
-					// along one line and stand still along the other where the ray leaves the
-					// picture at its side, or slides off a near thing's edge onto the room behind.
-					// Sharp, a row of texels drawn out so read as streaks; blurred by how far, from
-					// a smaller mip, as a smear. Seen straight or at a slant (stretched twice or so)
-					// it stays sharp.
-					float2 alongX = ddx(uv) / Params.yz;
-					float2 alongY = ddy(uv) / Params.yz;
-					float  major = max(length(alongX), length(alongY));
-					float  minor = abs(alongX.x * alongY.y - alongX.y * alongY.x) / max(major, 1e-6);
-					float  level = major > 1e-6 ? clamp(log2(major / max(minor, major * 1e-3)) - 1.5, 0, 4) : 0;
-					float2 step = Params.yz * exp2(level);
-					// A little more blur on top: what changed since the picture was taken stays vague.
-					float3 sum = 0;
-					[unroll] for (int x = -1; x <= 1; ++x)
-					[unroll] for (int y = -1; y <= 1; ++y) {
-						sum += (2 - abs(x)) * (2 - abs(y)) * SampleSmooth(uv + float2(x, y) * step, level);
-					}
-					color = sum / 16;
+					// Sharp: the picture's own texels, filtered by how big the screen shows them (the
+					// anisotropic filter follows the stretch of the ray's march across the picture).
+					color = Picture.SampleGrad(Linear, uv, ddx(uv), ddy(uv)).rgb;
 				} else if (Look.z > 0.5) {
 					// The outdoors: lighter up towards the sky.
 					color = Plain.rgb * lerp(1.2, 0.85, saturate(uv.y));
@@ -299,15 +267,26 @@ namespace Pictures::Gpu
 					// A room: its floor lit from the doorway, its ceiling dark.
 					color = Plain.rgb * lerp(0.6, 1.2, saturate(uv.y));
 				}
+				bool pictured = Plain.w > 0.5;
+				// The depth image, where the layers cover the ray: its surface, in parallax.
+				if (LayerInfo.x > 0.5) {
+					float3 layerColor, layerWorld;
+					float  layerBehind;
+					if (MarchLayers(v.world, dir, pixelAngle, layerColor, layerWorld, layerBehind)) {
+						color = layerColor;
+						world = layerWorld;
+						behind = layerBehind;
+						pictured = true;
+					}
+				}
 
-				// A picture as bright as the real space is now. Only the plain colour is made as an eye
-				// used to the player's space sees the other, eased out as it fades over the real space
-				// (which is drawn without it): the doorway brightens or dims into it like an eye
-				// adjusting. A picture got that too, and came out brighter or darker than the real
-				// space, its light already in it (taken in the same high dynamic range as the wall
-				// around it).
+				// The colour as bright as the real space would be (and, for a picture, as an eye adapted
+				// to the viewer's space sees it: Pictures' exposure). Only the plain colour is made as an
+				// eye used to the player's space sees the other, eased out as it fades over the real
+				// space (which is drawn without it): the doorway brightens or dims into it like an eye
+				// adjusting.
 				color *= Look.w;
-				float  adapt = Plain.w > 0.5 ? 0 : Look.y * Params.x;
+				float  adapt = pictured ? 0 : Look.y * Params.x;
 				float  luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
 				if (Look.x > 0.5 && Look.x < 1.5) {
 					// A room from the street by day: dim, dimmer the deeper in, but its lamps, fire
@@ -338,7 +317,7 @@ namespace Pictures::Gpu
 			return !pipeline.failed;
 		}
 		const std::string captureSource = std::string(kCaptureDeclarations) + Hlsl::kViewDistance + kCaptureCode;
-		const std::string drawSource = std::string(kDrawDeclarations) + Hlsl::kFogged + kDrawCode;
+		const std::string drawSource = std::string(kDrawDeclarations) + Hlsl::LayerConstants() + Hlsl::kFogged + Hlsl::kLayerMarch + kDrawCode;
 		std::vector<ID3DBlob*> blobs;
 		const auto             compile = [&](const std::string& a_source, const char* a_entry, const char* a_profile) -> ID3DBlob* {
 			std::string errors;
@@ -364,7 +343,8 @@ namespace Pictures::Gpu
 			D3D11_BUFFER_DESC    captureConstants{ sizeof(CaptureConstants), D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
 			D3D11_BUFFER_DESC    drawConstants{ sizeof(DrawConstants), D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
 			D3D11_SAMPLER_DESC   sampler{};
-			sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			sampler.Filter = D3D11_FILTER_ANISOTROPIC;
+			sampler.MaxAnisotropy = 8;
 			sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
 			sampler.MaxLOD = D3D11_FLOAT32_MAX;
 			D3D11_DEPTH_STENCIL_DESC depthWrite{};
@@ -469,7 +449,8 @@ namespace Pictures::Gpu
 		a_context->PSSetShaderResources(0, 2, none);
 	}
 
-	void Draw(ID3D11DeviceContext* a_context, const DrawConstants& a_constants, const float (&a_vertices)[4][5], const DrawTargets& a_targets, ID3D11ShaderResourceView* a_picture, bool a_opaque)
+	void Draw(ID3D11DeviceContext* a_context, const DrawConstants& a_constants, const float (&a_vertices)[4][5], const DrawTargets& a_targets, ID3D11ShaderResourceView* a_picture,
+		ID3D11ShaderResourceView* a_layers, bool a_opaque)
 	{
 		const Render::D3D::SavedState saved(a_context);
 		Render::D3D::Upload(a_context, pipeline.vertices, a_vertices, sizeof(a_vertices));
@@ -494,7 +475,8 @@ namespace Pictures::Gpu
 		a_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 		const UINT stride = sizeof(float) * 5, offset = 0;
 		a_context->IASetVertexBuffers(0, 1, &pipeline.vertices, &stride, &offset);
-		a_context->PSSetShaderResources(0, 1, &a_picture);
+		ID3D11ShaderResourceView* sources[2]{ a_picture, a_layers };
+		a_context->PSSetShaderResources(0, 2, sources);
 		a_context->PSSetSamplers(0, 1, &pipeline.sampler);
 		a_context->PSSetConstantBuffers(0, 1, &pipeline.drawConstants);
 		a_context->VSSetConstantBuffers(0, 1, &pipeline.drawConstants);
