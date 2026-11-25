@@ -5,6 +5,7 @@
 #include "Skyrim/Portal/LightOcclusion.h"
 #include "Skyrim/Render/Native/Pass.h"
 #include "Skyrim/Render/SceneQuery.h"
+#include "Skyrim/Render/SpaceLighting.h"
 
 // The light of another space with the game's own lighting shader.
 //
@@ -15,7 +16,7 @@
 //   bits 6-8 shadow lights; read at +0x94 and handed to ID 107313). The vertex and pixel shaders
 //   don't depend on these bits (ID 108699 / 108700 mask them out), so changing them only changes
 //   how many lights are uploaded;
-// - the directional ambient, from the engine's global transform at ID 390984.
+// - the directional ambient, from the engine's global transform (SpaceLighting::EngineAmbientTransform).
 // For a pass that should be lit by another space, all three are swapped for the length of the
 // engine's call and put back right after.
 //
@@ -46,18 +47,6 @@ namespace
 		std::uint64_t ownLight = 0;  // merged passes lit with the room's own sun and ambient
 		std::uint64_t ownFog = 0;    // merged passes fogged with the street's fog
 	} stats;
-
-	// The fog the lighting shader's technique setup (ID 107320, from SetupTechnique) uploads is the
-	// active light scene's fog property (Engine/Fog.h).
-	constexpr std::size_t kFogBegin = Engine::Fog::kBegin;
-	constexpr std::size_t kFogEnd = Engine::Fog::kEnd;
-
-	// The directional ambient transform the lighting shader's setup reads (rotation, translation, scale).
-	RE::NiTransform& AmbientTransform()
-	{
-		static REL::Relocation<RE::NiTransform*> transform{ REL::RelocationID(513243, 390984) };
-		return *transform.get();
-	}
 
 	// The SSAO composite (BSImagespaceShader::RenderSSAO, ID 107245) fogs the whole picture by
 	// depth with the active scene's fog: with the street merged into an interior, the interior's
@@ -109,7 +98,7 @@ struct Render::Native::LightingSwap::Saved
 	int                   scaledCount = 0;
 
 	std::byte*                             fog = nullptr;  // the fog property changed for this pass
-	std::array<std::byte, kFogEnd - kFogBegin> fogBytes{};
+	std::array<std::byte, Engine::Fog::kEnd - Engine::Fog::kBegin> fogBytes{};
 
 	RE::NiDirectionalLight* sun = nullptr;
 	RE::NiColor             sunDiffuse;
@@ -204,7 +193,7 @@ namespace Render::Native
 		if (fog) {
 			if (auto* property = Engine::Fog::ActiveProperty()) {
 				s.fog = property;
-				std::memcpy(s.fogBytes.data(), property + kFogBegin, s.fogBytes.size());
+				std::memcpy(s.fogBytes.data(), property + Engine::Fog::kBegin, s.fogBytes.size());
 				Engine::Fog::Write(property, *fog);
 				a_shader->SetupTechnique(a_pass->passEnum);
 				++stats.ownFog;
@@ -257,7 +246,7 @@ namespace Render::Native
 					s.sun->world.rotate.entry[row][0] = along[row];
 				}
 			}
-			auto& ambient = AmbientTransform();
+			auto& ambient = SpaceLighting::EngineAmbientTransform();
 			s.ambient = ambient;
 			s.ambientSwapped = true;
 			for (int row = 0; row < 3; ++row) {
@@ -292,10 +281,10 @@ namespace Render::Native
 			s.sun->world.rotate = s.sunRotate;
 		}
 		if (s.ambientSwapped) {
-			AmbientTransform() = s.ambient;
+			SpaceLighting::EngineAmbientTransform() = s.ambient;
 		}
 		if (s.fog) {
-			std::memcpy(s.fog + kFogBegin, s.fogBytes.data(), s.fogBytes.size());
+			std::memcpy(s.fog + Engine::Fog::kBegin, s.fogBytes.data(), s.fogBytes.size());
 			// SetupAndDrawPass (ID 107644) sets a technique up only when it differs from the last
 			// one (ID 415272); forgotten, the next shape sets it up again, with the world's fog.
 			static REL::Relocation<std::uint32_t*> lastTechnique{ REL::RelocationID(528320, 415272) };

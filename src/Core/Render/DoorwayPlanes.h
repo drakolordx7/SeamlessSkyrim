@@ -2,6 +2,9 @@
 
 #include "Core/Render/Types.h"
 
+#include <algorithm>
+#include <iterator>
+
 // The space seen through a doorway, as planes. Shared by whatever cuts draws at these planes and
 // whatever leaves out whole shapes beyond them: both must agree on what is seen, or a shape that
 // would be drawn gets culled.
@@ -81,5 +84,125 @@ namespace Core::Doorway
 		const double at = a_plane.At(a_center);
 		const double reach = a_radius + kBoundSlack;
 		return at > reach ? Side::kInside : at < -reach ? Side::kOutside : Side::kCrosses;
+	}
+
+	// A kept plane for a render clip plane (negative Distance = cut away).
+	[[nodiscard]] inline Plane KeptSide(const Core::Plane& a_clip)
+	{
+		return { { a_clip.normal.x, a_clip.normal.y, a_clip.normal.z }, -static_cast<double>(a_clip.offset) };
+	}
+
+	// X's five planes and a city gate's sixth, where the far gate stands.
+	inline constexpr int kMaxPlanes = 6;
+
+	// A convex part of a shape: what every one of its planes keeps.
+	struct Piece
+	{
+		Plane planes[kMaxPlanes];
+		int   count = 0;
+	};
+
+	// How a shape is drawn: as it is, not at all, or in convex pieces one after the other.
+	struct Cut
+	{
+		enum class Kind
+		{
+			kWhole,      // as it is
+			kWholeSeen,  // as it is, and wholly in view through the doorway
+			kLeftOut,    // not at all
+			kPieces,     // once per piece (no pieces: not at all)
+		};
+		Kind  kind = Kind::kWhole;
+		Piece pieces[kMaxPlanes];
+		int   count = 0;
+	};
+
+	// A shape of the space behind a plane that is drawn only where it keeps (the portal pass's far
+	// door), by its bounding sphere.
+	[[nodiscard]] inline Cut CutAt(const Plane& a_plane, const Vec3& a_center, float a_radius)
+	{
+		Cut cut;
+		switch (SideOf(a_plane, a_center, a_radius)) {
+		case Side::kInside:
+			break;
+		case Side::kOutside:
+			cut.kind = Cut::Kind::kLeftOut;
+			break;
+		case Side::kCrosses:
+			cut.kind = Cut::Kind::kPieces;
+			cut.count = 1;
+			cut.pieces[0].planes[0] = a_plane;
+			cut.pieces[0].count = 1;
+			break;
+		}
+		return cut;
+	}
+
+	// A shape seen through the doorway from a_eye. A shape of the merged space is kept inside X (one
+	// piece); one of the camera's own space outside X, which isn't convex: in up to six disjoint
+	// convex pieces (not P0; P0 and not P1; P0, P1 and not P2; ...). a_passage > 0: a city gate, X
+	// ends that far beyond the door plane.
+	[[nodiscard]] inline Cut CutThroughDoorway(const Door& a_door, const Vec3& a_eye, float a_passage, bool a_shapeMerged, const Vec3& a_center, float a_radius)
+	{
+		Cut        cut;
+		const bool cameraSpace = a_shapeMerged == a_door.cameraMerged;
+		Plane      doorway[5];
+		if (!Planes(a_door, a_eye, doorway)) {
+			if (!cameraSpace) {
+				cut.kind = Cut::Kind::kLeftOut;
+			}
+			return cut;
+		}
+
+		Plane planes[kMaxPlanes];
+		std::copy(std::begin(doorway), std::end(doorway), planes);
+		int count = 5;
+		if (a_passage > 0.0f) {
+			planes[count++] = Through(a_door.center + a_door.normal * a_passage, a_door.normal * -1.0f);
+		}
+		Side sides[kMaxPlanes];
+		bool clear = false;  // wholly outside X
+		bool within = true;  // wholly inside X
+		for (int i = 0; i < count; ++i) {
+			sides[i] = SideOf(planes[i], a_center, a_radius);
+			clear |= sides[i] == Side::kOutside;
+			within &= sides[i] == Side::kInside;
+		}
+		if (!cameraSpace) {
+			if (clear) {
+				cut.kind = Cut::Kind::kLeftOut;
+			} else if (within) {
+				cut.kind = Cut::Kind::kWholeSeen;
+			} else {
+				cut.kind = Cut::Kind::kPieces;
+				cut.count = 1;
+				std::copy(planes, planes + count, cut.pieces[0].planes);
+				cut.pieces[0].count = count;
+			}
+			return cut;
+		}
+		if (clear) {
+			return cut;
+		}
+		if (within) {
+			cut.kind = Cut::Kind::kLeftOut;
+			return cut;
+		}
+		cut.kind = Cut::Kind::kPieces;
+		for (int k = 0; k < count; ++k) {
+			// Piece k: planes 0..k-1 kept, plane k cut away.
+			bool empty = sides[k] == Side::kInside;
+			for (int i = 0; i < k && !empty; ++i) {
+				empty = sides[i] == Side::kOutside;
+			}
+			if (empty) {
+				continue;
+			}
+			Piece& piece = cut.pieces[cut.count++];
+			std::copy(planes, planes + k, piece.planes);
+			piece.planes[k] = planes[k].Flipped();
+			piece.count = k + 1;
+		}
+		return cut;
 	}
 }

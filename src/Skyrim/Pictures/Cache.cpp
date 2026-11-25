@@ -127,7 +127,7 @@ namespace Pictures::Cache
 		}
 		if (a_texels) {
 			auto* context = Render::D3D::Context();
-			context->UpdateSubresource(a_picture.texture, 0, nullptr, a_texels, a_width * 8, 0);
+			context->UpdateSubresource(a_picture.texture, 0, nullptr, a_texels, a_width * Camera::kBytesPerTexel, 0);
 			context->GenerateMips(a_picture.view);
 		}
 		a_picture.width = a_width;
@@ -173,7 +173,7 @@ namespace Pictures::Cache
 							picture.lightScale = place[3] > 0.0f ? place[3] : 1.0f;
 							picture.version = header[1];
 							if (!a_outdoors) {
-								picture.brightness = Brightness(texels.data(), header[2], header[3], header[2] * 8, picture.lightScale);
+								picture.brightness = Brightness(texels.data(), header[2], header[3], header[2] * Camera::kBytesPerTexel, picture.lightScale);
 							}
 						}
 					}
@@ -221,7 +221,7 @@ namespace Pictures::Cache
 				file.write(reinterpret_cast<const char*>(place), sizeof(place));
 				file.write(reinterpret_cast<const char*>(it->extent.data()), sizeof(it->extent));
 				for (UINT row = 0; row < it->height; ++row) {
-					file.write(static_cast<const char*>(mapped.pData) + row * mapped.RowPitch, it->width * 8);
+					file.write(static_cast<const char*>(mapped.pData) + row * mapped.RowPitch, it->width * Camera::kBytesPerTexel);
 				}
 				// Taken again meanwhile: the newer one's texels decide.
 				const auto found = pictures.find(it->key);
@@ -240,8 +240,7 @@ namespace Pictures::Cache
 
 	std::optional<float> RoomBrightness(RE::FormID a_door)
 	{
-		auto*       device = Render::D3D::Device();
-		const auto* picture = device ? Find(device, a_door, false) : nullptr;
+		const auto* picture = Find(Render::D3D::Device(), a_door, false);
 		if (picture && picture->brightness > 0.0f) {
 			return picture->brightness;
 		}

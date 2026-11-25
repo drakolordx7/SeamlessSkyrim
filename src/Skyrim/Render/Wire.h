@@ -76,4 +76,21 @@ namespace Render
 // optional: a fork older than the plugin lacks some, and the one missing is named in the log once
 // (Render/Backend.cpp).
 // X(member, export name, return type, (parameter types))
-#define SEAMLESS_FORK_EXPORTS(X)                                                                                  	X(setMergedDoor, "SeamlessPortal_SetMergedDoor", void, (const float*))                                        	X(setMergedLighting, "SeamlessPortal_SetMergedLighting", void, (const float*))                                	X(setMergedRoomDoor, "SeamlessPortal_SetMergedRoomDoor", void, (int, const float*))                           	X(setMergedRoomLighting, "SeamlessPortal_SetMergedRoomLighting", void, (int, const float*))                   	X(setMergedFog, "SeamlessPortal_SetMergedFog", void, (const float*))                                          	X(setFrontFog, "SeamlessPortal_SetFrontFog", void, (const float*))                                            	X(setMergedRoomDaylight, "SeamlessPortal_SetMergedRoomDaylight", void, (int, const float*))                   	X(setGatePassage, "SeamlessPortal_SetGatePassage", void, (float))                                             	X(setInteriorSun, "SeamlessPortal_SetInteriorSun", void, (bool))                                              	X(settleSkylighting, "SeamlessPortal_SettleSkylighting", void, ())                                            	X(setPortalClip, "SeamlessPortal_SetPortalClip", void, (const float*))                                        	X(setPortalShadows, "SeamlessPortal_SetPortalShadows", void, (RE::BSShadowDirectionalLight*, void*, void*))   	X(setPortalWorldspace, "SeamlessPortal_SetPortalWorldspace", void, (RE::TESWorldSpace*))                      	X(setPortalCamera, "SeamlessPortal_SetPortalCamera", void, (float, float))                                    	X(beginPass, "SeamlessPortal_BeginPass", void, (RE::NiDirectionalLight*, bool))                               	X(endPass, "SeamlessPortal_EndPass", void, ())                                                                	X(outdoorSunDirection, "SeamlessPortal_OutdoorSunDirection", bool, (float, const float*, float*))
+#define SEAMLESS_FORK_EXPORTS(X) \
+	X(setMergedDoor, "SeamlessPortal_SetMergedDoor", void, (const float*)) \
+	X(setMergedLighting, "SeamlessPortal_SetMergedLighting", void, (const float*)) \
+	X(setMergedRoomDoor, "SeamlessPortal_SetMergedRoomDoor", void, (int, const float*)) \
+	X(setMergedRoomLighting, "SeamlessPortal_SetMergedRoomLighting", void, (int, const float*)) \
+	X(setMergedFog, "SeamlessPortal_SetMergedFog", void, (const float*)) \
+	X(setFrontFog, "SeamlessPortal_SetFrontFog", void, (const float*)) \
+	X(setMergedRoomDaylight, "SeamlessPortal_SetMergedRoomDaylight", void, (int, const float*)) \
+	X(setGatePassage, "SeamlessPortal_SetGatePassage", void, (float)) \
+	X(setInteriorSun, "SeamlessPortal_SetInteriorSun", void, (bool)) \
+	X(settleSkylighting, "SeamlessPortal_SettleSkylighting", void, ()) \
+	X(setPortalClip, "SeamlessPortal_SetPortalClip", void, (const float*)) \
+	X(setPortalShadows, "SeamlessPortal_SetPortalShadows", void, (RE::BSShadowDirectionalLight*, void*, void*)) \
+	X(setPortalWorldspace, "SeamlessPortal_SetPortalWorldspace", void, (RE::TESWorldSpace*)) \
+	X(setPortalCamera, "SeamlessPortal_SetPortalCamera", void, (float, float)) \
+	X(beginPass, "SeamlessPortal_BeginPass", void, (RE::NiDirectionalLight*, bool)) \
+	X(endPass, "SeamlessPortal_EndPass", void, ()) \
+	X(outdoorSunDirection, "SeamlessPortal_OutdoorSunDirection", bool, (float, const float*, float*))

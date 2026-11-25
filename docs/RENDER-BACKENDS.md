@@ -2,13 +2,13 @@
 
 Seamless doors need changes to how shapes are drawn: the doorway mask of render-merge
 (two spaces drawn in one pass, each only where the other isn't), the far door's clip in the portal
-pass, and the light, ambient and fog of the space behind the door. `src/Render/Backend.h` hides
+pass, and the light, ambient and fog of the space behind the door. `src/Skyrim/Render/Backend.h` hides
 who does that.
 
 | Backend | When | What does the work |
 |---|---|---|
 | Community Shaders (fork) | `CommunityShaders.dll` with the `SeamlessPortal_*` exports | The fork's shaders (COMMUNITY-SHADERS-PATCH.md). Unchanged from before. |
-| Native | No Community Shaders (vanilla shaders, and ENB, which runs on them) | `src/Render/NativeMask.cpp`, `src/Render/NativeLighting.cpp` |
+| Native | No Community Shaders (vanilla shaders, and ENB, which runs on them) | `src/Skyrim/Render/Native/NativeMask.cpp`, `src/Skyrim/Render/Native/NativeLighting.cpp` |
 | None | A stock Community Shaders (no fork exports) | Nothing: no render-merge; the portal pass is drawn unclipped, with only the sun and ambient the portal code sets. Crossing without a loading screen works. |
 
 How many rooms can be merged at once (`Render::Backend::MergedRooms`): 4 with
@@ -26,9 +26,10 @@ counters). The in-game menu shows the backend's name.
 ## Native: the doorway mask
 
 No shader is changed. For a draw that must be cut, a geometry shader is bound behind the engine's
-vertex shader. It passes every vertex on unchanged and adds five clip distances
-(`SV_ClipDistance0/1`); the rasterizer cuts at them per pixel. A plane's distance is linear in
-world space and clip distances interpolate perspective-correctly, so the cut is exact.
+vertex shader. It passes every vertex on unchanged and adds up to six clip distances
+(`SV_ClipDistance0/1`: X's five planes, and a city gate's sixth); the rasterizer cuts at them per
+pixel. A plane's distance is linear in world space and clip distances interpolate
+perspective-correctly, so the cut is exact.
 
 - One room only: with two doorways, a shape near both would be cut into the pieces outside each
   doorway's X, multiplied; not solved. `[Portals] iShownRooms` above 1 keeps the other rooms loaded
@@ -38,9 +39,11 @@ world space and clip distances interpolate perspective-correctly, so the cut is 
   the doorway's edges). The other space's shapes are kept in X (one draw); the camera's space's
   shapes outside X, drawn as up to five disjoint convex pieces. Through a city gate X ends where
   the portal pass's cells end (`SetGatePassage`): a sixth plane and piece. Shapes whose bounding sphere is
-  50 units clear of a plane are drawn unchanged, or not at all, without a geometry shader.
+  50 units clear of a plane are drawn unchanged, or not at all, without a geometry shader. The rule
+  and the pieces are plain-float code in `src/Core/Render/DoorwayPlanes.h` (`CutThroughDoorway`,
+  `CutAt`); `NativeMask.cpp` turns the planes into clip space and draws.
 - Planes are turned into clip space with the renderer's current view-projection (row vectors,
-  camera-relative, as `DrawDoorQuad` uses it), so the portal pass's camera works the same way.
+  camera-relative, as the doorway quad in `Pictures/Composite.cpp` uses it), so the portal pass's camera works the same way.
 - Which draw: hooks on `SetupGeometry` / `RestoreGeometry` (vfuncs 6 and 7) of the Lighting,
   Utility and Effect shaders plan the cut for the pass between them. Main pass: depth target
   `kMAIN` and the world light scene, so shadow maps aren't cut. Portal pass: accumulator drawing
@@ -86,7 +89,7 @@ of it (`SetMergedDaylight`, `SetFrontFog`): both are per pixel in the fork's sha
 
 ## ENB
 
-`src/Render/Enb.cpp` finds ENB's SDK exports (`ENBGetSDKVersion` in d3d11.dll / dxgi.dll) and
+`Backend.cpp` (`Enb::Detect`, in `src/Skyrim/Render/`) finds ENB's SDK exports (`ENBGetSDKVersion` in d3d11.dll / dxgi.dll) and
 reports version and whether effects are on. ENB uses the native backend: no game shader is
 replaced, so ENB's recognition of the game's shaders is untouched, and the mask leaves no depth
 where it cuts, which ENB's screen-space effects read. With ENB the engine's context is ENB's proxy;

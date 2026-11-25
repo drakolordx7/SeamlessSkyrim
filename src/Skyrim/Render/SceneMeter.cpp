@@ -102,8 +102,7 @@ namespace Render::SceneMeter
 	void Measure(void* a_scene, float a_width, float a_height)
 	{
 		auto* context = D3D::Context();
-		auto* device = D3D::Device();
-		if (!context || !device || !a_scene || !EnsureMeter(device)) {
+		if (!a_scene || !EnsureMeter(D3D::Device())) {
 			return;
 		}
 		auto* copy = meter.staging[meter.next];

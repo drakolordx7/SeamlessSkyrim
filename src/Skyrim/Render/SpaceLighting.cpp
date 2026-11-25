@@ -7,62 +7,54 @@ namespace Render::SpaceLighting
 {
 	namespace
 	{
-	// Whether the interior takes a_what from its lighting template instead of its own data.
-	bool Inherits(RE::TESObjectCELL* a_cell, RE::INTERIOR_DATA::Inherit a_what)
-	{
-		return a_cell->GetRuntimeData().lightingTemplate && a_cell->GetLighting()->lightingTemplateInheritanceFlags.any(a_what);
-	}
-
-	const RE::INTERIOR_DATA& Interior(RE::TESObjectCELL* a_cell, RE::INTERIOR_DATA::Inherit a_what)
-	{
-		return Inherits(a_cell, a_what) ? a_cell->GetRuntimeData().lightingTemplate->data : *a_cell->GetLighting();
-	}
-
-	// A space's own colours, through the engine (and Community Shaders' hook on it, which adjusts
-	// them as it does for the engine's own calls).
-	void ApplyAmbient(const AmbientState& a_state)
-	{
-		static REL::Relocation<void (*)(const float*, const float*, float)> setAmbient{ REL::RelocationID(98989, 105643) };
-		setAmbient(&a_state.colors[0][0][0], a_state.tint, a_state.fresnel);
-	}
-
-	std::pair<std::byte*, std::byte*> AmbientMemory()
-	{
-		static const auto memory = [] {
-			auto* inputs = reinterpret_cast<std::byte*>(REL::RelocationID(527705, 414646).address());
-			auto* built = reinterpret_cast<std::byte*>(REL::RelocationID(513243, 390984).address());
-			// The layout read off the function (AE 1.7.104): both blocks contiguous.
-			SEAMLESS_ASSERT(REL::RelocationID(527716, 414657).address() - REL::RelocationID(527705, 414646).address() == 0x44);
-			SEAMLESS_ASSERT(REL::RelocationID(513259, 391000).address() - REL::RelocationID(513243, 390984).address() == 0x40);
-			return std::pair{ inputs, built };
-		}();
-		return memory;
-	}
-
-	// The directional ambient transform ID 105643 builds from six colours, worked out the same way
-	// without calling it: a room merged into the world got its own by setting the engine's global
-	// ambient to the room's for a moment, through Community Shaders' hook, and the outdoors
-	// flashed white when a room was merged in. Per colour channel c and axis a:
-	// rotate[c][a] = (min - max) / 2, translate[c] = (K[c] + sum over the axes of (max + min)) / 6,
-	// with K the engine's globals ID 410515..410517.
-	RE::NiTransform AmbientTransform(const AmbientState& a_state)
-	{
-		static REL::Relocation<const float*> offsets{ REL::RelocationID(523935, 410515) };
-		SEAMLESS_ASSERT(REL::RelocationID(523937, 410517).address() - REL::RelocationID(523935, 410515).address() == 8);  // three floats in a row
-		RE::NiTransform transform;
-		for (int channel = 0; channel < 3; ++channel) {
-			float sum = offsets.get()[channel];
-			for (int axis = 0; axis < 3; ++axis) {
-				const float max = a_state.colors[axis][0][channel];
-				const float min = a_state.colors[axis][1][channel];
-				transform.rotate.entry[channel][axis] = 0.5f * (min - max);
-				sum += max + min;
-			}
-			transform.translate[channel] = sum / 6.0f;
+		// Whether the interior takes a_what from its lighting template instead of its own data.
+		bool Inherits(RE::TESObjectCELL* a_cell, RE::INTERIOR_DATA::Inherit a_what)
+		{
+			return a_cell->GetRuntimeData().lightingTemplate && a_cell->GetLighting()->lightingTemplateInheritanceFlags.any(a_what);
 		}
-		return transform;
+
+		const RE::INTERIOR_DATA& Interior(RE::TESObjectCELL* a_cell, RE::INTERIOR_DATA::Inherit a_what)
+		{
+			return Inherits(a_cell, a_what) ? a_cell->GetRuntimeData().lightingTemplate->data : *a_cell->GetLighting();
+		}
+
+		// A space's own colours, through the engine (and Community Shaders' hook on it, which adjusts
+		// them as it does for the engine's own calls).
+		void ApplyAmbient(const AmbientState& a_state)
+		{
+			static REL::Relocation<void (*)(const float*, const float*, float)> setAmbient{ REL::RelocationID(98989, 105643) };
+			setAmbient(&a_state.colors[0][0][0], a_state.tint, a_state.fresnel);
+		}
+
+		std::pair<std::byte*, std::byte*> AmbientMemory()
+		{
+			static const auto memory = [] {
+				auto* inputs = reinterpret_cast<std::byte*>(REL::RelocationID(527705, 414646).address());
+				auto* built = reinterpret_cast<std::byte*>(REL::RelocationID(513243, 390984).address());
+				// The layout read off the function (AE 1.7.104): both blocks contiguous.
+				SEAMLESS_ASSERT(REL::RelocationID(527716, 414657).address() - REL::RelocationID(527705, 414646).address() == 0x44);
+				SEAMLESS_ASSERT(REL::RelocationID(513259, 391000).address() - REL::RelocationID(513243, 390984).address() == 0x40);
+				return std::pair{ inputs, built };
+			}();
+			return memory;
+		}
+
+		// The directional ambient transform ID 105643 builds from six colours, worked out the same way
+		// without calling it: a room merged into the world got its own by setting the engine's global
+		// ambient to the room's for a moment, through Community Shaders' hook, and the outdoors
+		// flashed white when a room was merged in. K is the engine's globals ID 410515..410517.
+		Core::Transform AmbientTransform(const AmbientState& a_state)
+		{
+			static REL::Relocation<const float*> offsets{ REL::RelocationID(523935, 410515) };
+			SEAMLESS_ASSERT(REL::RelocationID(523937, 410517).address() - REL::RelocationID(523935, 410515).address() == 8);  // three floats in a row
+			return Core::Lighting::AmbientTransform(a_state, offsets.get());
+		}
+
 	}
 
+	RE::NiTransform& EngineAmbientTransform()
+	{
+		return *reinterpret_cast<RE::NiTransform*>(AmbientMemory().second);
 	}
 
 	AmbientSnapshot SaveAmbient()
@@ -83,50 +75,50 @@ namespace Render::SpaceLighting
 
 	namespace
 	{
-	// The cell's directional ambient (DALC), from its lighting template when it inherits ambient.
-	std::optional<AmbientState> CellAmbient(RE::TESObjectCELL* a_cell)
-	{
-		auto* own = a_cell ? a_cell->GetLighting() : nullptr;
-		if (!own) {
-			return std::nullopt;
-		}
-		const auto& dalc = Inherits(a_cell, RE::INTERIOR_DATA::Inherit::kAmbientColor) ? a_cell->GetRuntimeData().lightingTemplate->directionalAmbientLightingColors :
-		                                                                                 own->directionalAmbientLightingColors;
+		// The cell's directional ambient (DALC), from its lighting template when it inherits ambient.
+		std::optional<AmbientState> CellAmbient(RE::TESObjectCELL* a_cell)
+		{
+			auto* own = a_cell ? a_cell->GetLighting() : nullptr;
+			if (!own) {
+				return std::nullopt;
+			}
+			const auto& dalc = Inherits(a_cell, RE::INTERIOR_DATA::Inherit::kAmbientColor) ? a_cell->GetRuntimeData().lightingTemplate->directionalAmbientLightingColors :
+			                                                                                 own->directionalAmbientLightingColors;
 
-		auto toFloat = [](const RE::Color& a_color, float* a_out) {
-			a_out[0] = a_color.red / 255.0f;
-			a_out[1] = a_color.green / 255.0f;
-			a_out[2] = a_color.blue / 255.0f;
-		};
-		AmbientState state{};
-		const RE::BGSDirectionalAmbientLightingColors::Directional::MaxMin<RE::Color>* axes[3] = { &dalc.directional.x, &dalc.directional.y, &dalc.directional.z };
-		for (int axis = 0; axis < 3; ++axis) {
-			toFloat(axes[axis]->max, state.colors[axis][0]);
-			toFloat(axes[axis]->min, state.colors[axis][1]);
+			auto toFloat = [](const RE::Color& a_color, float* a_out) {
+				a_out[0] = a_color.red / 255.0f;
+				a_out[1] = a_color.green / 255.0f;
+				a_out[2] = a_color.blue / 255.0f;
+			};
+			AmbientState state{};
+			const RE::BGSDirectionalAmbientLightingColors::Directional::MaxMin<RE::Color>* axes[3] = { &dalc.directional.x, &dalc.directional.y, &dalc.directional.z };
+			for (int axis = 0; axis < 3; ++axis) {
+				toFloat(axes[axis]->max, state.colors[axis][0]);
+				toFloat(axes[axis]->min, state.colors[axis][1]);
+			}
+			toFloat(dalc.specular, state.tint);
+			state.fresnel = dalc.fresnelPower;
+			return state;
 		}
-		toFloat(dalc.specular, state.tint);
-		state.fresnel = dalc.fresnelPower;
-		return state;
-	}
 
-	void SetLightDirection(RE::NiLight* a_light, RE::NiPoint3 a_direction)
-	{
-		// A directional light shines along its local +X.
-		a_direction.Unitize();
-		RE::NiPoint3 side = a_direction.UnitCross({ 0.0f, 0.0f, 1.0f });
-		if (side.Length() < 0.5f) {
-			side = { 1.0f, 0.0f, 0.0f };
+		void SetLightDirection(RE::NiLight* a_light, RE::NiPoint3 a_direction)
+		{
+			// A directional light shines along its local +X.
+			a_direction.Unitize();
+			RE::NiPoint3 side = a_direction.UnitCross({ 0.0f, 0.0f, 1.0f });
+			if (side.Length() < 0.5f) {
+				side = { 1.0f, 0.0f, 0.0f };
+			}
+			const RE::NiPoint3 up = side.UnitCross(a_direction);
+			auto&              m = a_light->local.rotate;
+			for (int row = 0; row < 3; ++row) {
+				m.entry[row][0] = a_direction[row];
+				m.entry[row][1] = side[row];
+				m.entry[row][2] = up[row];
+			}
+			RE::NiUpdateData update;
+			a_light->Update(update);
 		}
-		const RE::NiPoint3 up = side.UnitCross(a_direction);
-		auto&              m = a_light->local.rotate;
-		for (int row = 0; row < 3; ++row) {
-			m.entry[row][0] = a_direction[row];
-			m.entry[row][1] = side[row];
-			m.entry[row][2] = up[row];
-		}
-		RE::NiUpdateData update;
-		a_light->Update(update);
-	}
 
 	}
 }
@@ -135,17 +127,17 @@ namespace Render::SunDirections
 {
 	namespace
 	{
-	// Interiors (sky in interior mode): rotation Rz(XY) * Ry(Z), the angles in degrees from the
-	// cell's own getters (ID 18929 / 18931: its lighting data, or its lighting template's when it
-	// inherits the rotation).
-	RE::NiPoint3 FormulaDirection(RE::TESObjectCELL* a_cell)
-	{
-		static REL::Relocation<std::uint32_t (*)(RE::TESObjectCELL*)> rotationXY{ REL::RelocationID(18487, 18929) };
-		static REL::Relocation<std::uint32_t (*)(RE::TESObjectCELL*)> rotationZ{ REL::RelocationID(18488, 18931) };
-		const float xy = RE::deg_to_rad(static_cast<float>(rotationXY(a_cell)));
-		const float z = RE::deg_to_rad(static_cast<float>(rotationZ(a_cell)));
-		return { std::cos(xy) * std::cos(z), -std::sin(xy) * std::cos(z), std::sin(z) };
-	}
+		// Interiors (sky in interior mode): rotation Rz(XY) * Ry(Z), the angles in degrees from the
+		// cell's own getters (ID 18929 / 18931: its lighting data, or its lighting template's when it
+		// inherits the rotation).
+		RE::NiPoint3 FormulaDirection(RE::TESObjectCELL* a_cell)
+		{
+			static REL::Relocation<std::uint32_t (*)(RE::TESObjectCELL*)> rotationXY{ REL::RelocationID(18487, 18929) };
+			static REL::Relocation<std::uint32_t (*)(RE::TESObjectCELL*)> rotationZ{ REL::RelocationID(18488, 18931) };
+			const float xy = RE::deg_to_rad(static_cast<float>(rotationXY(a_cell)));
+			const float z = RE::deg_to_rad(static_cast<float>(rotationZ(a_cell)));
+			return { std::cos(xy) * std::cos(z), -std::sin(xy) * std::cos(z), std::sin(z) };
+		}
 
 		// Interiors' directional light as the engine set it (the world light scene's sun) while the
 		// player was in them, by cell, for this session (Observe).
@@ -181,13 +173,7 @@ namespace Render::SunDirections
 		const float widen = 0.5f * *alphaTransTime;
 		const float rise = 0.5f * (sky->GetSunriseBegin() + sky->GetSunriseEnd()) - widen;
 		const float set = 0.5f * (sky->GetSunsetBegin() + sky->GetSunsetEnd()) + widen;
-		float       x = 0.0f;
-		if (hour > rise && hour < set) {
-			x = 1.0f - 2.0f * (hour - rise) / (set - rise);
-		} else {
-			const float intoNight = hour >= set ? hour - set : day - set + hour;
-			x = 2.0f * intoNight / (day - (set - rise)) - 1.0f;
-		}
+		const float x = Core::Lighting::SunArc(hour, day, rise, set);
 		// Community Shaders' Sky Sync turns the light toward the sun's place in the sky (the
 		// position Sun::Update gives it, from the same x) instead: ~13 degrees steeper by day than
 		// the light above, and the street's shadows seen from indoors fell shorter than outside.
@@ -255,20 +241,20 @@ namespace Render::SpaceLighting
 {
 	namespace
 	{
-	void ApplyCellDirectional(RE::ShadowSceneNode* a_scene, RE::TESObjectCELL* a_cell)
-	{
-		auto* own = a_cell ? a_cell->GetLighting() : nullptr;
-		auto* sun = a_scene->GetRuntimeData().sunLight;
-		auto* light = sun ? sun->light.get() : nullptr;
-		if (!own || !light) {
-			return;
+		void ApplyCellDirectional(RE::ShadowSceneNode* a_scene, RE::TESObjectCELL* a_cell)
+		{
+			auto* own = a_cell ? a_cell->GetLighting() : nullptr;
+			auto* sun = a_scene->GetRuntimeData().sunLight;
+			auto* light = sun ? sun->light.get() : nullptr;
+			if (!own || !light) {
+				return;
+			}
+			const auto& color = Interior(a_cell, RE::INTERIOR_DATA::Inherit::kDirectionalColor).directional;
+			auto&       runtime = light->GetLightRuntimeData();
+			runtime.diffuse = { color.red / 255.0f, color.green / 255.0f, color.blue / 255.0f };
+			runtime.fade = Interior(a_cell, RE::INTERIOR_DATA::Inherit::kDirectionalFade).directionalFade;
+			SetLightDirection(light, SunDirections::OfCell(a_cell));
 		}
-		const auto& color = Interior(a_cell, RE::INTERIOR_DATA::Inherit::kDirectionalColor).directional;
-		auto&       runtime = light->GetLightRuntimeData();
-		runtime.diffuse = { color.red / 255.0f, color.green / 255.0f, color.blue / 255.0f };
-		runtime.fade = Interior(a_cell, RE::INTERIOR_DATA::Inherit::kDirectionalFade).directionalFade;
-		SetLightDirection(light, SunDirections::OfCell(a_cell));
-	}
 
 	}
 
@@ -354,34 +340,34 @@ namespace Render::SpaceLighting
 
 	namespace
 	{
-	struct OutdoorSnapshot
-	{
-		RE::NiColor         sun;
-		float               sunFade = 1.0f;
-		RE::NiPoint3        sunDirection;
-		AmbientSnapshot     ambient{};
-		SkyColors           sky{};
-		float               gameHour = 0.0f;
-		RE::TESWorldSpace*  world = nullptr;
-		bool                valid = false;
-	};
-	OutdoorSnapshot outdoorSnapshot;
+		struct OutdoorSnapshot
+		{
+			RE::NiColor         sun;
+			float               sunFade = 1.0f;
+			RE::NiPoint3        sunDirection;
+			AmbientSnapshot     ambient{};
+			SkyColors           sky{};
+			float               gameHour = 0.0f;
+			RE::TESWorldSpace*  world = nullptr;
+			bool                valid = false;
+		};
+		OutdoorSnapshot outdoorSnapshot;
 
-	const OutdoorSnapshot* RecentOutdoors(RE::TESObjectCELL* a_cell)
-	{
-		auto* sky = RE::Sky::GetSingleton();
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		auto* here = player ? player->GetParentCell() : nullptr;
-		const bool outdoorsNow = here && !here->IsInteriorCell();
-		if (!outdoorSnapshot.valid || !sky || !a_cell || (!outdoorsNow && a_cell->GetRuntimeData().worldSpace != outdoorSnapshot.world)) {
-			return nullptr;
+		const OutdoorSnapshot* RecentOutdoors(RE::TESObjectCELL* a_cell)
+		{
+			auto* sky = RE::Sky::GetSingleton();
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			auto* here = player ? player->GetParentCell() : nullptr;
+			const bool outdoorsNow = here && !here->IsInteriorCell();
+			if (!outdoorSnapshot.valid || !sky || !a_cell || (!outdoorsNow && a_cell->GetRuntimeData().worldSpace != outdoorSnapshot.world)) {
+				return nullptr;
+			}
+			float age = sky->currentGameHour - outdoorSnapshot.gameHour;
+			if (age < 0.0f) {
+				age += 24.0f;
+			}
+			return age < 0.5f ? &outdoorSnapshot : nullptr;
 		}
-		float age = sky->currentGameHour - outdoorSnapshot.gameHour;
-		if (age < 0.0f) {
-			age += 24.0f;
-		}
-		return age < 0.5f ? &outdoorSnapshot : nullptr;
-	}
 
 	}
 
@@ -429,13 +415,13 @@ namespace Render::SpaceLighting
 		// A space's light for a room merged into the world: its ambient turned from the space's own
 		// coordinates into the world's by a_rotation. ambient(n_world) = M * n_cell + t with
 		// n_cell = R^T n_world, so M' = M R^T.
-		Render::SpaceLight Light(const RE::NiColor& a_sun, const RE::NiPoint3& a_towardSun, const RE::NiTransform& a_ambient, const RE::NiMatrix3& a_rotation)
+		Render::SpaceLight Light(const RE::NiColor& a_sun, const RE::NiPoint3& a_towardSun, const Core::Transform& a_ambient, const RE::NiMatrix3& a_rotation)
 		{
 			Render::SpaceLight light;
 			light.sun = ToCore(a_sun);
 			light.towardSun = ToCore(a_towardSun);
-			light.ambientRotate = ToCore(a_ambient.rotate * a_rotation.Transpose());
-			light.ambientTranslate = ToCore(a_ambient.translate);
+			light.ambientRotate = a_ambient.rotate * ToCore(a_rotation).Transpose();
+			light.ambientTranslate = a_ambient.translate;
 			return light;
 		}
 	}
@@ -535,15 +521,15 @@ namespace Render::SpaceLighting
 		if (!weather) {
 			return std::nullopt;
 		}
-		const RE::NiTransform ambient = AmbientTransform(weather->ambient);
-		const RE::NiPoint3    color = ambient.rotate * a_normal + ambient.translate;
+		const auto ambient = AmbientTransform(weather->ambient);
+		const auto color = ambient.rotate * ToCore(a_normal) + ambient.translate;
 		return RE::NiColor{ std::max(color.x, 0.0f), std::max(color.y, 0.0f), std::max(color.z, 0.0f) };
 	}
 
 	json OutdoorLightingProbe()
 	{
 		const auto Rgb = [](const RE::NiColor& a_color) { return json::array({ a_color.red, a_color.green, a_color.blue }); };
-		const auto Transform = [](const RE::NiTransform& a_t) {
+		const auto Transform = [](const Core::Transform& a_t) {
 			json rows = json::array();
 			for (int row = 0; row < 3; ++row) {
 				rows.push_back({ a_t.rotate.entry[row][0], a_t.rotate.entry[row][1], a_t.rotate.entry[row][2], a_t.translate[row] });
@@ -562,7 +548,8 @@ namespace Render::SpaceLighting
 		if (outdoorSnapshot.valid) {
 			RE::NiTransform built;
 			std::memcpy(&built, outdoorSnapshot.ambient.built.data(), sizeof(RE::NiTransform));
-			result["snapshot"] = { { "sun", Rgb(outdoorSnapshot.sun) }, { "fade", outdoorSnapshot.sunFade }, { "ambient", Transform(built) }, { "hour", outdoorSnapshot.gameHour },
+			const auto ambient = ToCore(built);
+			result["snapshot"] = { { "sun", Rgb(outdoorSnapshot.sun) }, { "fade", outdoorSnapshot.sunFade }, { "ambient", Transform(ambient) }, { "hour", outdoorSnapshot.gameHour },
 				{ "direction", { outdoorSnapshot.sunDirection.x, outdoorSnapshot.sunDirection.y, outdoorSnapshot.sunDirection.z } } };
 		}
 		const auto computed = SunDirections::Outdoors();

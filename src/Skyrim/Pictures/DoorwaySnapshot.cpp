@@ -46,17 +46,14 @@ namespace Portal::Snapshot
 
 	void Prewarm()
 	{
-		if (auto* device = Render::D3D::Device()) {
-			const auto started = std::chrono::steady_clock::now();
-			Gpu::EnsurePipeline(device);
-			logger::info("portal: doorway picture shaders made ahead ({:.1f} ms)", std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count());
-		}
+		const auto started = std::chrono::steady_clock::now();
+		Gpu::EnsurePipeline(Render::D3D::Device());
+		logger::info("portal: doorway picture shaders made ahead ({:.1f} ms)", std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count());
 	}
 
 	bool HasPicture(RE::FormID a_door, bool a_outdoors)
 	{
-		auto* device = Render::D3D::Device();
-		return device && !Gpu::Failed() && Cache::Find(device, a_door, a_outdoors);
+		return !Gpu::Failed() && Cache::Find(Render::D3D::Device(), a_door, a_outdoors);
 	}
 
 	std::optional<float> RoomBrightness(RE::FormID a_door)
@@ -66,11 +63,10 @@ namespace Portal::Snapshot
 
 	bool CameraPictureWanted(RE::FormID a_door, const Corners& a_corners)
 	{
-		auto* device = Render::D3D::Device();
-		if (!device || Gpu::Failed()) {
+		if (Gpu::Failed()) {
 			return false;
 		}
-		const auto* picture = Cache::Find(device, a_door, false);
+		const auto* picture = Cache::Find(Render::D3D::Device(), a_door, false);
 		const auto [width, height] = Camera::SizeFor(Camera::kRoomCamera.extent, Camera::PictureHeight(), Camera::AspectOf(a_corners));
 		return !picture || picture->version < Cache::kVersion || picture->extent != Camera::kRoomCamera.extent || picture->width != width || picture->height != height;
 	}
@@ -81,7 +77,7 @@ namespace Portal::Snapshot
 		auto*       context = Render::D3D::Context();
 		auto*       device = Render::D3D::Device();
 		// Without the depth a picture would be drawn flat again, and kept so on disk.
-		if (!context || !device || !a_source.color || !a_source.depth || !Gpu::EnsurePipeline(device)) {
+		if (!a_source.color || !a_source.depth || !Gpu::EnsurePipeline(device)) {
 			return;
 		}
 		Cache::WriteReadbacks(context);
@@ -142,9 +138,6 @@ namespace Portal::Snapshot
 		ID3D11Resource*      sceneResource = nullptr;
 		D3D11_TEXTURE2D_DESC sceneDesc{};
 		sceneView->GetResource(&sceneResource);
-		if (!sceneResource) {
-			return;
-		}
 		static_cast<ID3D11Texture2D*>(sceneResource)->GetDesc(&sceneDesc);
 		sceneResource->Release();
 		if (!Gpu::EnsureTarget(device, width, height)) {
@@ -202,7 +195,7 @@ namespace Portal::Snapshot
 	{
 		auto* context = Render::D3D::Context();
 		auto* device = Render::D3D::Device();
-		if (!context || !device || a_alpha <= 0.0f || !Gpu::EnsurePipeline(device)) {
+		if (a_alpha <= 0.0f || !Gpu::EnsurePipeline(device)) {
 			return;
 		}
 		Cache::WriteReadbacks(context);
@@ -259,9 +252,7 @@ namespace Portal::Snapshot
 	void Flush()
 	{
 		if (Cache::HasReadbacks()) {
-			if (auto* context = Render::D3D::Context()) {
-				Cache::WriteReadbacks(context);
-			}
+			Cache::WriteReadbacks(Render::D3D::Context());
 		}
 	}
 

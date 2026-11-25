@@ -37,10 +37,9 @@ namespace
 
 	namespace Pass = Render::Native::Pass;
 	using Render::ClipPlane;
+	using Core::Doorway::Cut;
 	using Core::Doorway::Door;
 	using Core::Doorway::Plane;
-	using Core::Doorway::Side;
-	using Core::Doorway::SideOf;
 
 	// Set from the portal code (main thread, as is rendering).
 	std::mutex                stateLock;
@@ -50,22 +49,18 @@ namespace
 	std::atomic<bool>         portalPass = false;
 	bool                      ready = false;
 
-	// One draw's cut, worked out at the shader's per-draw setup: X's five planes, and a city gate's
-	// passage end.
-	constexpr int kPlanesPerPiece = 6;
-	constexpr int kMaxPieces = 6;
-
-	struct Piece
+	// One draw's cut, worked out at the shader's per-draw setup.
+	struct ClipPiece
 	{
-		float planes[kPlanesPerPiece][4];  // clip space; unused ones are (0,0,0,1): distance w > 0
+		float planes[Core::Doorway::kMaxPlanes][4];  // clip space; unused ones are (0,0,0,1): distance w > 0
 	};
 
 	struct Job
 	{
-		bool  active = false;
-		bool  skip = false;  // nothing of the shape shows
-		int   pieces = 0;
-		Piece piece[kMaxPieces];
+		bool      active = false;
+		bool      skip = false;  // nothing of the shape shows
+		int       pieces = 0;
+		ClipPiece piece[Core::Doorway::kMaxPlanes];
 	} job;
 
 	struct Stats
@@ -127,9 +122,9 @@ namespace
 		}
 	}
 
-	void SetPiece(Piece& a_piece, const Plane* a_planes, int a_count)
+	void SetPiece(ClipPiece& a_piece, const Plane* a_planes, int a_count)
 	{
-		for (int i = 0; i < kPlanesPerPiece; ++i) {
+		for (int i = 0; i < Core::Doorway::kMaxPlanes; ++i) {
 			if (i < a_count) {
 				ToClipSpace(a_planes[i], a_piece.planes[i]);
 			} else {
@@ -146,6 +141,33 @@ namespace
 		return { eye.x, eye.y, eye.z };
 	}
 
+	void Apply(const Cut& a_cut)
+	{
+		switch (a_cut.kind) {
+		case Cut::Kind::kWhole:
+			return;
+		case Cut::Kind::kWholeSeen:
+			++stats.passesWhole;
+			return;
+		case Cut::Kind::kLeftOut:
+			job.active = job.skip = true;
+			++stats.passesLeftOut;
+			return;
+		case Cut::Kind::kPieces:
+			if (!UpdateClipTransform()) {
+				return;
+			}
+			job.active = true;
+			job.skip = a_cut.count == 0;
+			job.pieces = a_cut.count;
+			for (int i = 0; i < a_cut.count; ++i) {
+				SetPiece(job.piece[i], a_cut.pieces[i].planes, a_cut.pieces[i].count);
+			}
+			++stats.passesCut;
+			return;
+		}
+	}
+
 	void PlanPortalPass(const RE::BSRenderPass* a_pass)
 	{
 		std::optional<ClipPlane> clip;
@@ -153,24 +175,11 @@ namespace
 			std::scoped_lock lock(stateLock);
 			clip = portalClip;
 		}
-		if (!clip || !UpdateClipTransform()) {
+		if (!clip) {
 			return;
 		}
-		const Plane plane{ { clip->normal.x, clip->normal.y, clip->normal.z }, -static_cast<double>(clip->offset) };
-		switch (SideOf(plane, ToCore(a_pass->geometry->worldBound.center), a_pass->geometry->worldBound.radius)) {
-		case Side::kInside:
-			return;
-		case Side::kOutside:
-			job.active = job.skip = true;
-			++stats.passesLeftOut;
-			return;
-		case Side::kCrosses:
-			break;
-		}
-		job.active = true;
-		job.pieces = 1;
-		SetPiece(job.piece[0], &plane, 1);
-		++stats.passesCut;
+		const auto& bound = a_pass->geometry->worldBound;
+		Apply(Core::Doorway::CutAt(Core::Doorway::KeptSide(*clip), ToCore(bound.center), bound.radius));
 	}
 
 	void PlanMerged(const RE::BSRenderPass* a_pass)
@@ -185,84 +194,8 @@ namespace
 		if (!d || !Pass::InMainWorldPass() || Render::Scene().IsPlayerShape(a_pass->geometry)) {
 			return;
 		}
-		const bool mergedSpace = Render::Scene().IsMergedShape(a_pass->geometry);
-		const bool cameraSpace = mergedSpace == d->cameraMerged;
-		Plane doorway[5];
-		if (!Core::Doorway::Planes(*d, ToCore(Eye()), doorway)) {
-			if (!cameraSpace) {
-				job.active = job.skip = true;
-				++stats.passesLeftOut;
-			}
-			return;
-		}
-
-		Plane planes[kPlanesPerPiece];
-		std::ranges::copy(doorway, planes);
-		int count = 5;
-		if (passage > 0.0f) {
-			// A city gate: X ends where the far gate stands in the world (the fork's SeamlessDoorClips).
-			planes[count++] = Core::Doorway::Through(d->center + d->normal * passage, d->normal * -1.0f);
-		}
 		const auto& bound = a_pass->geometry->worldBound;
-		Side sides[kPlanesPerPiece];
-		bool clear = false;  // wholly outside X
-		bool within = true;  // wholly inside X
-		for (int i = 0; i < count; ++i) {
-			sides[i] = SideOf(planes[i], ToCore(bound.center), bound.radius);
-			clear |= sides[i] == Side::kOutside;
-			within &= sides[i] == Side::kInside;
-		}
-		if (!UpdateClipTransform()) {
-			return;
-		}
-		if (!cameraSpace) {
-			// Seen only through the doorway.
-			if (clear) {
-				job.active = job.skip = true;
-				++stats.passesLeftOut;
-				return;
-			}
-			if (within) {
-				++stats.passesWhole;
-				return;  // wholly in view through the doorway: drawn as it is
-			}
-			job.active = true;
-			job.pieces = 1;
-			SetPiece(job.piece[0], planes, count);
-			++stats.passesCut;
-			return;
-		}
-		// Seen everywhere except through the doorway.
-		if (clear) {
-			return;
-		}
-		if (within) {
-			job.active = job.skip = true;
-			++stats.passesLeftOut;
-			return;
-		}
-		job.active = true;
-		job.pieces = 0;
-		for (int k = 0; k < count; ++k) {
-			// Piece k: planes 0..k-1 kept, plane k cut away.
-			bool empty = sides[k] == Side::kInside;
-			for (int i = 0; i < k && !empty; ++i) {
-				empty = sides[i] == Side::kOutside;
-			}
-			if (empty) {
-				continue;
-			}
-			Plane piece[kPlanesPerPiece];
-			for (int i = 0; i < k; ++i) {
-				piece[i] = planes[i];
-			}
-			piece[k] = planes[k].Flipped();
-			SetPiece(job.piece[job.pieces++], piece, k + 1);
-		}
-		if (job.pieces == 0) {
-			job.skip = true;
-		}
-		++stats.passesCut;
+		Apply(Core::Doorway::CutThroughDoorway(*d, ToCore(Eye()), passage, Render::Scene().IsMergedShape(a_pass->geometry), ToCore(bound.center), bound.radius));
 	}
 
 	void BeginPass(const RE::BSRenderPass* a_pass)
@@ -285,8 +218,6 @@ namespace
 	{
 		job.active = false;
 	}
-
-	// Geometry shaders, one per vertex shader output signature.
 
 	struct Element
 	{
@@ -438,7 +369,7 @@ namespace
 			if (shaders.failed++ < 10) {
 				logger::warn("native mask: geometry shader's signature doesn't match its vertex shader's (packing differs); those shapes aren't cut:\n{}", *source);
 			}
-		} else if (auto* device = Render::D3D::Device(); !device || FAILED(device->CreateGeometryShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &shader))) {
+		} else if (FAILED(Render::D3D::Device()->CreateGeometryShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &shader))) {
 			shader = nullptr;
 			++shaders.failed;
 		} else {
@@ -482,16 +413,12 @@ namespace
 		if (planeBuffer) {
 			return true;
 		}
-		auto* device = Render::D3D::Device();
-		if (!device) {
-			return false;
-		}
 		D3D11_BUFFER_DESC desc{};
-		desc.ByteWidth = sizeof(Piece);
+		desc.ByteWidth = sizeof(ClipPiece);
 		desc.Usage = D3D11_USAGE_DYNAMIC;
 		desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 		desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-		return SUCCEEDED(device->CreateBuffer(&desc, nullptr, &planeBuffer));
+		return SUCCEEDED(Render::D3D::Device()->CreateBuffer(&desc, nullptr, &planeBuffer));
 	}
 
 	using DrawIndexed_t = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, UINT, UINT, INT);
@@ -610,7 +537,7 @@ namespace
 			if (FAILED(a_context->Map(planeBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
 				continue;
 			}
-			std::memcpy(mapped.pData, &job.piece[i], sizeof(Piece));
+			std::memcpy(mapped.pData, &job.piece[i], sizeof(ClipPiece));
 			a_context->Unmap(planeBuffer, 0);
 			a_draw();
 			++stats.piecesDrawn;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Lighting/Ambient.h"
 #include "Skyrim/Render/Wire.h"
 
 // The light of a space seen from another: its sun, directional ambient, fog and sky, worked out
@@ -11,12 +12,7 @@ namespace Render::SpaceLighting
 	// Lighting shaders read one global directional ambient, set each frame for the current space
 	// by Sky::SetDirectionalAmbientColors (ID 105643, colors[3][2] + specular tint + fresnel). The
 	// portal's space needs its own, so it is set for the portal pass and the world's put back.
-	struct AmbientState
-	{
-		float colors[3][2][3];  // [x/y/z][max/min][rgb]
-		float tint[3];
-		float fresnel;
-	};
+	using AmbientState = Core::Lighting::Ambient;
 
 	// Everything ID 105643 writes, as memory: a copy of its inputs (ID 414646, 0x48 bytes) and what
 	// it builds from them (from ID 390984: the ambient transform, then tint and fresnel, 17 floats).
@@ -32,6 +28,9 @@ namespace Render::SpaceLighting
 
 	[[nodiscard]] AmbientSnapshot SaveAmbient();
 	void                          RestoreAmbient(const AmbientSnapshot& a_snapshot);
+
+	// The directional ambient transform the lighting shaders read (what ID 105643 builds), in the engine's own memory.
+	[[nodiscard]] RE::NiTransform& EngineAmbientTransform();
 
 	struct SkyColors
 	{

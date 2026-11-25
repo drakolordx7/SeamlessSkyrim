@@ -11,14 +11,9 @@ namespace Render::D3D
 
 	ID3D11Device* Device()
 	{
-		auto*         context = Context();
 		ID3D11Device* device = nullptr;
-		if (context) {
-			context->GetDevice(&device);
-		}
-		if (device) {
-			device->Release();
-		}
+		Context()->GetDevice(&device);
+		device->Release();
 		return device;
 	}
 

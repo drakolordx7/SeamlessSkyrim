@@ -47,13 +47,8 @@ namespace Render::Present
 
 	void Install()
 	{
-		// Only when something needs it (agent screenshots, portal compositing): installed during
-		// normal play, the Present hook sat next to CS's frame-generation proxy and the image came
-		// out blurred/doubled even with portals off.
-		if (Diag::AgentMode() || Portal::Manager::Enabled()) {
-			if (!originalPresent) {
-				InstallPresentHook();
-			}
+		if ((Diag::AgentMode() || Portal::Manager::Enabled()) && !originalPresent) {
+			InstallPresentHook();
 		}
 	}
 
