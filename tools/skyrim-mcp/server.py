@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import io
 import json
+import math
 import os
 import socket
 import subprocess
@@ -29,8 +30,40 @@ from pyvda import AppView, VirtualDesktop, get_virtual_desktops
 
 import retools
 
-GAME_DIR = Path(os.environ.get("SKYRIM_GAME_DIR", r"E:\SteamLibrary\steamapps\common\Skyrim Special Edition"))
-DOCS_DIR = Path(os.environ.get("SKYRIM_DOCS_DIR", Path.home() / "Documents" / "My Games" / "Skyrim Special Edition"))
+# ---- configuration ------------------------------------------------------------------------
+#
+# Defaults are the MO2 portable instance of the Skyrim modding project (D:\AI\Active\Skyrim\instance).
+# Override with environment variables, or with a harness.json next to this file (not in git:
+# {"game_dir": "...", "mo2_dir": ...}; keys are the lower-case names below without SKYRIM_);
+# the environment wins over the file. For the original Vortex/Steam setup:
+#   SKYRIM_LAUNCH=skse SKYRIM_GAME_DIR="E:\SteamLibrary\steamapps\common\Skyrim Special Edition"
+#   SKYRIM_SAVES_DIR="" (empty: derived from Skyrim.ini's sLocalSavePath in SKYRIM_DOCS_DIR)
+#
+#   SKYRIM_LAUNCH       "mo2" (default: ModOrganizer.exe moshortcut://:<SKYRIM_MO2_EXE>, so the mods
+#                       are in the game's virtual file system) or "skse" (skse64_loader.exe directly)
+#   SKYRIM_MO2_DIR      the portable MO2 folder holding ModOrganizer.exe
+#   SKYRIM_MO2_PROFILE  MO2 profile (default "Default")
+#   SKYRIM_MO2_EXE      the executable's title in MO2 (default "SKSE")
+#   SKYRIM_GAME_DIR     the game folder: SkyrimSE.exe, for the disassembler (default: MO2's Stock Game)
+#   SKYRIM_DOCS_DIR     Documents\My Games\Skyrim Special Edition (SKSE and plugin logs go there)
+#   SKYRIM_SAVES_DIR    the folder load_game/list_saves read (default: the MO2 profile's saves)
+
+
+def _settings() -> dict[str, str]:
+    file = Path(__file__).resolve().parent / "harness.json"
+    values = {k.lower(): str(v) for k, v in json.loads(file.read_text("utf-8")).items()} if file.exists() else {}
+    values.update({k[len("SKYRIM_"):].lower(): v for k, v in os.environ.items() if k.startswith("SKYRIM_")})
+    return values
+
+
+_cfg = _settings()
+MO2_DIR = Path(_cfg.get("mo2_dir", r"D:\AI\Active\Skyrim\instance"))
+MO2_PROFILE = _cfg.get("mo2_profile", "Default")
+MO2_EXE_TITLE = _cfg.get("mo2_exe", "SKSE")
+LAUNCH_MODE = _cfg.get("launch", "mo2")
+GAME_DIR = Path(_cfg.get("game_dir", str(MO2_DIR / "Stock Game")))
+DOCS_DIR = Path(_cfg.get("docs_dir", str(Path.home() / "Documents" / "My Games" / "Skyrim Special Edition")))
+SAVES_DIR = Path(_cfg["saves_dir"]) if _cfg.get("saves_dir") else (MO2_DIR / "profiles" / MO2_PROFILE / "saves" if LAUNCH_MODE == "mo2" else None)
 SKSE_LOG_DIR = DOCS_DIR / "SKSE"
 PLUGIN_LOG = SKSE_LOG_DIR / "SeamlessSkyrim.log"
 BRIDGE_ADDR = ("127.0.0.1", 47800)
@@ -446,16 +479,36 @@ def game_audio(muted: bool) -> dict[str, Any]:
     return {"muted": muted}
 
 
+def mo2_running() -> bool:
+    return any((proc.info["name"] or "").lower() == "modorganizer.exe" for proc in psutil.process_iter(["name"]))
+
+
+def launch_command() -> tuple[list[str], Path]:
+    if LAUNCH_MODE == "mo2":
+        # MO2 starts the game inside its virtual file system with MO2's own environment, which is
+        # ours: the SEAMLESS_AGENT_* variables below reach SkyrimSE.exe and the plugin.
+        return [str(MO2_DIR / "ModOrganizer.exe"), "-p", MO2_PROFILE, f"moshortcut://:{MO2_EXE_TITLE}"], MO2_DIR
+    return [str(GAME_DIR / "skse64_loader.exe")], GAME_DIR
+
+
 @mcp.tool()
 def game_launch(save: str | None = None, timeout_seconds: float = 300, background_mode: bool = True) -> dict[str, Any]:
-    """Start Skyrim through skse64_loader.exe and wait for the main menu.
+    """Start Skyrim (through MO2 and SKSE with SKYRIM_LAUNCH=mo2, the default) and wait for the main menu.
 
-    If `save` is given (file name without extension, see list_saves), load it and wait until the
-    player is in the world. With background_mode the game runs on its own virtual desktop so
-    the user can keep working; switch with game_window_mode.
+    If `save` is given (file name without extension, see list_saves) and exists, load it and wait
+    until the player is in the world; a name with no save file is ignored (use place_go / run_route:
+    their {"load": name} steps fall back to starts.json). With background_mode the game runs on its
+    own virtual desktop so the user can keep working; switch with game_window_mode. Muted unless
+    game_audio(False) was called. Refuses while the user's game or, with MO2, MO2 itself is open.
     """
     if game_process():
         return {"error": "Skyrim is already running", "status": game_status()}
+    if LAUNCH_MODE == "mo2" and mo2_running():
+        # A second ModOrganizer.exe hands the launch to the one that is open, and that one's
+        # environment has no agent variables: the game would start without the bridge.
+        return {"error": "Mod Organizer 2 is open: close it, a game it starts has no agent bridge"}
+    if save and not save_exists(save):
+        save = None
     background.enabled = background_mode
     background.parked_hwnd = 0
     background.remember_user_window()
@@ -464,7 +517,7 @@ def game_launch(save: str | None = None, timeout_seconds: float = 300, backgroun
     # The plugin only runs the bridge (and its other agent-only hooks) for games we launch.
     env["SEAMLESS_AGENT"] = "1"
     if background_mode:
-        # The plugin then stops the game from activating its own window (src/Bridge/AgentMode.cpp);
+        # The plugin then stops the game from activating its own window (AgentMode.cpp);
         # otherwise Windows follows each activation to the game's desktop and drags the user along.
         env["SEAMLESS_AGENT_BACKGROUND"] = "1"
     if background.mute:
@@ -475,9 +528,13 @@ def game_launch(save: str | None = None, timeout_seconds: float = 300, backgroun
     if save:
         # The plugin loads it itself the moment the main menu opens (AgentMode::InstallAutoLoad).
         env["SEAMLESS_AGENT_LOAD"] = save
-    subprocess.Popen([str(GAME_DIR / "skse64_loader.exe")], cwd=GAME_DIR, env=env)
+    command, cwd = launch_command()
+    subprocess.Popen(command, cwd=cwd, env=env)
     started = time.monotonic()
     deadline = started + timeout_seconds
+    # The loader exits immediately and SkyrimSE.exe takes a moment to appear (MO2 first builds its
+    # virtual file system), so only treat a missing process as a startup crash after a grace period.
+    grace = 90 if LAUNCH_MODE == "mo2" else 20
     while time.monotonic() < deadline:
         # The game takes focus when its window appears; the plugin forces bAlwaysActive, so it
         # keeps starting up once we hand focus back.
@@ -490,9 +547,7 @@ def game_launch(save: str | None = None, timeout_seconds: float = 300, backgroun
             pass
         time.sleep(0.5)  # poll faster than the bridge check so the window is parked quickly
         background.apply()
-        # The loader exits immediately and SkyrimSE.exe takes a moment to appear, so only treat
-        # a missing process as a startup crash after a grace period.
-        if time.monotonic() - started > 20 and not game_process():
+        if time.monotonic() - started > grace and not game_process():
             raise BridgeError("Skyrim exited during startup; check read_log('skse') / read_log('crash')")
         time.sleep(2)
     else:
@@ -558,9 +613,12 @@ def console(command: str) -> dict[str, Any]:
 def save_dir() -> Path:
     """The folder the game actually loads from.
 
-    Vortex profiles redirect saves via SLocalSavePath in Skyrim.ini; saves outside that folder
-    belong to other profiles and the game silently ignores load requests for them.
+    SKYRIM_SAVES_DIR (default with MO2: the profile's saves folder). Otherwise Vortex profiles
+    redirect saves via SLocalSavePath in Skyrim.ini; saves outside that folder belong to other
+    profiles and the game silently ignores load requests for them.
     """
+    if SAVES_DIR:
+        return SAVES_DIR
     ini = DOCS_DIR / "Skyrim.ini"
     if ini.exists():
         for line in ini.read_text("utf-8", "replace").splitlines():
@@ -716,23 +774,70 @@ def place_save(name: str, note: str = "") -> dict[str, Any]:
 
 
 def go_to_place(name: str) -> dict[str, Any]:
+    """The place's cell by `coc` (an exterior cell named Wilderness, which `coc` can't pick, by
+    `cow <worldspace> <grid x> <grid y>` from its "worldspace" and position), then its exact
+    position and heading. A place without "pos" is just where `coc` puts the player."""
     places = load_json(PLACES_FILE)
     if name not in places:
         raise ValueError(f"no place '{name}'; known: {', '.join(sorted(places))}")
     place = places[name]
     state = bridge.call("state")
-    if (state.get("player") or {}).get("cell", {}).get("editorId") != place["cell"]:
+    player = state.get("player") or {}
+    here = (player.get("cell") or {}).get("editorId")
+    if place["cell"] == "Wilderness":
+        if not place.get("worldspace"):
+            raise ValueError(f"place '{name}' is in a Wilderness cell and has no 'worldspace' for cow")
+        x, y = place["pos"][:2]
+        near = here == "Wilderness" and math.hypot(player["pos"][0] - x, player["pos"][1] - y) < 8192
+        load = None if near else f"cow {place['worldspace']} {math.floor(x / 4096)} {math.floor(y / 4096)}"
+    elif here != place["cell"]:
         if not place["cell"]:
             raise ValueError(f"place '{name}' is in a cell without an editor id; coc can't reach it")
+        load = f"coc {place['cell']}"
+    else:
+        load = None
+    if load:
         background.remember_user_window()
         background.guard(60)
-        bridge.call("console", command=f"coc {place['cell']}")
+        bridge.call("console", command=load)
         time.sleep(3)
         wait_until_in_game(60)
-    bridge.call("move_to", pos=place["pos"])
-    bridge.call("console", command=f"player.setangle z {place['headingDeg']:.2f}")
+    if "pos" in place:
+        bridge.call("move_to", pos=place["pos"])
+    if "headingDeg" in place:
+        bridge.call("console", command=f"player.setangle z {place['headingDeg']:.2f}")
     time.sleep(0.5)
     return bridge.call("state")
+
+
+# A route's {"load": name} names a save of the author's (SeamlessTest...). Where this machine has no
+# such save, starts.json says where that save was: {"place": name} of a stored place, or {"coc":
+# cell} (where `coc` puts the player, usually at the cell's front door), then "console" commands.
+STARTS_FILE = Path(__file__).resolve().parent / "starts.json"
+
+
+def save_exists(name: str) -> bool:
+    return (save_dir() / f"{name}.ess").exists()
+
+
+def start_from(name: str) -> dict[str, Any]:
+    if save_exists(name):
+        return load_game(name)
+    starts = load_json(STARTS_FILE)
+    if name not in starts:
+        raise ValueError(f"no save '{name}' in {save_dir()} and no start for it in starts.json (known: {', '.join(sorted(starts))})")
+    start = starts[name]
+    if "place" in start:
+        state = go_to_place(start["place"])
+    else:
+        background.remember_user_window()
+        background.guard(60)
+        bridge.call("console", command=f"coc {start['coc']}")
+        time.sleep(3)
+        state = wait_until_in_game(60)
+    for command in start.get("console", []):
+        bridge.call("console", command=command)
+    return state
 
 
 @mcp.tool()
@@ -751,7 +856,7 @@ def place_list() -> dict[str, Any]:
 def run_step(step: dict[str, Any]) -> str:
     (kind, arg), = step.items()
     if kind == "load":
-        return brief(load_game(arg))
+        return brief(start_from(arg))
     if kind == "place":
         return brief(go_to_place(arg))
     if kind == "walk":

@@ -1,0 +1,60 @@
+{
+  "_note": "Where the author's test saves (routes' {\"load\": name}) were, for a machine without them: {\"place\": stored place} or {\"coc\": cell}, then \"console\" commands. Inferred from the routes and places; see run_step/start_from in server.py. A save file with the same name in the saves folder wins.",
+  "SeamlessTestBelethors": {
+    "place": "belethors-inside-front-door"
+  },
+  "SeamlessTestDrunkenHuntsmanInside": {
+    "coc": "WhiterunDrunkenHuntsman"
+  },
+  "SeamlessTestHonningbrew": {
+    "coc": "HonningbrewMeadery"
+  },
+  "SeamlessTestMarkarthMines": {
+    "place": "markarth-smelter-house-door-out"
+  },
+  "SeamlessTestMistveil": {
+    "place": "mistveil-keep-door"
+  },
+  "SeamlessTestRainBanneredMare": {
+    "place": "bannered-mare-door-out",
+    "console": [
+      "fw 0010A241"
+    ]
+  },
+  "SeamlessTestRainSolitudeGate": {
+    "place": "solitude-gate-street",
+    "console": [
+      "fw 0010A241"
+    ]
+  },
+  "SeamlessTestRiftenJail": {
+    "coc": "RiftenJail"
+  },
+  "SeamlessTestRiftenSouthGate": {
+    "place": "riften-south-gate-inside"
+  },
+  "SeamlessTestSolitudeCastleDour": {
+    "place": "solitude-castle-dour-door"
+  },
+  "SeamlessTestSolitudeGate": {
+    "place": "solitude-gate-inside"
+  },
+  "SeamlessTestSolitudeHallOfTheDead": {
+    "place": "solitude-hall-of-the-dead-door"
+  },
+  "SeamlessTestWhiterunGateOutside": {
+    "place": "whiterun-gate-outside"
+  },
+  "SeamlessTestWindhelmSadris": {
+    "place": "windhelm-sadris-door"
+  },
+  "SeamlessTestWinterholdArcanaeum": {
+    "place": "winterhold-elements-arcanaeum-door"
+  },
+  "Quicksave0_00000000_0_507269736F6E6572_MarkarthWorld_000048_20261123161230_1_1": {
+    "place": "markarth-understone-front"
+  },
+  "Quicksave0_00000000_0_507269736F6E6572_RiftenBeggarsRow_000035_20261123153044_1_1": {
+    "place": "riften-beggars-row-door"
+  }
+}

@@ -21,6 +21,17 @@
       -3374.91259765625
     ]
   },
+  "belethors-inside-front-door": {
+    "cell": "WhiterunBelethorsGeneralGoods",
+    "headingDeg": 180.0,
+    "interior": true,
+    "note": "Inside Belethor's General Goods facing its front door (start of the SeamlessTestBelethors save; position from route belethors-out-in-bannered-mare, inferred, not captured)",
+    "pos": [
+      0.0,
+      -480.0,
+      68.0
+    ]
+  },
   "blackbriar-meadery-door": {
     "cell": "RiftenBlackBriarMeadery",
     "headingDeg": 91.10099029541016,
@@ -63,7 +74,8 @@
       -178746.984375,
       3410.0,
       -2182.39501953125
-    ]
+    ],
+    "worldspace": "MarkarthWorld"
   },
   "markarth-understone-inside-looking-out": {
     "cell": "MarkarthUnderStoneKeep",
@@ -142,6 +154,17 @@
       11496.474609375
     ]
   },
+  "riften-south-gate-inside": {
+    "cell": "Wilderness",
+    "headingDeg": 180.0,
+    "interior": false,
+    "note": "Riften inside the south gate, facing out (SeamlessTestRiftenSouthGate; x/y from route riften-south-gate-turn-back, height and exact spot unknown: approximate; worldspace guessed from the city's other places, check with get_state)",
+    "pos": [
+      172215.0,
+      -99700.0
+    ],
+    "worldspace": "RiftenWorld"
+  },
   "solitude-castle-dour-door": {
     "cell": "SolitudeCastleDourDistrict02",
     "headingDeg": 290.0,
@@ -195,7 +218,8 @@
       -178770.0,
       3388.278076171875,
       -2182.92919921875
-    ]
+    ],
+    "worldspace": "MarkarthWorld"
   },
   "whiterun-gate-from-warmaidens": {
     "cell": "WhiterunPLainsDistrict03",
@@ -218,6 +242,18 @@
       -7432.99951171875,
       -3602.6240234375
     ]
+  },
+  "whiterun-gate-outside": {
+    "cell": "Wilderness",
+    "headingDeg": 90.0,
+    "interior": false,
+    "note": "Tamriel ~1000 units outside Whiterun's gate (0001B1F1) looking at it (SeamlessTestWhiterunGateOutside; position from route whiterun-gate-shadows)",
+    "pos": [
+      18337.0,
+      -7425.0,
+      -3770.0
+    ],
+    "worldspace": "Tamriel"
   },
   "whiterun-market-arcadia-mare": {
     "cell": "WhiterunPLainsDistrict03",
@@ -250,7 +286,8 @@
       140380.0,
       38639.99609375,
       -12961.22265625
-    ]
+    ],
+    "worldspace": "WindhelmWorld"
   },
   "winterhold-elements-arcanaeum-door": {
     "cell": "WinterholdCollegeHallofTheElements",
