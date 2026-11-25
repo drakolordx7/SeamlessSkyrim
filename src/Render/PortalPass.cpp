@@ -276,7 +276,6 @@ namespace Render::PortalPass
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};
 
-	// ---- rain and snow behind a door ----------------------------------------------------------
 	// The weather's precipitation is one particle shape (Sky::precip, under the world scene's
 	// "Weather" node) that the engine keeps centred on the camera. Rain writes no depth, so the
 	// doorway's picture, put over the main view after the world is drawn, covered the rain in front
@@ -556,7 +555,6 @@ namespace Render::PortalPass
 			static_cast<int>(depthDesc.Format));
 	}
 
-	// ---- the sun's shadows of an outdoor space behind a door -----------------------------------
 	// The portal pass had no sun shadows: through a city gate everything the other side's sun
 	// reaches was lit, also what its cliffs and walls shade, and a low sun's specular glinted on the
 	// needles of trees standing in a cliff's shadow. The other side's light scene has a sun shadow
@@ -901,7 +899,7 @@ namespace Render::PortalPass
 		data.renderMode = mainData.renderMode;
 		data.eyePosition = portalCamera->world.translate;
 
-		// ---- everything below is restored at the end ----
+		// Everything below is restored at the end.
 		auto&       shadowState = RE::BSGraphics::RendererShadowState::GetSingleton()->GetRuntimeData();
 		const auto  savedColorTarget = shadowState.renderTargets[0];
 		const auto  savedColorMode = shadowState.setRenderTargetMode[0];
