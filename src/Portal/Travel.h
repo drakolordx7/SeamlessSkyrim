@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Portal/Active.h"
 #include "Portal/DoorPair.h"
 
 // Walking through a load door without a loading screen.
@@ -19,7 +20,7 @@ namespace Portal::Travel
 	// a_cameraFloor: the closest the let-out may hold the camera.
 	// a_exact: the player is already standing in the other space as drawn (a merged room walked into
 	// on its copied collision): they come out exactly where that is, not a step past the far door.
-	void Request(const Manager::Active& a_portal, bool a_limitCamera, float a_cameraFloor = 0.0f, bool a_exact = false);
+	void Request(const Active& a_portal, bool a_limitCamera, float a_cameraFloor = 0.0f, bool a_exact = false);
 
 	// Right after loading a save: the player is taken through a_door (a load door, without opening it)
 	// to a_position (in the space it leads to) facing a_yaw, with the game's usual loading screen.

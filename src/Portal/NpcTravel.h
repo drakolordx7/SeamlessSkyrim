@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Portal/PortalManager.h"
+#include "Portal/Active.h"
 
 // NPCs using the portal's door. The engine moves an NPC that takes a load door from where it
 // stood in front of the door to the door's marker on the other side. With both sides alive and
@@ -13,7 +13,7 @@ namespace Portal::NpcTravel
 	void Install();
 
 	// Main thread, every frame a portal is active. a_remoteCells: the cells behind the door.
-	void Update(const Manager::Active& a_portal, const std::vector<RE::TESObjectCELL*>& a_remoteCells);
+	void Update(const Active& a_portal, const std::vector<RE::TESObjectCELL*>& a_remoteCells);
 
 	// No portal: forget what was tracked.
 	void Reset();

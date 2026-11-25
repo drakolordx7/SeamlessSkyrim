@@ -11,6 +11,10 @@ namespace Perf
 	void AddCpu(const char* a_name, double a_ms);
 	void AddCount(const char* a_name, double a_value);
 
+	// What Scope does, for the telemetry sink (Diag::Scope): a start stamp, 0 while off, and the end.
+	[[nodiscard]] std::int64_t ScopeBegin();
+	void                       ScopeEnd(const char* a_name, std::int64_t a_start);
+
 	class Scope
 	{
 	public:

@@ -1,8 +1,6 @@
 #include "Portal/PortalManager.h"
 
-#include "Bridge/AgentMode.h"
-#include "Bridge/FrameHooks.h"
-#include "Bridge/Perf.h"
+#include "Diag/Telemetry.h"
 #include "Hooks.h"
 #include "Paths.h"
 
@@ -1411,7 +1409,7 @@ namespace
 
 	void UnmergeLOD()
 	{
-		const Perf::Scope scope("unmerge LOD");
+		const Diag::Scope scope("unmerge LOD");
 		Portal::StreetLOD::Hide();
 		RestoreSkyMode();
 		if (!mergedLOD) {
@@ -2378,7 +2376,7 @@ namespace Portal::Manager
 		// mods' hooks (as with Precision's in the physics step). They can't be put in later when
 		// portals are switched on: the physics step's call site runs on job threads, and code
 		// can't be patched safely under them. Agent sessions get them always (portals_enable).
-		hooksInstalled = enabled || AgentMode::Enabled();
+		hooksInstalled = enabled || Diag::AgentMode();
 		if (!hooksInstalled) {
 			logger::info("portal: off in {}; no hooks installed (switching on needs a restart)", ini.string());
 			return;
@@ -2592,7 +2590,7 @@ namespace Portal::Manager
 			Portal::RemoteCell space;
 			bool attachedKept = false;
 			{
-				const Perf::Scope scope("attach kept");
+				const Diag::Scope scope("attach kept");
 				attachedKept = space.Attach(cell, false, false);
 			}
 			if (attachedKept) {
@@ -2662,10 +2660,10 @@ namespace Portal::Manager
 	void ReleaseAll(std::string_view a_reason, float a_holdoff, bool a_handOver)
 	{
 		{
-			const Perf::Scope scope("release kept");
+			const Diag::Scope scope("release kept");
 			ReleaseWarm(a_reason);
 		}
-		const Perf::Scope scope("release shown");
+		const Diag::Scope scope("release shown");
 		ReleaseShown(a_reason, a_holdoff, a_handOver);
 	}
 
@@ -2686,7 +2684,7 @@ namespace Portal::Manager
 		CloseDoor();
 		ClosePassage();
 		if (remote.merged) {
-			const Perf::Scope scope("release: end merged");
+			const Diag::Scope scope("release: end merged");
 			EndMerged(*primaryRoom, 0);
 		}
 		primaryRoom = std::make_unique<MergedRoom>();
@@ -2832,7 +2830,7 @@ namespace Portal::Manager
 				attached = true;
 				logger::info("portal: {} was kept behind its door{}", Probe::DescribeCell(candidate->cell), remote.FullyLoaded() ? ", loaded" : ", still loading");
 			} else {
-				const Perf::Scope scope("attach");
+				const Diag::Scope scope("attach");
 				attached = remote.Attach(candidate->cell, here->IsInteriorCell() && Mergeable(here, candidate->cell));
 			}
 			logger::info("portal: attach took {:.1f} ms", std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - attachStarted).count());
@@ -2879,11 +2877,11 @@ namespace Portal::Manager
 			if (mergeable && !waiting) {
 				CloseDoor();
 				try {
-					FrameHooks::CaptureEventFrames(L"merge", 40);
+					Diag::CaptureEventFrames(L"merge", 40);
 					const auto mergeStarted = std::chrono::steady_clock::now();
 					const auto placement = PlacementOf(*portal, Doors::Compute(*portal));
 					const auto toSource = placement.toSource;
-					const Perf::Scope scope("merge");
+					const Diag::Scope scope("merge");
 					const auto        result = remote.Merge(placement);
 					if (walkIntoRooms && !MergedOutdoors()) {
 						MergeRoomCollision(*portal, here->GetbhkWorld());
@@ -3797,7 +3795,7 @@ namespace Portal::Manager
 				if (street) {
 					MergePersistent();
 				}
-				const Perf::Scope scope("mark shapes");
+				const Diag::Scope scope("mark shapes");
 				MarkMergedShapes(a_room, &a_space, primary, street, true, mapping.sourceCenter);
 			} else if (!a_room.markPass && (a_room.markTimer -= a_delta) <= 0.0f) {
 				a_room.markTimer = 0.5f;

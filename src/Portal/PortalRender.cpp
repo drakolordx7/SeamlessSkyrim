@@ -1,9 +1,7 @@
 #include "Portal/PortalRender.h"
 #include "Portal/Travel.h"
 
-#include "Bridge/AgentMode.h"
-#include "Bridge/FrameHooks.h"
-#include "Bridge/Perf.h"
+#include "Diag/Telemetry.h"
 #include "Hooks.h"
 
 #include "Portal/CameraLimit.h"
@@ -1730,7 +1728,7 @@ namespace
 			// skips them: in the portal the room was empty. Outdoors the flag was clear.
 			const auto actors = capturing ? HideActorsForCapture(Portal::Manager::RemoteCells()) : ShowActorsForCull(Portal::Manager::RemoteCells());
 			{
-				const Perf::Scope scope("portal cull");
+				const Diag::Scope scope("portal cull");
 				RE::BSCullingProcess::Process(context);
 			}
 			if (capturing) {
@@ -1746,10 +1744,10 @@ namespace
 		const bool useBackend = lightDebug.communityShaders;
 		const bool shadowed = useBackend && lightDebug.sunShadows && !a_portal.cell->IsInteriorCell() && ::Render::Backend::CanShadowPortal();
 		if (shadowed) {
-			const Perf::Scope scope("portal shadows");
-			Perf::GpuBegin("gpu portal shadows");
+			const Diag::Scope scope("portal shadows");
+			Diag::GpuBegin("gpu portal shadows");
 			RenderPortalShadows(root, portalCamera.get());
-			Perf::GpuEnd("gpu portal shadows");
+			Diag::GpuEnd("gpu portal shadows");
 		}
 		if (useBackend) {
 			::Render::Backend::SetPortalWorldspace(a_portal.cell->IsInteriorCell() ? nullptr : a_portal.cell->GetRuntimeData().worldSpace);
@@ -1860,13 +1858,13 @@ namespace
 		}
 		inPortalSubmit = true;
 		{
-			const Perf::Scope scope("portal submit");
-			Perf::GpuBegin("gpu portal submit");
+			const Diag::Scope scope("portal submit");
+			Diag::GpuBegin("gpu portal submit");
 			RE::BSGraphics::Renderer::SubmitAccumulator(portalCamera.get(), portalAccumulator.get(), atRenderScale ? LiveRenderFlags() : kRenderFlags);
-			Perf::GpuEnd("gpu portal submit");
+			Diag::GpuEnd("gpu portal submit");
 		}
 		inPortalSubmit = false;
-		Perf::AddCount("portal passes", static_cast<double>(drawnThisSubmit.size()));
+		Diag::AddCount("portal passes", static_cast<double>(drawnThisSubmit.size()));
 		// Not for the main view's rain drawn into the picture next (its own pass, see
 		// DrawMainPrecipitation); EndPortalPass puts the world's shadows back.
 		if (shadowed) {
@@ -1937,7 +1935,7 @@ namespace
 
 		// Diagnostics, for the bridge's portal_status: only there in agent sessions, and a walk over
 		// the cell's references plus a JSON document every frame is wasted on anyone else.
-		if (!AgentMode::Enabled()) {
+		if (!Diag::AgentMode()) {
 			return json::object();
 		}
 		const auto& p = portalCamera->world.translate;
@@ -2527,7 +2525,7 @@ namespace
 			// moment before the engine culls the world.
 			Portal::MergedCull::BeforeView();
 			{
-				const Perf::Scope scope("player view");
+				const Diag::Scope scope("player view");
 				func(a_main, a_arg2, a_arg3);
 			}
 			Portal::MergedCull::AfterView();
@@ -2652,7 +2650,7 @@ namespace
 				CheckSunDirection();
 			}
 			if (Portal::Travel::ConsumeArrivalFrame()) {
-				FrameHooks::MarkArrivalFrame();
+				Diag::MarkArrivalFrame();
 				// The engine brings the new space's directional ambient and sun in one frame late
 				// (Community Shaders already treats the frame as indoors / outdoors): the first
 				// frame after walking in was lit by the full outdoor ambient. Put the new space's
@@ -2689,13 +2687,13 @@ namespace
 				mainView = { state.posAdjust, state.previousPosAdjust, state.cameraData };
 			}
 			{
-				const Perf::Scope scope("world draw");
-				Perf::GpuBegin("gpu world draw");
+				const Diag::Scope scope("world draw");
+				Diag::GpuBegin("gpu world draw");
 				func(a_menuOpen);
-				Perf::GpuEnd("gpu world draw");
+				Diag::GpuEnd("gpu world draw");
 			}
-			const Perf::Scope portalScope("portal (all)");
-			Perf::GpuBegin("gpu portal (all)");
+			const Diag::Scope portalScope("portal (all)");
+			Diag::GpuBegin("gpu portal (all)");
 
 			auto portal = PortalToDraw();
 			if (portal && lightDebug.skipPortalPass) {
@@ -2784,7 +2782,7 @@ namespace
 				std::scoped_lock lock(stateLock);
 				lastFrame = std::move(result);
 			}
-			Perf::GpuEnd("gpu portal (all)");
+			Diag::GpuEnd("gpu portal (all)");
 		}
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};

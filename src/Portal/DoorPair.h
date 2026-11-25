@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Portal/PortalManager.h"
+#include "Portal/Active.h"
 
 // Geometry of a load door pair: where the doorway is and how space in front of the source door
 // maps to space in front of the linked door. Shared by the renderer (portal camera, quad) and the
@@ -48,10 +48,10 @@ namespace Portal::Doors
 	};
 
 	// Throws if a door has no 3D or no teleport marker.
-	Mapping Compute(const Manager::Active& a_portal);
+	Mapping Compute(const Active& a_portal);
 	// Nothing while a door of the pair has no 3D: loading, or unloaded under a portal that is about
 	// to be let go. Every frame's work on a door pair waits for both doors this way.
-	std::optional<Mapping> TryCompute(const Manager::Active& a_portal);
+	std::optional<Mapping> TryCompute(const Active& a_portal);
 
 	// Some interiors are a little turned against the outside they belong to (the doors' markers
 	// don't quite agree); the player can correct that by hand (the in-game menu). The correction

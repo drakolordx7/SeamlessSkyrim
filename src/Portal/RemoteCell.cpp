@@ -1,6 +1,6 @@
 #include "Portal/RemoteCell.h"
 
-#include "Bridge/Perf.h"
+#include "Diag/Telemetry.h"
 #include "Hooks.h"
 #include "Portal/DoorPair.h"
 #include "Portal/LightScene.h"
@@ -394,7 +394,7 @@ namespace Portal
 		// All the cells' persistent references in one pass over the worldspace's persistent cell
 		// (thousands of references in a city): done per cell, it was most of an attach.
 		if (!(debugSkip & 1)) {
-			const Perf::Scope scope("attach persistent");
+			const Diag::Scope scope("attach persistent");
 			int               newlyQueued = 0;
 			const auto        persistent = PersistentIn(cells, persistentQueued, newlyQueued);
 			if (newlyQueued) {
@@ -670,7 +670,7 @@ namespace Portal
 		auto* here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
 		UnmergeCollision();
 		if (std::exchange(merged, false)) {
-			const Perf::Scope scope("release: unmerge cells");
+			const Diag::Scope scope("release: unmerge cells");
 			// Back under the portal root, unmoved, so the normal release below applies.
 			for (auto* cell : cells) {
 				RE::NiPointer<RE::NiAVObject> cell3D(Cell3D(cell));
@@ -725,7 +725,7 @@ namespace Portal
 			handedWorldMapClouds = std::move(worldMapClouds);
 		}
 		worldMapClouds.reset();
-		const Perf::Scope detachScope("release: detach");
+		const Diag::Scope detachScope("release: detach");
 		for (auto* cell : cells | std::views::reverse) {
 			auto* cell3D = Cell3D(cell);
 			if (handOver && cell3D && cell3D->parent == root && cell->cellState.get() == CellState::kAttached) {
@@ -788,7 +788,7 @@ namespace Portal
 
 	void RemoteCell::Update(float a_delta)
 	{
-		const Perf::Scope scope("remote update");
+		const Diag::Scope scope("remote update");
 		if (!Healthy()) {
 			StepWorld(nullptr);
 			return;
@@ -927,7 +927,7 @@ namespace Portal
 
 	void RemoteCell::Prewarm()
 	{
-		const Perf::Scope scope("prewarm");
+		const Diag::Scope scope("prewarm");
 		auto* world = cells.front()->GetRuntimeData().worldSpace;
 		// The change into an exterior loads the world map's clouds (ID 53142 + 0x272: Demand into a
 		// global emptied indoors), ~25 ms from disk on the first walk out. Held here, the engine's
@@ -1280,7 +1280,7 @@ namespace Portal
 
 	void RemoteCell::StepAtEndOfFrame()
 	{
-		const Perf::Scope scope("remote step");
+		const Diag::Scope scope("remote step");
 		std::scoped_lock  lock(stepLock);
 		const auto        started = std::chrono::steady_clock::now();
 		// Through a city gate both worldspaces' cells are in one world, the player's: the engine

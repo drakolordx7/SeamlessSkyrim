@@ -2,6 +2,7 @@
 
 #include "Paths.h"
 #include "Portal/Pristine.h"
+#include "Portal/PortalManager.h"
 
 namespace Portal::Doors
 {

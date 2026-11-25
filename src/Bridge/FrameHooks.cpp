@@ -1,12 +1,10 @@
 #include "Bridge/FrameHooks.h"
 
 #include "Bridge/AgentMode.h"
-#include "Bridge/Perf.h"
 
-#include "Portal/CameraLimit.h"
-#include "Portal/PortalManager.h"
-#include "Portal/PortalRender.h"
-#include "Portal/Travel.h"
+#include "Plugin/Frame.h"
+#include "Render/FlashGuard.h"
+#include "Render/Present.h"
 
 #include <d3d11.h>
 #include <dxgi.h>
@@ -80,38 +78,6 @@ namespace
 		controls->data.running = walk.request.run;
 	}
 
-	// Diagnostics: wall-clock time between player updates (= frame time), last 120 frames.
-	std::mutex                                         frameLock;
-	std::array<float, 120>                             frameMs{};
-	std::size_t                                        frameIndex = 0;
-	std::optional<std::chrono::steady_clock::time_point> lastFrame;
-
-	struct PlayerUpdateHook
-	{
-		static void Thunk(RE::PlayerCharacter* a_this, float a_delta)
-		{
-			{
-				const auto now = std::chrono::steady_clock::now();
-				std::scoped_lock lock(frameLock);
-				if (lastFrame) {
-					frameMs[frameIndex++ % frameMs.size()] = std::chrono::duration<float, std::milli>(now - *lastFrame).count();
-				}
-				lastFrame = now;
-			}
-			func(a_this, a_delta);
-			SteerPlayer(a_this, a_delta);
-			{
-				const Perf::Scope scope("manager update");
-				Portal::Manager::Update(a_delta);
-				Portal::Travel::Update();
-			}
-			const auto approach = Portal::Manager::CameraLimit();
-			const auto leave = Portal::Travel::CameraLimit();
-			Portal::CameraLimit::Set(approach && leave ? std::optional(std::min(*approach, *leave)) : approach ? approach : leave);
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
 	// ---- screenshot -------------------------------------------------------------------------
 
 	struct CaptureRequest
@@ -173,9 +139,6 @@ namespace
 		sequence = {};
 	}
 
-	using Present_t = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
-	Present_t originalPresent = nullptr;
-
 	json Capture(IDXGISwapChain* a_swapChain, const std::wstring& a_path)
 	{
 		ID3D11Texture2D* backBuffer = nullptr;
@@ -224,7 +187,8 @@ namespace
 
 	// A few rows across the screen, copied to a staging texture and read two frames later, so the
 	// GPU isn't waited for: three textures in turn.
-	constexpr UINT kRows[] = { 4, 3, 2 };  // the row at height/kRows[i]
+	using Render::FlashGuard::kRows;
+	using Render::FlashGuard::RowAverage;
 	struct Readback
 	{
 		Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
@@ -237,25 +201,6 @@ namespace
 	std::array<Readback, 3> readbacks;
 	std::size_t             readbackIndex = 0;
 	std::optional<std::chrono::steady_clock::time_point> lastPresent;
-
-	float RowAverage(const D3D11_MAPPED_SUBRESOURCE& a_map, UINT a_width, DXGI_FORMAT a_format)
-	{
-		double sum = 0.0;
-		for (UINT row = 0; row < std::size(kRows); ++row) {
-			const auto* pixels = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(a_map.pData) + row * a_map.RowPitch);
-			for (UINT x = 0; x < a_width; ++x) {
-				const std::uint32_t p = pixels[x];
-				if (a_format == DXGI_FORMAT_R10G10B10A2_UNORM) {
-					sum += ((p & 0x3FF) + ((p >> 10) & 0x3FF) + ((p >> 20) & 0x3FF)) / (3.0 * 1023.0);
-				} else {
-					sum += ((p & 0xFF) + ((p >> 8) & 0xFF) + ((p >> 16) & 0xFF)) / (3.0 * 255.0);
-				}
-			}
-		}
-		return static_cast<float>(sum / (a_width * std::size(kRows)));
-	}
-
-	std::atomic<bool> arrivalPresent = false;
 
 	void SampleBrightness(IDXGISwapChain* a_swapChain, bool a_arrival, bool a_held)
 	{
@@ -326,115 +271,12 @@ namespace
 		slot.filled = true;
 	}
 
-	// ---- flash guard ------------------------------------------------------------------------------
-	// The first walk outdoors in a session drew one frame almost entirely white, two or three frames
-	// after the crossing (the engine's own: also with this plugin's image-space blend off; behind a
-	// loading screen it is never seen). For a short while after each crossing every frame's
-	// brightness is read before it is shown, waiting for the GPU (a few rows, about a millisecond),
-	// and a frame far brighter than the one shown before it is replaced by that one. Not by skipping
-	// the Present: with Presents skipped the white lasted as many frames as were skipped (something
-	// in the engine or a mod only moves on with each Present).
-	constexpr float kFlashJump = 0.3f;  // of the average brightness, 0..1
-	// Only a frame washed out to near white: a real step in brightness (the street after a dark room
-	// on the first walk outdoors, 0.23 to 0.53) was held for six frames and then shown anyway.
-	constexpr float kFlashBrightness = 0.8f;
-	constexpr int   kMaxHeldInRow = 6;  // a scene really that bright is shown after this many
-	std::atomic<int>                        guardFrames = 0;
-	std::atomic<bool>                       guardReset = false;
-	Microsoft::WRL::ComPtr<ID3D11Texture2D> guardTexture;
-	Microsoft::WRL::ComPtr<ID3D11Texture2D> guardLastShown;  // copy of the last frame shown
-	float                                   guardShown = -1.0f;  // brightness of the last frame shown
-	int                                     guardHeld = 0;
-
-	bool HoldFlash(IDXGISwapChain* a_swapChain)
+	// Runs in the Present hook (Render::Present) after the flash guard: the brightness log, then the
+	// screenshot and the frame sequence.
+	void OnPresent(IDXGISwapChain* a_swapChain, bool a_arrival, bool a_held)
 	{
-		if (guardReset.exchange(false)) {
-			guardShown = -1.0f;
-			guardHeld = 0;
-		}
-		Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
-		if (FAILED(a_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(backBuffer.GetAddressOf())))) {
-			return false;
-		}
-		D3D11_TEXTURE2D_DESC desc{};
-		backBuffer->GetDesc(&desc);
-		const bool known = desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM || desc.Format == DXGI_FORMAT_R10G10B10A2_UNORM;
-		if (!known || desc.SampleDesc.Count != 1) {
-			return false;
-		}
-		Microsoft::WRL::ComPtr<ID3D11Device>        device;
-		Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
-		backBuffer->GetDevice(device.GetAddressOf());
-		device->GetImmediateContext(context.GetAddressOf());
-		D3D11_TEXTURE2D_DESC have{};
-		if (guardTexture) {
-			guardTexture->GetDesc(&have);
-		}
-		if (!guardTexture || have.Width != desc.Width || have.Format != desc.Format) {
-			D3D11_TEXTURE2D_DESC staging{};
-			staging.Width = desc.Width;
-			staging.Height = static_cast<UINT>(std::size(kRows));
-			staging.MipLevels = 1;
-			staging.ArraySize = 1;
-			staging.Format = desc.Format;
-			staging.SampleDesc.Count = 1;
-			staging.Usage = D3D11_USAGE_STAGING;
-			staging.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-			guardTexture = nullptr;
-			if (FAILED(device->CreateTexture2D(&staging, nullptr, guardTexture.GetAddressOf()))) {
-				return false;
-			}
-		}
-		for (UINT row = 0; row < std::size(kRows); ++row) {
-			const UINT      y = desc.Height / kRows[row];
-			const D3D11_BOX box{ 0, y, 0, desc.Width, y + 1, 1 };
-			context->CopySubresourceRegion(guardTexture.Get(), 0, 0, row, 0, backBuffer.Get(), 0, &box);
-		}
-		D3D11_MAPPED_SUBRESOURCE map{};
-		if (FAILED(context->Map(guardTexture.Get(), 0, D3D11_MAP_READ, 0, &map))) {
-			return false;
-		}
-		const float value = RowAverage(map, desc.Width, desc.Format);
-		context->Unmap(guardTexture.Get(), 0);
-		if (guardShown >= 0.0f && guardLastShown && value - guardShown > kFlashJump && value > kFlashBrightness && guardHeld < kMaxHeldInRow) {
-			++guardHeld;
-			logger::info("flash guard: a frame of brightness {:.2f} after {:.2f} replaced by the one before", value, guardShown);
-			context->CopyResource(backBuffer.Get(), guardLastShown.Get());
-			return true;
-		}
-		D3D11_TEXTURE2D_DESC copyDesc{};
-		if (guardLastShown) {
-			guardLastShown->GetDesc(&copyDesc);
-		}
-		if (!guardLastShown || copyDesc.Width != desc.Width || copyDesc.Height != desc.Height || copyDesc.Format != desc.Format) {
-			D3D11_TEXTURE2D_DESC copy = desc;
-			copy.Usage = D3D11_USAGE_DEFAULT;
-			copy.BindFlags = 0;
-			copy.CPUAccessFlags = 0;
-			copy.MiscFlags = 0;
-			guardLastShown = nullptr;
-			if (FAILED(device->CreateTexture2D(&copy, nullptr, guardLastShown.GetAddressOf()))) {
-				guardLastShown = nullptr;
-			}
-		}
-		if (guardLastShown) {
-			context->CopyResource(guardLastShown.Get(), backBuffer.Get());
-		}
-		guardShown = value;
-		guardHeld = 0;
-		return false;
-	}
-
-	HRESULT STDMETHODCALLTYPE PresentThunk(IDXGISwapChain* a_swapChain, UINT a_syncInterval, UINT a_flags)
-	{
-		const bool arrival = arrivalPresent.exchange(false);
-		bool       held = false;
-		if (guardFrames > 0) {
-			--guardFrames;
-			held = HoldFlash(a_swapChain);
-		}
 		if (brightnessOn) {
-			SampleBrightness(a_swapChain, arrival, held);
+			SampleBrightness(a_swapChain, a_arrival, a_held);
 		}
 		std::optional<CaptureRequest> request;
 		{
@@ -452,55 +294,15 @@ namespace
 				request->done->set_exception(std::current_exception());
 			}
 		}
-		Perf::FrameEnd();
-		// Time spent waiting here is the GPU (or frame generation) holding the main thread back.
-		const Perf::Scope scope("present");
-		return originalPresent(a_swapChain, a_syncInterval, a_flags);
-	}
-
-	void InstallPresentHook()
-	{
-		auto* window = RE::BSGraphics::Renderer::GetCurrentRenderWindow();
-		auto* swapChain = window ? reinterpret_cast<IDXGISwapChain*>(window->swapChain) : nullptr;
-		if (!swapChain) {
-			logger::error("frame hooks: no swap chain, screenshots disabled");
-			return;
-		}
-		// Patching the shared vtable chains with any other Present hook (Community Shaders, ENB
-		// helpers): we call whatever was installed before us.
-		auto*           vtable = *reinterpret_cast<std::uintptr_t**>(swapChain);
-		constexpr auto kPresentIndex = 8;
-		originalPresent = reinterpret_cast<Present_t>(vtable[kPresentIndex]);
-		REL::safe_write(reinterpret_cast<std::uintptr_t>(&vtable[kPresentIndex]), reinterpret_cast<std::uintptr_t>(&PresentThunk));
 	}
 }
 
 namespace FrameHooks
 {
-	void Install()
+	void Register()
 	{
-		// The player update drives the portals and the agent's walking; with neither there is
-		// nothing for it to do (Portal::Manager::Install runs first and decides about portals).
-		if (!AgentMode::Enabled() && !Portal::Manager::HooksInstalled()) {
-			logger::info("frame hooks: none needed");
-			return;
-		}
-		REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_PlayerCharacter[0] };
-		PlayerUpdateHook::func = vtable.write_vfunc(0xAD, PlayerUpdateHook::Thunk);
-		// Only when something needs it (agent screenshots, portal compositing): installed during
-		// normal play, the Present hook sat next to CS's frame-generation proxy and the image came
-		// out blurred/doubled even with portals off.
-		if (AgentMode::Enabled() || Portal::Manager::Enabled()) {
-			EnsurePresentHook();
-		}
-		logger::info("frame hooks installed (Present hook: {})", originalPresent != nullptr);
-	}
-
-	void EnsurePresentHook()
-	{
-		if (!originalPresent) {
-			InstallPresentHook();
-		}
+		Plugin::Frame::SetPreUpdate(SteerPlayer);
+		Render::Present::SetCallback(OnPresent);
 	}
 
 	void StartWalk(const WalkRequest& a_request)
@@ -525,15 +327,7 @@ namespace FrameHooks
 
 	json FrameStats()
 	{
-		std::scoped_lock lock(frameLock);
-		const auto       count = std::min(frameIndex, frameMs.size());
-		if (!count) {
-			return nullptr;
-		}
-		std::vector<float> sorted(frameMs.begin(), frameMs.begin() + count);
-		std::ranges::sort(sorted);
-		const float sum = std::accumulate(sorted.begin(), sorted.end(), 0.0f);
-		return { { "frames", count }, { "avgMs", sum / count }, { "medianMs", sorted[count / 2] }, { "p95Ms", sorted[count * 95 / 100] }, { "maxMs", sorted.back() } };
+		return Plugin::Frame::FrameStats();
 	}
 
 	json WalkStatus()
@@ -544,7 +338,7 @@ namespace FrameHooks
 	bool CaptureFrames(const std::wstring& a_directory, int a_frames)
 	{
 		std::scoped_lock lock(captureLock);
-		if (!originalPresent) {
+		if (!Render::Present::Installed()) {
 			return false;
 		}
 		// Takes over from a run still being taken, whose frames are dropped.
@@ -587,17 +381,6 @@ namespace FrameHooks
 		CaptureFrames(directory, a_frames);
 	}
 
-	void GuardFlashes(int a_frames)
-	{
-		guardReset = true;
-		guardFrames = a_frames;
-	}
-
-	void MarkArrivalFrame()
-	{
-		arrivalPresent = true;
-	}
-
 	void RecordBrightness(bool a_start)
 	{
 		std::scoped_lock lock(brightnessLock);
@@ -623,7 +406,7 @@ namespace FrameHooks
 
 	json CaptureScreenshot(const std::wstring& a_path, std::chrono::milliseconds a_timeout)
 	{
-		if (!originalPresent) {
+		if (!Render::Present::Installed()) {
 			throw std::runtime_error("screenshot hook not installed");
 		}
 		auto done = std::make_shared<std::promise<json>>();

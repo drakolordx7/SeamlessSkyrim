@@ -1,8 +1,8 @@
 #include "Bridge/AgentMode.h"
 #include "Bridge/Bridge.h"
-#include "Bridge/FrameHooks.h"
 #include "Portal/NpcTravel.h"
 #include "Portal/PortalManager.h"
+#include "Plugin/Frame.h"
 #include "Portal/Travel.h"
 #include "UI/Menu.h"
 #include "Probe.h"
@@ -30,7 +30,7 @@ namespace
 				Portal::NpcTravel::Install();
 			}
 			UI::Menu::Register();
-			FrameHooks::Install();
+			Plugin::Frame::Install();
 			if (AgentMode::Enabled()) {
 				Bridge::ForceAlwaysActive();
 				AgentMode::InstallInputGuards();
@@ -82,6 +82,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	}
 	logger::info("{} {} loaded", SKSE::GetPluginName(), SKSE::GetPluginVersion().string());
 
+	// Before anything can call the telemetry sink or the frame callbacks.
+	Bridge::RegisterTelemetry();
 	// Before anything else touches windows: the game window doesn't exist yet at this point.
 	AgentMode::InstallFocusGuards();
 	AgentMode::InstallMute();

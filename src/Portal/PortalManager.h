@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Portal/Active.h"
+
 struct IDXGISwapChain;
 
 // Runs the door portals: picks the load door the player is approaching, keeps the cell behind it
@@ -7,13 +9,8 @@ struct IDXGISwapChain;
 // and carries the player through without a loading screen when they walk in (Travel).
 namespace Portal::Manager
 {
-	struct Active
-	{
-		RE::FormID         sourceDoor;  // in the player's space
-		RE::FormID         linkedDoor;  // in the remote cell
-		RE::TESObjectCELL* cell;
-		std::uint32_t      generation;  // changes whenever the remote cell is (re)attached
-	};
+	using Active = Portal::Active;
+	using DoorPrompt = Portal::DoorPrompt;
 
 	// Reads Data/SKSE/Plugins/SeamlessSkyrim.ini ([Portals] bEnabled, on by default) and hooks
 	// the events the manager reacts to. Call at kDataLoaded.
@@ -63,14 +60,7 @@ namespace Portal::Manager
 	[[nodiscard]] std::optional<Active> ActivePortal();
 	// The portal's door stands (at least partly) open; shut, the portal isn't drawn on it.
 	[[nodiscard]] bool DoorwayOpen();
-	// Main thread: what using the door does, for its prompt: nothing (it stands open), shut it
-	// (someone opened it, DoorUse), or what it does for any door (open it).
-	enum class DoorPrompt
-	{
-		kOpen,
-		kClose,
-		kNone,
-	};
+	// Main thread: what using the door does, for its prompt (see DoorPrompt).
 	[[nodiscard]] DoorPrompt Prompt(RE::FormID a_door);
 	// Diagnostics: the image-space blend across the doorway is on (UpdateTone).
 	[[nodiscard]] bool ToneBlendOn();

@@ -7,6 +7,11 @@ namespace Bridge
 {
 	inline constexpr std::uint16_t kPort = 47800;
 
+	// Hands the portal code the bridge's perf, sampler, capture and walk implementations
+	// (Diag::Sink) and the agent-mode flag, and registers the bridge's frame callbacks. Call from
+	// SKSEPluginLoad, before anything can call them.
+	void RegisterTelemetry();
+
 	void Start();
 	// Keeps the game running while unfocused. Call once INI settings are loaded (kDataLoaded).
 	void ForceAlwaysActive();

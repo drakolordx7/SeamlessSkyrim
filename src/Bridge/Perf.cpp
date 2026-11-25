@@ -180,15 +180,25 @@ namespace Perf
 		s.touched = true;
 	}
 
+	std::int64_t ScopeBegin()
+	{
+		return on ? Ticks() : 0;
+	}
+
+	void ScopeEnd(const char* a_name, std::int64_t a_start)
+	{
+		if (a_start) {
+			AddCpu(a_name, TicksToMs(Ticks() - a_start));
+		}
+	}
+
 	Scope::Scope(const char* a_name) :
-		name(a_name), start(on ? Ticks() : 0)
+		name(a_name), start(ScopeBegin())
 	{}
 
 	Scope::~Scope()
 	{
-		if (start) {
-			AddCpu(name, TicksToMs(Ticks() - start));
-		}
+		ScopeEnd(name, start);
 	}
 
 	void GpuBegin(const char* a_name)

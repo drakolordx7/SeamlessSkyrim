@@ -1,15 +1,14 @@
 #include "Portal/Travel.h"
 #include "Portal/RemoteCell.h"
 
-#include "Bridge/AgentMode.h"
-#include "Bridge/FrameHooks.h"
-#include "Bridge/Perf.h"
-#include "Bridge/Sampler.h"
+#include "Diag/Telemetry.h"
+#include "Render/FlashGuard.h"
 #include "Hooks.h"
 #include "Paths.h"
 #include "Portal/CameraLimit.h"
 #include "Portal/LightScene.h"
 #include "Portal/NpcTravel.h"
+#include "Portal/PortalManager.h"
 #include "Probe.h"
 
 namespace
@@ -192,17 +191,17 @@ namespace
 		trace.running = true;
 		trace.start = trace.lastFrame = Clock::now();
 		trace.door = door->GetFormID();
-		Perf::AddCount("crossing", 1.0);
+		Diag::AddCount("crossing", 1.0);
 		// The white frame came 2-3 frames after the crossing; a second's worth leaves room for slow ones.
-		FrameHooks::GuardFlashes(60);
-		FrameHooks::CaptureEventFrames(L"crossing", 16);
+		::Render::FlashGuard::Guard(60);
+		Diag::CaptureEventFrames(L"crossing", 16);
 		if (!profileFile.empty()) {
-			Sampler::Start(profileFile, 1.5);
+			Diag::SamplerStart(profileFile, 1.5);
 			profileFile.clear();
-		} else if (!profileAllTo.empty() && !Sampler::Running()) {
+		} else if (!profileAllTo.empty() && !Diag::SamplerRunning()) {
 			static int crossings = 0;
 			const auto file = profileAllTo / std::format("crossing_{:02}.txt", ++crossings);
-			Sampler::Start(file, kProfileAllSeconds);
+			Diag::SamplerStart(file, kProfileAllSeconds);
 			Note(std::format("sampling the main thread into {}", file.string()));
 		}
 		trace.fromCell = player->GetParentCell() ? player->GetParentCell()->GetFormID() : 0;
@@ -451,7 +450,7 @@ namespace
 		static void Thunk(RE::ShadowSceneNode* a_scene, void* a_arg)
 		{
 			const bool        world = a_scene == RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
-			const Perf::Scope scope(world ? "lights: world" : "lights: other");
+			const Diag::Scope scope(world ? "lights: world" : "lights: other");
 			UpdateLightsSpread(a_scene, a_arg, [](RE::ShadowSceneNode* a_s, void* a_a) { func(a_s, a_a); });
 			if (world && spreadFrames > 0) {
 				--spreadFrames;
@@ -547,7 +546,7 @@ namespace
 			const auto  cameraOffset = camera->cameraRoot->world.translate - a_player->GetPosition();
 			const float yawBefore = a_player->GetAngleZ();
 			{
-				const Perf::Scope scope(seamlessTeleport ? "teleport" : "teleport step");
+				const Diag::Scope scope(seamlessTeleport ? "teleport" : "teleport step");
 				func(a_player);
 			}
 			if (std::exchange(seamlessTeleport, false)) {
@@ -585,7 +584,7 @@ namespace
 					thirdPerson->currentYaw = cameraPose->yawCurrent + turn;
 				}
 				Note(std::format("heading set to {:.1f}, now {:.1f}", RE::rad_to_deg(*arrivalYaw), RE::rad_to_deg(a_player->GetAngleZ())));
-				const Perf::Scope arrivalScope("arrival");
+				const Diag::Scope arrivalScope("arrival");
 				arrivalYaw.reset();
 				// Before the space just left is attached below, which forgets them.
 				Portal::RemoteCell::HangHandedPersistent();
@@ -659,7 +658,7 @@ namespace
 				// unseen): the room or street the player had been looking into faded out and in again.
 				Portal::NpcTravel::ShowAtOnce(a_player->GetParentCell(), 2.0f);
 				// A walk the bridge is steering would turn the player back towards its old goal.
-				FrameHooks::StopWalk("travelled through a door");
+				Diag::StopWalk("travelled through a door");
 				SetArrivalDoorOpen(true);
 				// Indoors the view back out isn't needed in the frame of arrival (the camera faces
 				// into the room), and attaching the street costs ~15 ms on top of the engine's own
@@ -719,7 +718,7 @@ namespace
 				const auto portal = *pending;
 				pending.reset();
 				{
-					const Perf::Scope scope("crossing begin");
+					const Diag::Scope scope("crossing begin");
 					Begin(portal, pendingLimitsCamera);
 				}
 				guard.unlock();
@@ -735,7 +734,7 @@ namespace Portal::Travel
 {
 	void Install()
 	{
-		if (AgentMode::Enabled()) {
+		if (Diag::AgentMode()) {
 			wchar_t folder[MAX_PATH]{};
 			const auto ini = Paths::PluginDirectory() / "SeamlessSkyrim.ini";
 			if (::GetPrivateProfileStringW(L"Portals", L"sProfileCrossingsTo", L"", folder, MAX_PATH, ini.c_str()) > 0) {
@@ -864,7 +863,7 @@ namespace Portal::Travel
 
 	void Update()
 	{
-		Sampler::SetMainThread();
+		Diag::SamplerSetMainThread();
 		std::scoped_lock guard(lock);
 		if (purgeDeadline && (!LoadsPending() || Clock::now() >= *purgeDeadline)) {
 			const bool timedOut = Clock::now() >= *purgeDeadline;

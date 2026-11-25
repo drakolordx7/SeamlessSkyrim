@@ -2,8 +2,9 @@
 
 #include "Portal/DoorPair.h"
 #include "Portal/DoorUse.h"
+#include "Portal/PortalManager.h"
 
-#include "Bridge/FrameHooks.h"
+#include "Diag/Telemetry.h"
 #include "Hooks.h"
 
 namespace
@@ -299,7 +300,7 @@ namespace Portal::NpcTravel
 						root->Update(update);
 					}
 					KeepVisible(actor.get());
-					FrameHooks::CaptureEventFrames(L"npc", 60);  // run_route(capture=true): every frame of the walk
+					Diag::CaptureEventFrames(L"npc", 60);  // run_route(capture=true): every frame of the walk
 					Manager::RefreshMergedShapes();
 					++carried;
 					lastCarried = std::format("{} {} at ({:.0f},{:.0f},{:.0f})", actor->GetDisplayFullName(), wentIn ? "in" : "out", seen.position.x, seen.position.y, seen.position.z);

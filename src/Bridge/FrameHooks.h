@@ -4,10 +4,9 @@
 // (screenshot). Both run inside the engine's own frame so they see consistent state.
 namespace FrameHooks
 {
-	void Install();
-
-	// The Present hook (screenshots, portal compositing) is installed on demand only.
-	void EnsurePresentHook();
+	// Registers the bridge's parts of the frame: steering before the portals' update, and the
+	// brightness log, screenshots and frame sequences at Present. At plugin load.
+	void Register();
 
 	struct WalkRequest
 	{
@@ -41,13 +40,6 @@ namespace FrameHooks
 	// Empty: off. Not left on for a whole session: writing a burst out is a hitch of its own,
 	// which is what a stutter test is looking for.
 	void SetEventCapture(const std::wstring& a_directory);
-
-	// The next a_frames frames: one far brighter than the frame shown before it is not shown (a white
-	// flash the engine draws once in a while right after a change of space). See HoldFlash.
-	void GuardFlashes(int a_frames);
-
-	// Diagnostics: the next frame presented is the first in a new space (marked in the brightness log).
-	void MarkArrivalFrame();
 
 	// Diagnostics: average brightness (0..1) of every presented frame while recording, with its
 	// wall-clock time (as in the log) and the time since the frame before. A flash lasting a frame

@@ -1,6 +1,12 @@
 #include "Bridge/Bridge.h"
 
+#include "Bridge/AgentMode.h"
 #include "Bridge/Commands.h"
+#include "Bridge/FrameHooks.h"
+#include "Bridge/Perf.h"
+#include "Bridge/Sampler.h"
+#include "Diag/Telemetry.h"
+#include "Render/Present.h"
 
 #include <WinSock2.h>
 #include <WS2tcpip.h>
@@ -150,6 +156,26 @@ namespace Bridge
 		}
 		logger::info("bridge: bAlwaysActive was {}, forcing on", setting->GetBool());
 		setting->data.b = true;
+	}
+
+	void RegisterTelemetry()
+	{
+		Diag::agentMode = AgentMode::Enabled();
+		Diag::sink = {
+			.scopeBegin = Perf::ScopeBegin,
+			.scopeEnd = Perf::ScopeEnd,
+			.addCount = Perf::AddCount,
+			.gpuBegin = Perf::GpuBegin,
+			.gpuEnd = Perf::GpuEnd,
+			.frameEnd = Perf::FrameEnd,
+			.samplerStart = Sampler::Start,
+			.samplerRunning = Sampler::Running,
+			.samplerSetMainThread = Sampler::SetMainThread,
+			.captureEventFrames = FrameHooks::CaptureEventFrames,
+			.stopWalk = FrameHooks::StopWalk,
+			.markArrivalFrame = Render::Present::MarkArrivalFrame,
+		};
+		FrameHooks::Register();
 	}
 
 	void Start()
