@@ -289,7 +289,7 @@ Found porting the plugin; each was checked in the code of both.
   light update (ID 106335, per queued light ID 106342 → 106401, shadow lights 106400) builds a
   ~200 KB `BSParabolicCullingProcess` for it and walks the scene for the shapes it lights
   (ID 108282, pruned by `worldBound`). It dedupes by `BSLight::light` (the NiLight), not by
-  BSLight. The patched Community Shaders still uses the world scene's per-shape lists (without
+  BSLight. Community Shaders still uses the world scene's per-shape lists (without
   them a room came out ~4% darker); our scenes don't need them.
 - **Arriving in a cell queues each of its lights twice** in the world scene (Understone Keep: 306
   for 153). The update takes in the first and, finding the second's NiLight active, walks the

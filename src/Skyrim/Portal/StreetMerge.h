@@ -9,7 +9,7 @@
 namespace Portal::StreetMerge
 {
 	// Main thread, every frame, also with portals off: the street's water reflections kept (engine
-	// bug workaround, WaterReflections), and Community Shaders' skylighting settled on walking out.
+	// bug workaround, WaterReflections).
 	void EveryFrame();
 
 	// The shown space is the street merged into an interior.

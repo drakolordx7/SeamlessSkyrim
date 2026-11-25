@@ -9,9 +9,9 @@ project(
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Targets SE 1.5.97 and AE 1.7.104: addresses are SE/AE ID pairs, and CommonLib resolves struct
-# layouts at runtime (GetRuntimeData); AE itself has two (before/after 1.6.629). VR is off: its
-# openvr submodule is not checked out and we never target it.
+# Targets SE 1.5.97, AE 1.6.1170 and AE 1.7.104: addresses are SE/AE ID pairs, and CommonLib
+# resolves struct layouts at runtime (GetRuntimeData); AE itself has two (before/after 1.6.629).
+# VR is off: its openvr submodule is not checked out and we never target it.
 set(ENABLE_SKYRIM_SE ON CACHE BOOL "" FORCE)
 set(ENABLE_SKYRIM_AE ON CACHE BOOL "" FORCE)
 set(ENABLE_SKYRIM_VR OFF CACHE BOOL "" FORCE)
@@ -25,8 +25,8 @@ add_subdirectory(extern/CommonLibSSE-NG EXCLUDE_FROM_ALL)
 # The in-game test harness runs on a Mod Organizer 2 instance instead: build with
 # tools/build.ps1 -NoDeploy and put the DLL there with tools/deploy-mo2-dev.ps1.
 set(SKYRIM_PLUGINS_DIR
-	"E:/SteamLibrary/steamapps/common/Skyrim Special Edition/Data/SKSE/Plugins"
-	CACHE PATH "Where the post-build step copies the DLL and PDB. Empty disables the copy.")
+	""
+	CACHE PATH "Where the post-build step copies the DLL and PDB. Empty (the default) disables the copy.")
 
 # The game-independent part: no CommonLib, no PCH, no Windows or D3D. Its include root is src/, so
 # Core headers read "Core/Math/Vec3.h"; cmake/CheckCore.cmake fails the build for a Core file that
@@ -110,13 +110,10 @@ if(SKYRIM_PLUGINS_DIR)
 	add_custom_command(
 		TARGET ${PROJECT_NAME} POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${SKYRIM_PLUGINS_DIR}"
-		# Not `cmake -E copy`: it replaces the file, which cuts the hard link when the DLL is
-		# deployed by Vortex (tools/deploy-vortex-mod.ps1).
-		COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-			-File "${CMAKE_SOURCE_DIR}/tools/copy-in-place.ps1"
-			-Destination "${SKYRIM_PLUGINS_DIR}"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			"$<TARGET_FILE:${PROJECT_NAME}>"
 			"$<TARGET_PDB_FILE:${PROJECT_NAME}>"
+			"${SKYRIM_PLUGINS_DIR}"
 		COMMENT "Deploying ${PROJECT_NAME} to ${SKYRIM_PLUGINS_DIR}"
 		VERBATIM
 	)

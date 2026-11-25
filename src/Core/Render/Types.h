@@ -3,8 +3,7 @@
 #include "Core/Math/Mat3.h"
 #include "Core/Math/Shapes.h"
 
-// What the portal renderer is told about a merged space, as plain floats. Packing these into a
-// backend's own layout is the adapter's job.
+// What the portal renderer is told about a merged space, as plain floats.
 namespace Core::Render
 {
 	struct Color
@@ -49,12 +48,6 @@ namespace Core::Render
 		float most = 0.0f;  // the most it covers; 0: no fog
 		Color nearColor;
 		Color farColor;
-	};
-
-	// The street's light coming in through a room's doorway: the radiance of the opening.
-	struct Daylight
-	{
-		Color radiance;
 	};
 
 	// The plane a portal pass is cut at: pixels with Distance < 0 are cut. The sign convention is

@@ -7,7 +7,7 @@
 // through the remote cell's Havok world, cached in that world's coordinates (static geometry and
 // lights don't move, and the space keeps its pairs when it is drawn elsewhere or walked through).
 //
-// Used by the patched Community Shaders through the exported SeamlessPortal_LightVisibility.
+// Used by the native lighting swap (Render/Native/NativeLighting.cpp).
 namespace Portal::LightOcclusion
 {
 	// The room's door, in its Havok world.
@@ -21,10 +21,8 @@ namespace Portal::LightOcclusion
 	// Main thread, per frame: the world to cast rays in (nullptr = none). a_toPhysics maps where the
 	// remote cell is drawn to where its Havok world has it: identity for the portal pass; for a room
 	// merged into the world (its 3D moved to the door, its physics left in place) the door mapping.
-	// a_interior: the remote space is an interior, with nothing around its shell. a_slot: the
-	// room's (Render::Backend::Interface::SetMergedDoor). 0, the shown space, is set every frame and first; the
-	// others for rooms merged beside it (a null world when there is none).
-	void SetWorld(int a_slot, RE::bhkWorld* a_world, const RE::NiTransform& a_toPhysics = {},
+	// a_interior: the remote space is an interior, with nothing around its shell. Set every frame.
+	void SetWorld(RE::bhkWorld* a_world, const RE::NiTransform& a_toPhysics = {},
 		const std::optional<RoomDoor>& a_door = std::nullopt, bool a_interior = false);
 
 	// 0 = blocked, 1 = in plain view of the light (fraction of sample points that see it).

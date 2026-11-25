@@ -16,8 +16,6 @@
 - AE: `place_go` (`coc RiftenBeggarsRow`) from Riften's street just after walking out of Beggar's
   Row hung the game during the load: no CPU, every thread waiting; the log ends with the room's
   door opened again (`Doors::Open`) after the release. Once.
-- SE 1.5.97 with the Community Shaders fork: not tried (the fork builds for SE; Community Shaders
-  isn't installed in the 1.5.97 test game).
 - The skylight (the indoor stand-in for the sun) in The Drunken Huntsman turns off when seen from outside (jarring).
 - Markarth: the market attack at the start of The Forsworn Conspiracy played again, not every
   time (user). Not reproduced: no save from before the quest. Possibly the same lost-item bug fixed with
@@ -26,7 +24,7 @@
 - Physics objects and arrows are not carried through a doorway.
 - Physics objects can break.
 - The street's particles (Riften's falling leaves) drawn inside an interior it is merged into, in front of the doorway too (Mistveil Keep's hall, looking out). Cause not looked into.
-- Understone Keep seen from Markarth's street: frame ~13.7 ms, ~9.6 ms with it hidden. Left: the game drawing it, the fork's light setup per shape with `LightOcclusion::Visibility` (~1.5 ms), our cull (~0.5 ms).
+- Understone Keep seen from Markarth's street: frame ~13.7 ms, ~9.6 ms with it hidden. Left: the game drawing it, the light setup per shape with `LightOcclusion::Visibility` (~1.5 ms), our cull (~0.5 ms).
 - Walking into Understone Keep: the first frame takes ~110 ms (the teleport ~37 ms, releasing the keep's merge ~15 ms, attaching the street ~16 ms, merging it ~5 ms), the next ~50 ms. Walking out: ~115 ms (the teleport ~25 ms, attaching the keep ~16 ms, the player view ~40 ms), then for a second every other frame ~55 ms (the light-occlusion rays catching up).
 - Walking out of Riften's jail into the street, the first time after loading the save: the first frame outside takes 95-185 ms (the teleport 70-100 ms), then a few frames of 50-180 ms. Before the grid was prewarmed, moving the street back out of the jail was 50-270 ms of it, nearly all of it Havok moving the street's bodies (ENGINE.md, "Moving a cell's 3D moves its bodies too"); not split up again since.
 - Walking out of Belethor's the first time after loading the save: the first frame ~80 ms (the teleport ~60 ms: the grid cells' attach, and ~20 ms of po3_LightPlacer's work under ID 19411).
@@ -39,8 +37,9 @@
 - Whiterun's distant objects and trees gone right after walking out of Belethor's (the user had been in and out of it and the Bannered Mare a few times): every LOD node's object and tree layer state 2 (none), the land's normal, the mountains bare low LOD land until a game is loaded. Not reproduced in ~30 walk-outs of either of its doors (front and back), quick or after waiting inside.
 - Loading saves one after another across worldspaces (Whiterun's Belethor's, Riften's jail) with portals on crashes now and then (ID 19165 putting an actor's 3D into a cell without 3D), also without the persistent references' 3D loading. During the sectors work (APPROACHES.md, 5), loading a save, travelling to Swindler's Den and loading again crashed with all of that switched off.
 - Looking out of an interior built of rooms (Mistveil Keep at Riften), the street's distant tree
-  LOD is hidden: there it came into the sun's shadow map twice now and then, the batch list looped
-  and the game hung (ENGINE.md, Culling). What adds it twice isn't known.
+  LOD is hidden. It was a workaround for a hang seen with the removed sun-shadow pass (the LOD came
+  into the sun's shadow map twice, the batch list looped; ENGINE.md, Culling); whether the hide is
+  still needed without that pass isn't tried.
 - Walking out of the Smelter Overseer's House (Markarth's mines), first time after loading the
   save: a flat grey wall, like distant LOD, drawn over the pipe and the city behind the house's
   corner. In each of 22 full suite runs (22:05–23:03), then in none of 7 runs after; cause not
@@ -65,9 +64,9 @@
   back out about 3 s later: the city's arrival point is 40 units past the city-side gate's plane,
   and once the view back out is attached, `Approach` crosses at depth >= 0 without the walk being
   towards the doorway. Seen at 4749361, before the gate reach changes.
-- Seen from indoors without Sky Sync, the street's sun direction and colours are those of the
-  moment the player came in, for half a game hour; then they jump to the computed ones
-  (`Render/SpaceLighting.cpp`, `RecentOutdoors`).
+- Seen from indoors, the street's sun direction and colours are those of the moment the player
+  came in, for half a game hour; then they jump to the computed ones (`Render/SpaceLighting.cpp`,
+  `RecentOutdoors`).
 - A door's 3D rebuilt while held open is noticed at the next `Doors::Open` on it; the door the
   player came out of is opened once and waits for another opener.
 - Walking out of Solitude's gate and turning round at once: for up to 4 s the gateway shows
@@ -86,12 +85,10 @@
   until a second `coc`. Once.
 - Walking out of Belethor's (`belethors-walk-out`): one frame just after the crossing drawn almost
   white, as if overexposed. Once in two runs. Cause not looked into.
-- A room seen from across a sunlit street gets the street's sky light through its doorway but no
-  patch of sunlight on its floor (the sun's shadow at the doorway isn't known to the room's shapes).
-  With the native backend (no Community Shaders) it gets neither that light nor the street's fog in
-  front of the doorway; only its dimming.
-- A room seen from the street is dimmed by its doorway picture's brightness against the view's; a
-  room merged beside the shown one without a picture of its own takes the other pictures' mean.
+- A room seen from across a sunlit street gets neither the street's light through its doorway, nor
+  a patch of sunlight on its floor, nor the street's fog in front of the doorway; only its dimming
+  by its doorway picture's brightness against the view's (the other pictures' mean when it has
+  none of its own).
 - Whiterun, after walking into Arcadia's Cauldron and out, then saving at night ~600 units away:
   Arcadia's and Belethor's doors stood open on the house's backing panel, with no portal activated
   again, even at the door; seven other doors stuck as open stand-ins since the walk out. Not
@@ -146,15 +143,9 @@
   it was ready. Not reproduced in about 30 trips since.
 - Through a city gate the view back takes about 5 s (the purge after the trip, then the load):
   walking back through it sooner takes the engine's trip with its loading screen.
-- Without Community Shaders (the native backend) water isn't masked at a merged room's doorway:
-  the street's canal shows in the Ratway's doorway over the steps down. `NativeMask` hooks the
-  lighting, utility and effect shaders only; the water shader isn't tried.
-- Through Solitude's gate near sunset (18:24 to 18:36) the tops of the trees beside the cliff and
-  behind the ruined fort catch the sun in the gateway and not outside (their lower parts, the
-  ground and the cliff tree's needles are shaded in both). Not known what shades them outside: a
-  caster beyond the portal's nine cells, distant LOD (not in the portal pass), or the gateway's
-  shadows being the soft copy (Volumetric Shadows' VSM, 512 texels a cascade) where the world has
-  its crisp shadow mask. The portal's own shadow pass costs about 1 ms of the main thread.
+- Water isn't masked at a merged room's doorway: the street's canal shows in the Ratway's doorway
+  over the steps down. `NativeMask` hooks the lighting, utility and effect shaders only; the water
+  shader isn't tried.
 - College of Winterhold, Hall of the Elements: with the door up to the Arcanaeum (000175DD) used and
   open, the walk in (`winterhold-arcanaeum-walk-in`) stops at x 320 instead of going up the stairs;
   the route predates doors opening only when used and doesn't use the door.

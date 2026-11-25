@@ -52,7 +52,7 @@ namespace Portal::Manager
 	[[nodiscard]] std::optional<Active> ReadyPortal();
 	// For the renderer: the portal to draw this frame, if any (none while merged).
 	[[nodiscard]] std::optional<Active> ActivePortal();
-	// The space behind a_door is drawn in its doorway (merged, the portal ready, or a room beside),
+	// The space behind a_door is drawn in its doorway (merged or the portal ready),
 	// not a stand-in's picture.
 	[[nodiscard]] bool SpaceShown(RE::FormID a_door);
 	// The remote cells are merged into the world scene right now.

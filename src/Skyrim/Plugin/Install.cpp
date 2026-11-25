@@ -15,8 +15,9 @@
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Portal/StreetLOD.h"
 #include "Skyrim/Portal/Travel.h"
-#include "Skyrim/Render/Backend.h"
+#include "Skyrim/Render/Enb.h"
 #include "Skyrim/Render/Frame.h"
+#include "Skyrim/Render/Native/Native.h"
 #include "Skyrim/Spaces/RemoteCell.h"
 #include "Skyrim/Spaces/Tuning.h"
 #include "Skyrim/UI/Menu.h"
@@ -40,7 +41,8 @@ namespace Plugin
 			// (see RemoteCell::StepAtEndOfFrame), else 1.
 			const bool stepRemote = Settings::Int(Settings::Id::kStepRemoteHavok) != 0;
 			// Before anything asks whether a room can be merged (MergedView::Mergeable).
-			Render::Backend::Install();
+			Render::Enb::Detect();
+			Render::Native::Install();
 			Spaces::RemoteCell::InstallStepHook(stepRemote);
 			Spaces::RemoteCell::InstallGridHook();
 			Render::Frame::Install();

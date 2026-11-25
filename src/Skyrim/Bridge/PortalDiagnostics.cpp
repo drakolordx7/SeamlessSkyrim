@@ -16,7 +16,8 @@
 #include "Skyrim/Portal/Selection.h"
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Portal/StreetMerge.h"
-#include "Skyrim/Render/Backend.h"
+#include "Skyrim/Render/Enb.h"
+#include "Skyrim/Render/Native/Native.h"
 #include "Skyrim/Render/SceneMeter.h"
 #include "Skyrim/Spaces/RemoteCell.h"
 
@@ -27,12 +28,10 @@ namespace Bridge::PortalDiagnostics
 	json DescribeAdaptation()
 	{
 		json rooms = json::array();
-		for (const auto& room : MergedView::Rooms()) {
-			if (room.door) {
-				const auto brightness = Pictures::Cache::RoomBrightness(room.door);
-				rooms.push_back({ { "door", std::format("{:08X}", room.door) }, { "brightness", brightness ? json(*brightness) : json() },
-					{ "lightScale", 1.0f + (MergedView::StreetEyeScale(room.door) - 1.0f) * room.daylight }, { "daylight", room.daylight } });
-			}
+		if (const auto room = MergedView::Shown(); room && room->door) {
+			const auto brightness = Pictures::Cache::RoomBrightness(room->door);
+			rooms.push_back({ { "door", std::format("{:08X}", room->door) }, { "brightness", brightness ? json(*brightness) : json() },
+				{ "lightScale", 1.0f + (MergedView::StreetEyeScale(room->door) - 1.0f) * room->away }, { "away", room->away } });
 		}
 		const auto scene = ::Render::SceneMeter::Brightness();
 		return { { "sceneBrightness", scene ? json(*scene) : json() }, { "rooms", rooms }, { "streetEye", true } };
@@ -277,28 +276,12 @@ namespace Bridge::PortalDiagnostics
 					 { "activate", Selection::ActivateRadius() }, { "spaces", out }, { "targets", Selection::TargetCount() } };
 			 }() },
 			{ "shownRooms", [] {
-				 json beside = json::array();
-				 for (const auto& room : MergedView::Rooms()) {
-					 if (!room.slot) {
-						 continue;
-					 }
-					 const auto* space = Selection::KeptSpace(room.cell);
-					 beside.push_back({ { "cell", Probe::DescribeCell(room.cell) }, { "door", std::format("{:08X}", room.sourceDoor) }, { "slot", room.slot },
-						 { "swing", room.swing }, { "shapes", room.shapes }, { "seen", room.seen }, { "paused", room.paused },
-						 { "lightScene", space ? LightScene::Describe(space->Scene(), space->Cell3D()) : json(nullptr) } });
-				 }
-				 json parked = json::array();
-				 for (const auto& space : Selection::Kept()) {
-					 if (space.Parked()) {
-						 parked.push_back(Probe::DescribeCell(space.Cell()));
-					 }
-				 }
-				 return json{ { "setting", Selection::ShownRooms() }, { "pauseUnseen", MergedView::PauseUnseenRooms() }, { "beside", beside }, { "parked", parked },
-					 { "backendRooms", ::Render::Backend::Current().MergedRooms() } };
+				 return json{ { "setting", Selection::ShownRooms() }, { "pauseUnseen", MergedView::PauseUnseenRooms() } };
 			 }() },
 			{ "lightOcclusion", LightOcclusion::Describe() },
 			{ "mergedCull", MergedCull::Describe() },
-			{ "render", ::Render::Backend::Describe() },
+			{ "render", json{ { "ready", ::Render::Native::Ready() }, { "enb", ::Render::Enb::Describe() }, { "mask", ::Render::Native::DescribeMask() },
+								{ "lighting", ::Render::Native::DescribeLighting() } } },
 			{ "npcTravel", NpcTravel::Status() },
 			// Which Havok world the engine steps (*ID 400440) against the player's and the remote one.
 			{ "havok", [] {

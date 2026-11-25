@@ -6,7 +6,7 @@
 #include <d3d11.h>
 
 // The doorway pictures kept per door: in video memory, on disk (SeamlessSkyrim_Doorways/*.ssdw,
-// versioned), and what is waiting to be written there.
+// only the current version is read), and what is waiting to be written there.
 namespace Pictures::Cache
 {
 	inline constexpr std::uint32_t kVersion = Core::Pictures::kVersion;
@@ -22,11 +22,9 @@ namespace Pictures::Cache
 		// Its own: one loaded from disk or taken before the size was changed keeps the old one.
 		UINT                 width = 0;
 		UINT                 height = 0;
-		bool                 depth = false;  // false: a version 1 picture
 		Camera::DoorwayPlace takenFrom{};
 		Camera::Extent       extent = Camera::kDoorwayOnly;
 		float                lightScale = 1.0f;  // Source::lightScale when taken
-		std::uint32_t        version = kVersion;
 		float                brightness = 0.0f;  // RoomBrightness; 0 until its texels have been on the CPU
 	};
 

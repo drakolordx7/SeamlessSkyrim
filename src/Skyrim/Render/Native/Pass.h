@@ -1,6 +1,6 @@
 #pragma once
 
-// Which pass the engine is drawing, as the native backend needs to know it. Three questions that
+// Which pass the engine is drawing, as the native renderer needs to know it. Three questions that
 // look alike and are not, and must not be merged: each is asked at a different place for a
 // different reason, and answers differently for the same draw.
 namespace Render::Native::Pass

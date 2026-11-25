@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Skyrim/Render/Wire.h"
+#include "Skyrim/Render/Types.h"
 
 // A room merged into the world (RemoteCell::Merge) is drawn by the engine's main pass, which culls
 // only against the camera's view; the doorway mask then throws away every pixel of it not seen
@@ -13,12 +13,12 @@ namespace Portal::MergedCull
 {
 	struct Room
 	{
-		Render::DoorRect                            door;        // as sent to Render::Backend::Interface::SetMergedDoor
+		Render::DoorRect                            door;        // as sent to Render::Native::SetDoor
 		std::vector<RE::TESObjectCELL*>             cells;       // merged; their 3D is culled
 		std::vector<RE::NiPointer<RE::NiAVObject>> keep;        // drawn as the engine has them (the room's door)
 		bool                                        doorShut = false;
 		// The street merged into an interior (its distant land and persistent references in roots),
-		// never culled: it casts the sun's shadows into the room.
+		// never culled.
 		bool                                        street = false;
 		std::vector<RE::NiPointer<RE::NiAVObject>> roots;
 	};
@@ -33,9 +33,8 @@ namespace Portal::MergedCull
 	// kDataLoaded: the engine's cull of room bounds, opened for merged rooms (see RoomCullHook).
 	void Install();
 
-	// Main thread, every frame: the rooms merged now (the shown one and those merged beside it),
-	// none when nothing is.
-	void Set(std::vector<Room> a_rooms);
+	// Main thread, every frame: the room merged now, none when nothing is.
+	void Set(std::optional<Room> a_room);
 
 	// Around the engine's player view (Main::RenderPlayerView). What BeforeView hides, AfterView
 	// shows again, so nothing hidden outlives the view: saves, crossings and the rest of the frame

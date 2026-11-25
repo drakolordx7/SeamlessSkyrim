@@ -1,6 +1,6 @@
 import os, sys, traceback
 OUT = os.environ.get("RDC_OUT", os.getcwd())
-CAP = os.environ.get("RDC_CAPTURE", "E:/captures/capture.rdc")
+CAP = os.environ["RDC_CAPTURE"]
 log = open(os.path.join(OUT, "survey.txt"), "w")
 def p(*a):
     log.write(" ".join(str(x) for x in a) + "\n"); log.flush()

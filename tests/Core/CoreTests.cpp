@@ -494,9 +494,9 @@ namespace
 		CHECK(P::HeaderValid(good, 1024, 512));
 		const std::uint32_t tooWide[4] = { P::kMagic, P::kVersion, 4096, 256 };
 		const std::uint32_t newer[4] = { P::kMagic, P::kVersion + 1, 512, 256 };
+		const std::uint32_t older[4] = { P::kMagic, P::kVersion - 1, 512, 256 };
 		const std::uint32_t foreign[4] = { 0, P::kVersion, 512, 256 };
-		CHECK(!P::HeaderValid(tooWide, 1024, 512) && !P::HeaderValid(newer, 1024, 512) && !P::HeaderValid(foreign, 1024, 512));
-		CHECK(!P::HasDepth(1) && P::HasDepth(2));
+		CHECK(!P::HeaderValid(tooWide, 1024, 512) && !P::HeaderValid(newer, 1024, 512) && !P::HeaderValid(older, 1024, 512) && !P::HeaderValid(foreign, 1024, 512));
 		P::BrightnessMean mean;
 		CHECK(mean.Result(1.0f) == 0.0f);
 		mean.Add(1.0f);

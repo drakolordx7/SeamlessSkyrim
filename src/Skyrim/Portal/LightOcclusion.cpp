@@ -1,8 +1,6 @@
 #include "Skyrim/Portal/LightOcclusion.h"
 
 #include "Skyrim/Engine/Havok.h"
-#include "Skyrim/Portal/MergedView.h"
-#include "Skyrim/Render/Wire.h"
 
 namespace
 {
@@ -63,9 +61,8 @@ namespace
 		RE::NiPoint3 at;
 		bool         interior = false;
 	};
-	// One per room merged at once (Render::Backend::Interface::MergedRooms), by the room's slot: each room's
-	// lights are measured in its own Havok world, placed by its own door. Slot 0 also serves the
-	// portal pass.
+	// The shown space: its lights are measured in its own Havok world, placed by its own door.
+	// Serves the portal pass too.
 	struct Space
 	{
 		RE::bhkWorld*                                        world = nullptr;
@@ -73,12 +70,12 @@ namespace
 		std::optional<Portal::LightOcclusion::RoomDoor>      door;       // see SetWorld
 		bool                                                 interior = false;  // see SetWorld
 	};
-	std::array<Space, ::Render::kMaxRooms> spaces;
+	Space space;
 	// With the world, like the cache.
 	std::unordered_map<Key, ShellVerdict, KeyHash> outsideShell;  // geometry null
 	std::uint32_t                              unmeasuredThisFrame = 0;
 	std::uint64_t                              raysTotal = 0;
-	std::uint32_t                              frame = 0;  // advanced with slot 0's SetWorld, once per frame
+	std::uint32_t                              frame = 0;  // advanced with SetWorld, once per frame
 	// Measuring a whole room at once (thousands of pairs) would be one long frame; the rest is
 	// measured over the next frames, and until then a pair counts as half lit. In time, not rays: a
 	// ray in a Dwemer hall's mesh costs ~3 us, and 4000 rays a frame were 12 ms.
@@ -192,19 +189,17 @@ namespace
 
 namespace Portal::LightOcclusion
 {
-	void SetWorld(int a_slot, RE::bhkWorld* a_world, const RE::NiTransform& a_toPhysics, const std::optional<RoomDoor>& a_door, bool a_interior)
+	void SetWorld(RE::bhkWorld* a_world, const RE::NiTransform& a_toPhysics, const std::optional<RoomDoor>& a_door, bool a_interior)
 	{
-		spaces[a_slot] = { a_world, a_toPhysics, a_door, a_interior };
-		if (a_slot == 0) {
-			// Once per frame: slot 0 is set every frame, before the others.
-			++frame;
-			unmeasuredThisFrame = 0;
-			msThisFrame = 0.0;
-			if (cachedPairs > kMaxCached) {
-				cache.clear();
-				cachedPairs = 0;
-				outsideShell.clear();
-			}
+		space = { a_world, a_toPhysics, a_door, a_interior };
+		// Once per frame.
+		++frame;
+		unmeasuredThisFrame = 0;
+		msThisFrame = 0.0;
+		if (cachedPairs > kMaxCached) {
+			cache.clear();
+			cachedPairs = 0;
+			outsideShell.clear();
 		}
 	}
 
@@ -215,27 +210,22 @@ namespace Portal::LightOcclusion
 
 	float Visibility(RE::BSGeometry* a_geometry, RE::NiLight* a_light)
 	{
-		// A shape of a room merged beside the shown one is lit by that room's lights alone. Asked
-		// for each of a shape's shadow-casting lights in a row: the room, the shape's place and its
+		// Asked for each of a shape's shadow-casting lights in a row: the shape's place and its
 		// lights looked up once per shape. The lights' list stays valid until the cache is cleared,
 		// at the start of a frame (SetWorld).
 		static thread_local const RE::BSGeometry*   lastShape = nullptr;
 		static thread_local std::uint32_t           lastFrame = 0;
-		static thread_local Space*                  lastSpace = nullptr;
 		static thread_local RE::NiPoint3            lastCenter;
 		static thread_local std::vector<LightEntry>* lastLights = nullptr;
 		if (a_geometry != lastShape || frame != lastFrame) {
 			lastShape = a_geometry;
 			lastFrame = frame;
-			const int slot = a_geometry ? Portal::MergedView::RoomOf(a_geometry) : -1;
-			lastSpace = &spaces[slot > 0 && slot < static_cast<int>(spaces.size()) ? slot : 0];
 			lastLights = nullptr;
-			if (lastSpace->world && a_geometry) {
-				lastCenter = lastSpace->toPhysics * a_geometry->worldBound.center;
-				lastLights = &cache[Key{ lastSpace->world, a_geometry, nullptr }];
+			if (space.world && a_geometry) {
+				lastCenter = space.toPhysics * a_geometry->worldBound.center;
+				lastLights = &cache[Key{ space.world, a_geometry, nullptr }];
 			}
 		}
-		auto& space = *lastSpace;
 		if (!lastLights || !a_light) {
 			return 1.0f;
 		}
@@ -271,11 +261,6 @@ namespace Portal::LightOcclusion
 
 	json Describe()
 	{
-		json bySlot = json::array();
-		for (const auto& space : spaces) {
-			bySlot.push_back({ { "world", space.world != nullptr } });
-		}
-		return { { "pairs", cachedPairs }, { "raysTotal", raysTotal }, { "unmeasuredThisFrame", unmeasuredThisFrame }, { "world", spaces[0].world != nullptr },
-			{ "slots", bySlot } };
+		return { { "pairs", cachedPairs }, { "raysTotal", raysTotal }, { "unmeasuredThisFrame", unmeasuredThisFrame }, { "world", space.world != nullptr } };
 	}
 }

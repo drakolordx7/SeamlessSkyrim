@@ -115,10 +115,6 @@ namespace Portal::Doors
 					corrections[a_door] = degrees;
 				}
 			});
-			// The older [DoorOpen] and [DoorShift] were made against doors measured by their bounds:
-			// the hinge guessed from them, the shift mostly making up for the bounds' depth. Against
-			// the measured panel neither means the same, so they are left unread, as is [DoorHinge],
-			// the other end of the leaf for a hinge, which a smaller swing angle made unneeded.
 			each(L"DoorSwing", [](RE::FormID a_door, const wchar_t* a_value) { swingDegrees[a_door] = std::wcstof(a_value, nullptr); });
 			// [DoorPortal] =0: the pair's portal switched off.
 			each(L"DoorPortal", [](RE::FormID a_door, const wchar_t* a_value) {

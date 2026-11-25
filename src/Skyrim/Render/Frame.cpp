@@ -13,7 +13,6 @@
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Portal/StreetMerge.h"
 #include "Skyrim/Portal/Travel.h"
-#include "Skyrim/Render/Backend.h"
 #include "Skyrim/Render/D3D.h"
 #include "Skyrim/Render/MainView.h"
 #include "Skyrim/Render/PortalPass.h"
@@ -51,43 +50,6 @@ namespace Render::Frame
 			trampoline.write_branch<5>(a_target, a_thunk);
 			return stub;
 		}
-
-		// The sky's precipitation update (ID 26179, from Sky::Update) gives the rain and snow no
-		// particles unless the sky is in full mode (the emitter's density 0, the shape culled), and
-		// indoors it is in dome-only mode. While the street is merged in, the update runs as outdoors:
-		// the street through the doorway has the weather's rain, fading in and out with the weather as
-		// it does outdoors. The shape follows the camera into the room; the doorway mask keeps it to the
-		// street (MergedView::RoomOf).
-		struct PrecipitationUpdateHook
-		{
-			static void Thunk(RE::Precipitation* a_precip, float a_delta)
-			{
-				auto*      sky = RE::Sky::GetSingleton();
-				const auto mode = sky->mode;
-				if (Portal::StreetMerge::Merged() && ::Render::Backend::Current().MasksPrecipitation()) {
-					sky->mode = RE::Sky::Mode::kFull;
-				}
-				original(a_precip, a_delta);
-				sky->mode = mode;
-			}
-
-			// The sky's precipitation update is called from two places (Sky::Update and ID 26222), so the
-			// function itself is redirected: its first instructions (mov rax, rsp; push rbx; sub rsp,
-			// imm32: 11 bytes, the frame size differing between builds).
-			static void Install()
-			{
-				REL::Relocation<std::uintptr_t> target{ REL::RelocationID(25638, 26179) };
-				constexpr std::size_t           kMoved = 11;
-				const auto*                     code = reinterpret_cast<const std::uint8_t*>(target.address());
-				static constexpr std::uint8_t   expected[7] = { 0x48, 0x8B, 0xC4, 0x53, 0x48, 0x81, 0xEC };
-				if (std::memcmp(code, expected, sizeof(expected)) != 0 || code[9] != 0 || code[10] != 0) {
-					logger::warn("portal: precipitation update not as expected; no rain or snow through a doorway seen from indoors");
-					return;
-				}
-				original = reinterpret_cast<decltype(original)>(MovePrologue(target.address(), kMoved, reinterpret_cast<std::uintptr_t>(&Thunk)));
-			}
-			static inline void (*original)(RE::Precipitation*, float) = nullptr;
-		};
 
 		std::optional<Active> PortalToDraw()
 		{
@@ -128,9 +90,6 @@ namespace Render::Frame
 				if (body) {
 					body->SetAppCulled(true);
 				}
-				// Rooms merged beside the shown one are lit from light scenes the engine doesn't update.
-				// First: a paused room woken for this view has its people shown below.
-				Portal::MergedView::BeforePlayerView();
 				// NPCs of a merged interior keep NiAVObject::kNotVisible on their 3D root like those of
 				// any remote interior (see PortalPass::Draw): the room looked empty from outside, and they
 				// faded in on walking in. Cleared for the whole player view (the world is culled before
@@ -427,7 +386,6 @@ namespace Render::Frame
 		}
 		RenderWorldHook::func = trampoline.write_call<5>(renderWorld.address(), RenderWorldHook::Thunk);
 		ActorCullHook::Install();
-		PrecipitationUpdateHook::Install();
 		REL::Relocation<std::uintptr_t> playerView{ REL::RelocationID(35559, 36558), REL::Relocate(0x11D, 0x11D) };
 		if (Hooks::CallsTo(playerView.address(), REL::RelocationID(35560, 36559), "portal: Main::RenderPlayerView")) {
 			RenderPlayerViewHook::func = trampoline.write_call<5>(playerView.address(), RenderPlayerViewHook::Thunk);

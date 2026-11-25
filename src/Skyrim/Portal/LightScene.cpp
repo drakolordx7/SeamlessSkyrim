@@ -1,6 +1,6 @@
 #include "Skyrim/Portal/LightScene.h"
 
-#include "Skyrim/Render/Wire.h"
+#include "Skyrim/Render/Types.h"
 
 namespace
 {
@@ -198,23 +198,6 @@ namespace Portal::LightScene
 	{
 		ForEachLight(Get(), [](RE::BSLight* a_light) {
 			a_light->frustrumCull = 0;  // 0 = visible, 255 = culled
-			a_light->lodDimmer = 1.0f;
-		});
-	}
-
-	void PrepareUnshownForView(RE::ShadowSceneNode* a_scene)
-	{
-		if (!a_scene || a_scene == registered) {
-			return;
-		}
-		// What Main::RenderPlayerView does for every registered scene (ID 36559 + 0x194, through
-		// ID 106337), with the same second argument.
-		REL::Relocation<void (*)(RE::ShadowSceneNode*, void*)> updateLights{ REL::RelocationID(99701, 106335) };
-		REL::Relocation<void***>                               viewer{ REL::RelocationID(528077, 415022) };
-		void* const                                            argument = *viewer ? **viewer : nullptr;
-		updateLights(a_scene, argument);
-		ForEachLight(a_scene, [](RE::BSLight* a_light) {
-			a_light->frustrumCull = 0;
 			a_light->lodDimmer = 1.0f;
 		});
 	}

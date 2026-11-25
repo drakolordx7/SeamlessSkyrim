@@ -13,7 +13,7 @@ namespace Portal::MergedCull
 		using Core::Doorway::Side;
 
 		Mode                mode = Mode::kShapes;
-		std::vector<Room>   rooms;  // main thread, as is the view
+		std::optional<Room> mergedRoom;  // main thread, as is the view
 
 		// Shown again after the view; only what was shown before, so the cull never undoes another
 		// part's hiding (blockers in the doorway, shapes with stray bones).
@@ -504,10 +504,8 @@ namespace Portal::MergedCull
 			});
 		}
 
-		// The rooms are culled one after the other, each against its own doorway; they are disjoint
-		// subtrees, so what one keeps says nothing about another.
-		// a_unseen: no line of sight reaches the room (the camera stands in another one).
-		void CullRoom(const Room& a_room, bool a_unseen)
+		// The room is culled against its doorway.
+		void CullRoom(const Room& a_room)
 		{
 			const auto* room = &a_room;
 			const auto& door = room->door;
@@ -521,9 +519,8 @@ namespace Portal::MergedCull
 					return;
 				}
 			}
-			// The street casts the sun's shadows (Interior Sun), into the room too: hidden whole while
-			// the doorway was off screen, the sunlit patches on the room's walls changed; shape by
-			// shape, a porch beam's shadow seen through the doorway thinned. Not culled.
+			// Hidden whole while the doorway was off screen, the sunlit patches on the room's walls
+			// changed; shape by shape, a porch beam's shadow seen through the doorway thinned. Not culled.
 			if (room->street) {
 				stats.lastWhy = "street: not culled";
 				return;
@@ -534,7 +531,6 @@ namespace Portal::MergedCull
 			}
 			doorCenter = ToNi(door.center);
 			const char* none = inside                                               ? nullptr :
-			                   a_unseen                                             ? "camera in another room" :
 			                   room->doorShut                                      ? "door shut" :
 			                   !Core::Doorway::Planes(door, ToCore(camera->world.translate), planes) ? "camera behind the door plane" :
 			                   !DoorwayInView(door)                                 ? "doorway off screen" :
@@ -598,18 +594,12 @@ namespace Portal::MergedCull
 			stats.lastTested = 0;
 			lastRoomsSeen = lastRoomsTotal = 0;
 			lastRoomsWhy = "no room graph";
-			if (rooms.empty() || mode == Mode::kOff) {
-				stats.lastWhy = rooms.empty() ? "nothing merged" : "off";
+			if (!mergedRoom || mode == Mode::kOff) {
+				stats.lastWhy = !mergedRoom ? "nothing merged" : "off";
 				return;
 			}
 			++stats.views;
-			std::string why;
-			const bool  cameraInRoom = std::ranges::any_of(rooms, [](const Room& a_room) { return a_room.door.cameraMerged; });
-			for (const auto& room : rooms) {
-				CullRoom(room, cameraInRoom && !room.door.cameraMerged);
-				why += (why.empty() ? "" : "; ") + stats.lastWhy;
-			}
-			stats.lastWhy = std::move(why);
+			CullRoom(*mergedRoom);
 		}
 	}
 
@@ -635,19 +625,19 @@ namespace Portal::MergedCull
 		}
 	}
 
-	void Set(std::vector<Room> a_rooms)
+	void Set(std::optional<Room> a_room)
 	{
-		rooms = std::move(a_rooms);
+		mergedRoom = std::move(a_room);
 		// Not the room the player has walked into: the engine culls it with its own graph then.
 		auto*                              here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
 		std::vector<const RE::NiAVObject*> found;
 		std::vector<const RE::NiAVObject*> roots;
-		for (const auto& room : rooms) {
-			for (auto* cell : room.cells) {
+		if (mergedRoom) {
+			for (auto* cell : mergedRoom->cells) {
 				auto* loaded = cell != here ? cell->GetRuntimeData().loadedData : nullptr;
 				// Not a street merged into an interior: hung in the room at its door, it is culled through
 				// that room's portals, which the compound frustum holds (Riften's jail).
-				if (auto* root = loaded && !room.street ? loaded->cell3D.get() : nullptr) {
+				if (auto* root = loaded && !mergedRoom->street ? loaded->cell3D.get() : nullptr) {
 					roots.push_back(root);
 				}
 				if (auto* graph = loaded ? loaded->portalGraph.get() : nullptr) {
@@ -709,7 +699,7 @@ namespace Portal::MergedCull
 		};
 		return {
 			{ "mode", static_cast<int>(mode) },
-			{ "merged", rooms.size() },
+			{ "merged", mergedRoom ? 1 : 0 },
 			{ "views", stats.views },
 			{ "cameraInside", stats.cameraInside },
 			{ "noneSeen", stats.noneSeen },

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "Skyrim/Render/Wire.h"
+#include "Skyrim/Render/Types.h"
 
-// The native backend (see Render/Backend.h): seamless rendering with the game's own shaders.
+// The native renderer: seamless rendering with the game's own shaders (also under ENB).
 namespace Render::Native
 {
 	// Hooks the shaders' per-draw setup and the device context's draw calls. False if something
-	// it needs isn't there (then the backend is off).
+	// it needs isn't there (then the renderer is off).
 	bool Install();
 	[[nodiscard]] bool Ready();
 

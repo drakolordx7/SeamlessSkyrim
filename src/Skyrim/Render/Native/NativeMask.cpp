@@ -14,15 +14,14 @@
 
 // The doorway mask without changing the game's shaders.
 //
-// The patched Community Shaders discards pixels in its pixel shaders (SeamlessDoorClips in its
-// SharedData.hlsli). The game's own shaders can't be changed that way without replacing them, and
-// ENB recognises the game's shaders to apply its own effects, so a replaced shader may lose those.
+// The game's own shaders can't be changed to discard pixels without replacing them, and ENB
+// recognises the game's shaders to apply its own effects, so a replaced shader may lose those.
 // Instead, for the draws that need it, a geometry shader is put behind the engine's vertex shader:
 // it passes every vertex on unchanged and adds clip distances (SV_ClipDistance), which the
 // rasterizer cuts at per pixel. The cut is exact: a plane's distance is linear in world space and
 // clip distances are interpolated perspective-correctly.
 //
-// The rule is the fork's (X, see Core/Render/DoorwayPlanes.h). A shape of the space the camera is not
+// The rule (X, see Core/Render/DoorwayPlanes.h). A shape of the space the camera is not
 // in is kept inside X (one draw, up to six clip distances). A shape of the camera's own space is kept
 // outside X; that isn't convex, so it is drawn in up to six disjoint convex pieces (not P0; P0 and
 // not P1; P0, P1 and not P2; ...). Shapes whose bounds lie wholly on one side are drawn once,
@@ -44,7 +43,7 @@ namespace
 	// Set from the portal code (main thread, as is rendering).
 	std::mutex                stateLock;
 	std::optional<Door>       door;                // under stateLock
-	float                     gatePassage = 0.0f;  // under stateLock; Render::Backend::Interface::SetGatePassage
+	float                     gatePassage = 0.0f;  // under stateLock; SetGatePassage
 	std::optional<ClipPlane>  portalClip;          // under stateLock
 	std::atomic<bool>         portalPass = false;
 	bool                      ready = false;
@@ -634,7 +633,7 @@ namespace Render::Native
 	{
 		auto* context = DrawingContext();
 		if (!context) {
-			logger::error("native backend: no device context; seamless rendering off");
+			logger::error("native renderer: no device context; seamless rendering off");
 			return false;
 		}
 		// Everything the cut needs from the engine's structures, checked once.
@@ -646,7 +645,7 @@ namespace Render::Native
 		HookShader<2>(RE::VTABLE_BSEffectShader[0]);
 		Render::Native::InstallLightingHooks();
 		ready = true;
-		logger::info("native backend: shader setup and draw hooks installed (context {:X})", reinterpret_cast<std::uintptr_t>(context));
+		logger::info("native renderer: shader setup and draw hooks installed (context {:X})", reinterpret_cast<std::uintptr_t>(context));
 		return true;
 	}
 

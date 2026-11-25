@@ -286,8 +286,8 @@ namespace Spaces
 			}
 		}
 		MoveBounds(toSource);
-		// The room's lights stay in the portal's light scene: the patched Community Shaders lights the
-		// merged shapes from there (SetupPortalStrictLights). Handed to the world's, they lit the
+		// The room's lights stay in the portal's light scene: the native lighting lights the
+		// merged shapes from there (Render/Native/NativeLighting.cpp). Handed to the world's, they lit the
 		// street around the door, through walls, took shadow slots from the town's own lights (its
 		// shadows changed as doors were passed) and stayed behind after the room was let go.
 		merged = true;
