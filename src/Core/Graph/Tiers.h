@@ -64,7 +64,7 @@ namespace Core::Graph
 	{
 		// Spaces besides the player's that may be live at once.
 		std::uint32_t maxLive = 1;
-		// Spaces besides the live ones that may be kept loaded and paused (Settings iShownRooms is 2).
+		// Spaces besides the live ones that may be kept loaded and paused.
 		std::uint32_t maxLoaded = 3;
 		// A door within this reach (gates count nearer, Selection::Reach) can make its space live when it is open.
 		float liveReach = 450.0f;
@@ -96,6 +96,10 @@ namespace Core::Graph
 		Vec3    velocity;  // units per second
 		// Doors that are open now, in either space (the two ends of a doorway open together).
 		std::span<const DoorIx> openDoors;
+		// Doors that are only doors right now (locked shut, disabled, switched off by the player): a
+		// doorway with such an end is no way through, so nothing is held for it. Not a fact of the
+		// graph, which is built once: whether a door is locked changes.
+		std::span<const DoorIx> blockedDoors;
 		// Target frame time minus the last frame's; negative when over budget.
 		float headroomMs = 0.0f;
 		float memoryBudgetMb = 0.0f;  // for what is held beyond the player's own space; 0 holds nothing
@@ -145,6 +149,17 @@ namespace Core::Graph
 		void Fallback(DoorwayIx a_doorway);
 		[[nodiscard]] bool IsFallback(DoorwayIx a_doorway) const { return forced[a_doorway]; }
 
+		// The budgets and reaches change while playing (the menu); takes effect at the next tick.
+		void Configure(const SchedulerConfig& a_config) { config = a_config; }
+
+		// The adapter let go of everything it held (a save, a load, the player entered another
+		// space): every space is cold again and none waits to be retried. Fallbacks stay.
+		void Reset();
+		// The graph was built again with more in it (the adapter finds doors as cells load): the
+		// tiers, retry waits and fallbacks follow their spaces and doors by id into a_new, which
+		// replaces the graph this scheduler was made with. a_old is that graph, still alive.
+		void Rebind(const SpaceGraph& a_old, const SpaceGraph& a_new);
+
 	private:
 		[[nodiscard]] Tier             CapOf(DoorwayIx a_doorway) const;
 		[[nodiscard]] const SpaceCost& CostOf(const Inputs& a_inputs, SpaceIx a_space) const;
@@ -155,9 +170,9 @@ namespace Core::Graph
 		std::vector<float>     retryCooldown;   // by space
 		std::vector<bool>      forced;          // by doorway
 		std::vector<bool>      open;            // by door, set during a tick
+		std::vector<bool>      blocked;         // by door, set during a tick
 		std::vector<int>       candidateOf;     // by space, -1 outside a tick
 		float                  attachTimer = 0.0f;
 		float                  memoryMb = 0.0f;
-		SpaceIx                lastPlayerSpace = kNoSpace;
 	};
 }

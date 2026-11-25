@@ -21,6 +21,7 @@
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/NpcTravel.h"
 #include "Skyrim/Portal/PortalDoor.h"
+#include "Skyrim/Portal/Schedule.h"
 #include "Skyrim/Portal/Selection.h"
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Portal/StreetLOD.h"
@@ -37,7 +38,6 @@ namespace Portal::Manager
 		Spaces::RemoteCell            remote;                  // the space shown behind the portal's door
 		std::mutex            activeLock;
 		std::optional<Active> active;
-		Selection::AttachRetry retry;
 		std::string           lastEvent = "none";
 		std::optional<float>  approachLimit;  // camera pull-in this frame, see Crossing::Approach
 
@@ -117,9 +117,9 @@ namespace Portal::Manager
 			MergedView::Publish();
 		}
 
-		// The portal let go when the player walked away, a closer door took over, the door was locked
-		// or the portal switched off; or only its door pair changed.
-		void EndOrSwitchPortal(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_here, const std::optional<Selection::Candidate>& a_candidate)
+		// The portal let go when the scheduler dropped its space (the player walked away), a closer door
+		// took over, the door was locked or the portal switched off; or only its door pair changed.
+		void EndOrSwitchPortal(RE::PlayerCharacter* a_player, RE::TESObjectCELL* a_here, const std::optional<Schedule::Candidate>& a_candidate)
 		{
 			const auto portal = CurrentPortal();
 			if (!portal) {
@@ -130,12 +130,16 @@ namespace Portal::Manager
 			const float reach = door && linkedDoor ? Selection::Reach(a_player->GetPosition(), door, linkedDoor) : FLT_MAX;
 			// Another door into the same space counts too (an inn's kitchen door next to its front
 			// door): the space is placed by the door pair, so it has to be the nearest door's.
-			const bool  better = a_candidate && (a_candidate->cell != portal->cell || a_candidate->door->GetFormID() != portal->sourceDoor) &&
-			                     a_candidate->rank + Selection::kSwitchMargin < (door && linkedDoor ? Selection::Rank(a_player->GetPosition(), door, linkedDoor) : FLT_MAX);
+			// Another space holds the live slot (the scheduler took it from this one), or another door into this
+			// space is clearly nearer.
+			const bool  better = a_candidate && ((a_candidate->cell != portal->cell) ||
+												   (a_candidate->door->GetFormID() != portal->sourceDoor &&
+													   a_candidate->rank + Selection::kSwitchMargin < (door && linkedDoor ? Selection::Rank(a_player->GetPosition(), door, linkedDoor) : FLT_MAX)));
 			// A shop closing for the night locks its door.
 			const bool  off = Portal::Doors::PortalOff(portal->sourceDoor) || Portal::Doors::PortalOff(portal->linkedDoor);
 			const bool  locked = door && Portal::Doors::LockedShut(door);
-			const char* end = reach > Selection::ReleaseRadius() ? "player walked away" : better ? "a closer door" : locked ? "door locked" :
+			const bool  dropped = Schedule::TierOf(portal->cell) < Core::Graph::Tier::LoadedPaused;
+			const char* end = dropped ? (reach > Selection::ReleaseRadius() ? "player walked away" : "the scheduler let it go") : better ? "a closer door" : locked ? "door locked" :
 			                  off                                ? "portal switched off for this door" :
 			                                                       nullptr;
 			// A door a stand-in will hold open is let go open, to be taken over where it is: swung shut
@@ -162,14 +166,12 @@ namespace Portal::Manager
 		}
 
 		// The candidate door's space attached (or taken from the kept ones) and shown.
-		void AttachCandidate(RE::TESObjectCELL* a_here, const std::optional<Selection::Candidate>& a_candidate)
+		void AttachCandidate(RE::TESObjectCELL* a_here, const std::optional<Schedule::Candidate>& a_candidate)
 		{
 			const auto attachStarted = std::chrono::steady_clock::now();
 			bool       attached = false;
-			if (const auto kept = Selection::FindKept(a_candidate->cell); kept != Selection::Kept().end()) {
-				// Attached out of sight already (Selection::UpdateWarm): only its light scene becomes the drawn one.
-				std::swap(remote, *kept);
-				Selection::Kept().erase(kept);
+			if (Schedule::TakeKept(a_candidate->cell, remote)) {
+				// Attached out of sight already (Schedule, tier 3): only its light scene becomes the drawn one.
 				remote.SetPaused(false);
 				remote.Show();
 				attached = true;
@@ -196,7 +198,7 @@ namespace Portal::Manager
 				// drawn before the merge.
 				StreetMerge::PlaceLOD(*CurrentPortal(), a_here);
 			} else {
-				retry.Failed(a_candidate->cell->GetFormID());
+				Schedule::AttachFailed(a_candidate->cell);
 				lastEvent = std::format("could not attach {}", Probe::DescribeCell(a_candidate->cell));
 			}
 			logger::info("portal: {}", lastEvent);
@@ -300,7 +302,6 @@ namespace Portal::Manager
 			forgetTimer = 5.0f;
 			Doors::ForgetUnloaded();
 		}
-		retry.Tick(a_delta);
 		Crossing::Tick(a_delta);
 		if (!enabled) {
 			StandIns::Drop();
@@ -329,16 +330,21 @@ namespace Portal::Manager
 		for (const auto& [door, linked] : Portal::DoorUse::Update(a_delta)) {
 			Portal::DoorUse::PlayDoorSound(door, linked, false);
 		}
-		const auto candidate = Selection::CandidateDoor(player, a_delta);
+		Schedule::Update(player, here, a_delta);
+		const auto candidate = Schedule::LiveCandidate();
+		Crossing::Drive(a_delta);
 		EndOrSwitchPortal(player, here, candidate);
+		// Nothing simulates behind a door that is shut or far: the shown space runs only while the scheduler holds it live.
+		if (const auto shown = CurrentPortal()) {
+			remote.SetPaused(Schedule::TierOf(shown->cell) < Core::Graph::Tier::Live);
+		}
 		// Before the portal's own door handling (UpdateShown): a door a stand-in held is handed over
 		// this frame.
 		StandIns::Update(player, here, a_delta);
 		StandIns::WalkInto(player, here, a_delta);
-		if (!CurrentPortal() && candidate && !Crossing::AttachHeld() && !retry.Blocks(candidate->cell->GetFormID())) {
+		if (!CurrentPortal() && candidate && !Crossing::AttachHeld()) {
 			AttachCandidate(here, candidate);
 		}
-		Selection::UpdateWarm(here, a_delta, { retry, Crossing::AttachHeld(), CurrentPortal() && !(remote.Healthy() && remote.FullyLoaded()) });
 		std::optional<MergedCull::Room> cull;
 		UpdateShown(player, here, a_delta, cull);
 		Gates::UpdateMask(here);
@@ -360,6 +366,7 @@ namespace Portal::Manager
 
 	void OnArrival()
 	{
+		Crossing::Arrived();
 		Update(0.0f);
 	}
 
@@ -367,7 +374,7 @@ namespace Portal::Manager
 	{
 		{
 			const Diag::Scope scope("release kept");
-			Selection::ReleaseWarm(a_reason);
+			Schedule::ReleaseAll(a_reason);
 		}
 		const Diag::Scope scope("release shown");
 		ReleaseShown(a_reason, a_holdoff, a_handOver);

@@ -1,9 +1,11 @@
 #include "Skyrim/Portal/Crossing.h"
 
 #include "Core/Crossing/Approach.h"
+#include "Core/Crossing/Sequence.h"
 
 #include "Skyrim/Doors/Geometry.h"
 #include "Skyrim/Doors/Hold.h"
+#include "Skyrim/Graph/DoorScan.h"
 #include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Engine/Havok.h"
 #include "Skyrim/Portal/CameraLimit.h"
@@ -11,6 +13,7 @@
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalDoor.h"
 #include "Skyrim/Portal/PortalManager.h"
+#include "Skyrim/Portal/Schedule.h"
 #include "Skyrim/Portal/Selection.h"
 #include "Skyrim/Portal/StreetMerge.h"
 #include "Skyrim/Spaces/RemoteCell.h"
@@ -21,6 +24,10 @@ namespace Portal::Crossing
 	{
 		Core::Crossing::Timers        timers;
 		Core::Crossing::ApproachState approach;
+		// The order of one crossing and its timeouts (Core/Crossing/Sequence.h): what is done is here.
+		Core::Crossing::Sequence      sequence;
+		// The crossing the player's step into the doorway asks for, while the sequence answers it.
+		std::optional<Travel::CrossingRequest> request;
 
 		// Merged, the player walks into the doorway until the camera has followed them through it;
 		// but behind an exterior door is the building's own collision (its volume is solid). Whatever
@@ -121,6 +128,51 @@ namespace Portal::Crossing
 			}
 		}
 
+		void Run(const std::vector<Core::Crossing::Action>& a_actions, Core::Crossing::Phase a_before)
+		{
+			using Core::Crossing::ActionKind;
+			for (const auto& action : a_actions) {
+				switch (action.kind) {
+				case ActionKind::PrewarmSpace:
+					// The scheduler holds the space behind an open door that is near; nothing more to ask of it.
+					logger::info("crossing: preparing the space behind door {:08X}", Graph::DoorForm(sequence.Current().door));
+					break;
+				case ActionKind::CancelPrewarm:
+				case ActionKind::OpenDoor:  // the door swings by itself (a stand-in, then the portal)
+				case ActionKind::StartCover:
+				case ActionKind::EndCover:
+					break;
+				case ActionKind::Teleport:
+					if (request) {
+						Crossing::Request(*std::exchange(request, std::nullopt));
+					} else {
+						// Nothing to carry out (the player is not in the doorway): the engine's own door.
+						logger::warn("crossing: asked to cross with no request");
+						Run(sequence.Handle({ Core::Crossing::EventKind::Failed }), Core::Crossing::Phase::Cross);
+					}
+					break;
+				case ActionKind::ReleaseSpace:
+					// Let go when the player's cell changed (Manager::ReleaseAll).
+					Run(sequence.Handle({ Core::Crossing::EventKind::Released }), Core::Crossing::Phase::Release);
+					break;
+				case ActionKind::VanillaDoor: {
+					const auto form = Graph::DoorForm(action.door);
+					Schedule::Fallback(form, a_before == Core::Crossing::Phase::Cross ? "the crossing did not arrive in time" : "the space behind it was not ready in time");
+					if (a_before == Core::Crossing::Phase::Cross) {
+						// In the doorway and not carried through: the engine's own door, with its loading screen.
+						if (auto* door = RE::TESForm::LookupByID<RE::TESObjectREFR>(form)) {
+							ThroughDoor(door);
+						}
+					} else {
+						// No one is taking it yet: the door is an ordinary door from now on.
+						Run(sequence.Handle({ Core::Crossing::EventKind::Crossed }), Core::Crossing::Phase::Fallback);
+					}
+					break;
+				}
+				}
+			}
+		}
+
 		// How far the camera's near plane is from the camera.
 		float NearPlane()
 		{
@@ -132,6 +184,48 @@ namespace Portal::Crossing
 	void Tick(float a_delta)
 	{
 		timers.Tick(a_delta);
+	}
+
+	void Drive(float a_delta)
+	{
+		using namespace Core::Crossing;
+		const auto  before = sequence.GetPhase();
+		const auto& ahead = Schedule::ApproachedDoorway();
+		const auto  portal = Manager::CurrentPortal();
+		// The player stepped away from the door the crossing was prepared for.
+		if (sequence.Busy() && before >= Phase::Approach && before <= Phase::Commit && (!ahead || ahead->target.door != sequence.Current().door)) {
+			logger::info("crossing: dropped, the player left door {:08X}", Graph::DoorForm(sequence.Current().door));
+			Run(sequence.Handle({ EventKind::Abort }), before);
+		}
+		if (ahead && !sequence.Busy()) {
+			Run(sequence.Handle({ EventKind::Begin, ahead->target }), Phase::Idle);
+			Run(sequence.Handle({ EventKind::Near }), Phase::Approach);
+		}
+		// The space behind the door is shown and loaded; the door stands open.
+		if (ahead && portal && portal->sourceDoor == ahead->door) {
+			if (sequence.GetPhase() == Phase::Prewarm && Manager::ReadyPortal()) {
+				Run(sequence.Handle({ EventKind::Prewarmed }), Phase::Prewarm);
+			}
+			constexpr float kOpen = 0.9f;
+			const bool      open = Manager::Merged() ? MergedView::ShownAmount() >= kOpen : PortalDoor::Holds(portal->sourceDoor) && PortalDoor::Amount() >= kOpen;
+			if (sequence.GetPhase() == Phase::Open && open) {
+				Run(sequence.Handle({ EventKind::DoorOpened }), Phase::Open);
+			}
+		}
+		const auto phase = sequence.GetPhase();
+		Run(sequence.Tick(a_delta), phase);
+	}
+
+	void Arrived()
+	{
+		using namespace Core::Crossing;
+		const auto phase = sequence.GetPhase();
+		Run(sequence.Handle({ EventKind::Crossed }), phase);
+	}
+
+	std::string_view PhaseName()
+	{
+		return Core::Crossing::Name(sequence.GetPhase());
 	}
 
 	bool Ready()
@@ -152,7 +246,6 @@ namespace Portal::Crossing
 	void EndHoldoff(float a_seconds)
 	{
 		timers.EndHoldoff(a_seconds);
-		Selection::ScanNow();
 	}
 
 	void Request(const Travel::CrossingRequest& a_request)
@@ -182,8 +275,8 @@ namespace Portal::Crossing
 		auto* teleport = a_door->extraList.GetByType<RE::ExtraTeleport>();
 		auto  linked = teleport && teleport->teleportData ? teleport->teleportData->linkedDoor.get() : nullptr;
 		if (auto* cell = linked ? linked->GetParentCell() : nullptr) {
-			if (const auto kept = Selection::FindKept(cell); kept != Selection::Kept().end()) {
-				Selection::LetGoKept(kept, "player took a door into it");
+			if (Schedule::FindKept(cell) != Schedule::Kept().end()) {
+				Schedule::LetGoKept(cell, "player took a door into it");
 				HoldAttach(3.0f);
 			}
 		}
@@ -263,8 +356,32 @@ namespace Portal::Crossing
 			HoldPassageHeight(a_player, true);
 		}
 		if (Ready() && decision.cross) {
+			using namespace Core::Crossing;
 			logger::info("portal: crossing at depth {:.1f}, side {:.1f}, camera depth {:.1f}{}", decision.depth, decision.side, decision.cameraDepth, merged ? " (merged)" : "");
-			Request({ .portal = a_portal, .limitCamera = decision.limitCamera, .cameraFloor = decision.cameraFloor });
+			request = Travel::CrossingRequest{ .portal = a_portal, .limitCamera = decision.limitCamera, .cameraFloor = decision.cameraFloor };
+			// The portal is shown and its door is not shut: the way is ready whatever the sequence has
+			// been told so far, so it is brought up to the threshold (its timeouts still guard the rest).
+			const auto  door = Graph::DoorOf(a_portal.sourceDoor);
+			const auto& graph = Graph::Get();
+			Target      target;
+			if (door != Core::Graph::kNoDoor && door < graph.DoorCount()) {
+				const auto& d = graph.GetDoor(door);
+				const auto& way = graph.GetDoorway(d.doorway);
+				target = { d.doorway, door, d.space, way.Other(d.space) };
+			}
+			for (const auto step : { EventKind::Begin, EventKind::Near, EventKind::Prewarmed, EventKind::DoorOpened }) {
+				const auto phase = sequence.GetPhase();
+				const bool due = (step == EventKind::Begin && phase == Phase::Idle) || (step == EventKind::Near && phase == Phase::Approach) ||
+				                 (step == EventKind::Prewarmed && phase == Phase::Prewarm) || (step == EventKind::DoorOpened && phase == Phase::Open);
+				if (due) {
+					Run(sequence.Handle({ step, target }), phase);
+				}
+			}
+			const auto phase = sequence.GetPhase();
+			Run(sequence.Handle({ EventKind::AtThreshold }), phase);
+			// Not carried out (the sequence is busy with the last crossing): the player is in the doorway
+			// still next frame, and asks again.
+			request.reset();
 		}
 		return decision.cameraLimit;
 	}

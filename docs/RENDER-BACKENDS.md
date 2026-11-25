@@ -11,7 +11,7 @@ drawn into the world (`Render::Native::Ready()`); crossing without a loading scr
 and the portal pass is drawn unclipped.
 
 One room is merged at a time (the shown one): with two doorways, a shape near both would be cut
-into the pieces outside each doorway's X, multiplied; not solved. `[Portals] iShownRooms` above 1
+into the pieces outside each doorway's X, multiplied; not solved. `[Portals] iLoadedRooms` above 0
 keeps the other rooms loaded out of sight; their open doors show a picture.
 
 With Community Shaders installed the mask still works on its pixel shaders, but Community Shaders

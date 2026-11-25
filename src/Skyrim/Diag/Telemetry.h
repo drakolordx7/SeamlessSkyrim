@@ -25,6 +25,8 @@ namespace Diag
 	};
 
 	inline Sink  sink;
+	// Also called at Present, whether or not the bridge is there: the portal scheduler's frame timing.
+	inline void (*frameEndHook)() = nullptr;
 	// Set by the bridge at load: the game was launched by the MCP server (AgentMode::Enabled).
 	inline bool agentMode = false;
 
@@ -56,7 +58,13 @@ namespace Diag
 	inline void GpuBegin(const char* a_name) { sink.gpuBegin(a_name); }
 	inline void GpuEnd(const char* a_name) { sink.gpuEnd(a_name); }
 	// At Present: closes the frame.
-	inline void FrameEnd() { sink.frameEnd(); }
+	inline void FrameEnd()
+	{
+		sink.frameEnd();
+		if (frameEndHook) {
+			frameEndHook();
+		}
+	}
 
 	inline bool SamplerStart(const std::filesystem::path& a_file, double a_seconds) { return sink.samplerStart(a_file, a_seconds); }
 	[[nodiscard]] inline bool SamplerRunning() { return sink.samplerRunning(); }

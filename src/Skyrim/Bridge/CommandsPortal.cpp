@@ -5,10 +5,12 @@
 #include "Skyrim/Bridge/PortalDiagnostics.h"
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Doors/Settings.h"
+#include "Skyrim/Graph/DoorScan.h"
 #include "Skyrim/Pictures/Cache.h"
 #include "Skyrim/Portal/MergedCull.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
+#include "Skyrim/Portal/Schedule.h"
 #include "Skyrim/Portal/Selection.h"
 #include "Skyrim/Portal/Travel.h"
 #include "Skyrim/Portal/TravelTrace.h"
@@ -77,17 +79,72 @@ namespace Bridge
 				 return json{ { "key", std::format("{:08X}", key->GetFormID()) }, { "turn", Portal::Doors::Correction(key->GetFormID()) },
 					 { "shift", { shift.x, shift.y, shift.z } } };
 			 } } },
-			// Testing without touching the ini: {count} as [Portals] iShownRooms, {pause} as
-			// bPauseUnseenRooms.
-			{ "shown_rooms", { [](const json& a) {
-				 if (a.contains("count")) {
-					 Portal::Selection::SetShownRooms(a.at("count").get<int>());
+			// The tier scheduler. Testing without touching the ini: {loadedRooms} as [Portals] iLoadedRooms,
+			// {memoryMb} as iHeldMemoryMB, {frameRate} as iTargetFrameRate (for the session). Returns the
+			// scheduler's state, the rooms kept loaded, frame times and the merged cull.
+			{ "schedule", { [](const json& a) {
+				 if (a.contains("loadedRooms")) {
+					 Portal::Schedule::SetLoadedRooms(a.at("loadedRooms").get<int>());
 				 }
-				 if (a.contains("pause")) {
-					 Portal::MergedView::SetPauseUnseenRooms(a.at("pause").get<bool>());
+				 if (a.contains("memoryMb")) {
+					 Portal::Schedule::SetMemoryBudgetMb(a.at("memoryMb").get<int>());
+				 }
+				 if (a.contains("frameRate")) {
+					 Portal::Schedule::SetTargetFrameRate(a.at("frameRate").get<int>());
 				 }
 				 auto status = PortalDiagnostics::Status();
-				 return json{ { "shownRooms", status["shownRooms"] }, { "warm", status["warm"] }, { "mergedCull", status["mergedCull"] }, { "frames", FrameHooks::FrameStats() } };
+				 return json{ { "schedule", status["schedule"] }, { "warm", status["warm"] }, { "crossingPhase", status["crossingPhase"] }, { "mergedCull", status["mergedCull"] },
+					 { "frames", FrameHooks::FrameStats() } };
+			 } } },
+			// The door graph built from the loaded game's teleport doors: counts by kind and link, how many
+			// were there at data load and how many were found as cells loaded. {door: "<hex form id>"} adds
+			// that door's record and the doorway it is part of.
+			// Why a door shows its portal or not: {ref} or {plugin, id}. The scheduler's tier for the space behind it
+			// and its last decision, the door's state and the first thing that stops it (`reason`; null while shown).
+			{ "door_status", { [](const json& a) {
+				 const auto* ref = RequireRef(a);
+				 auto        status = Portal::Schedule::DescribeDoor(ref->GetFormID());
+				 status["doorUse"] = Portal::DoorUse::Used(ref->GetFormID());
+				 return status;
+			 } } },
+			// A form by plugin name and the ID within it ({plugin: "Skyrim.esm", id: "01A6F9"}), as the census and the
+			// crawler name them; or by runtime form ID ({ref}) the other way round.
+			{ "form_lookup", { [](const json& a) {
+				 const auto id = a.contains("plugin") ? LookupInPlugin(a.at("plugin").get<std::string>(), ParseFormID(a.at("id"))) : ParseFormID(a.at("ref"));
+				 auto*      form = RE::TESForm::LookupByID(id);
+				 json       out{ { "formId", Hex(id) }, { "loaded", form != nullptr } };
+				 if (form) {
+					 const auto* file = form->GetFile(0);
+					 out["plugin"] = file ? std::string(file->GetFilename()) : std::string();
+					 out["localId"] = std::format("{:06X}", form->GetLocalFormID());
+					 out["type"] = RE::FormTypeToString(form->GetFormType());
+					 out["editorId"] = form->GetFormEditorID() ? form->GetFormEditorID() : "";
+					 if (auto* ref = form->AsReference()) {
+						 out["pos"] = Vec(ref->GetPosition());
+						 out["cell"] = CellJson(ref->GetParentCell());
+						 out["base"] = ref->GetBaseObject() ? Hex(ref->GetBaseObject()->GetFormID()) : "";
+					 }
+				 }
+				 return out;
+			 } } },
+			{ "graph_summary", { [](const json& a) {
+				 auto summary = Graph::Summary();
+				 if (a.contains("door")) {
+					 const auto  form = static_cast<RE::FormID>(std::stoul(a.at("door").get<std::string>(), nullptr, 16));
+					 const auto  ix = Graph::DoorOf(form);
+					 const auto& graph = Graph::Get();
+					 if (ix != Core::Graph::kNoDoor && ix < graph.DoorCount()) {
+						 const auto& door = graph.GetDoor(ix);
+						 const auto& way = graph.GetDoorway(door.doorway);
+						 summary["door"] = { { "id", door.id }, { "space", graph.GetSpace(door.space).id }, { "pos", { door.pos.x, door.pos.y, door.pos.z } },
+							 { "link", way.link == Core::Graph::Link::Paired ? "paired" : way.link == Core::Graph::Link::OneWay ? "one-way" : "broken" },
+							 { "kind", way.kind == Core::Graph::DoorKind::Gate ? "gate" : way.kind == Core::Graph::DoorKind::Hatch ? "hatch" : "hinged" },
+							 { "leadsTo", way.Other(door.space) != Core::Graph::kNoSpace ? graph.GetSpace(way.Other(door.space)).id : "" } };
+					 } else {
+						 summary["door"] = nullptr;
+					 }
+				 }
+				 return summary;
 			 } } },
 			{ "portal_passes", { [](const json& a) { return PortalDiagnostics::RenderPasses(Portal::Manager::Space(), a.value("drop", false)); } } },
 			{ "portals_enable", { [](const json& a) {

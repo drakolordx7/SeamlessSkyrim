@@ -6,7 +6,7 @@ Read this before proposing a new approach. The engine facts behind it are in ENG
 
 | Situation | How the other side is shown |
 |---|---|
-| Outdoors, a door into a room | The room merged into the world scene (3), one at a time; `[Portals] iShownRooms` more keeps others loaded out of sight, their open doors showing a picture |
+| Outdoors, a door into a room | The room merged into the world scene (3), one at a time; `[Portals] iLoadedRooms` more are kept loaded out of sight and paused by the tier scheduler (`Schedule`), their open doors showing a picture |
 | Indoors, the door out to the street | The street merged into the interior (9, `[Portals] bMergeOutdoors`, on) |
 | Interior ↔ interior, exterior ↔ exterior (city gates) | The portal pass (1); through a city gate the world's own shapes are masked as far as the portal pass draws (`UpdateGateMask`) |
 | A room's doorway before its merge | A picture taken with the portal pass, kept per door. From inside a building, none of the street: its door stays shut until the street is shown live (`StreetShownLive`) |

@@ -49,7 +49,8 @@ building when the game is running and the copy would fail.
 | `Engine/` | Engine helpers shared by domains: attach/detach a cell, fade, fog layout, same-space, hook-site checks, `CoreConvert.h` |
 | `Doors/` | One door pair: geometry, swing, held-open count, mapping, per-door ini, policy |
 | `Spaces/` | `RemoteCell`: the space behind a door kept alive (attach, Havok step, placement into the world scene, a gate's passage, engine hooks), and `WalkOut` |
-| `Portal/` | `PortalManager` (frame order), selection, merged view/cull, crossing and travel, lights, street merge |
+| `Graph/` | `DoorScan`: the door graph (`Core::Graph::SpaceGraph`) from the placed teleport doors the engine has in memory: a scan at data load, then each cell as it loads. Bridge: `graph_summary`, `portal_status.graph` |
+| `Portal/` | `PortalManager` (frame order), `Schedule` (the tier scheduler run on the game: what is kept loaded, which door is live), selection (portal-door tests and ranking), merged view/cull, crossing (driven by `Core::Crossing::Sequence`) and travel, lights, street merge |
 | `Render/` | The native renderer (`Native/`: doorway mask, lighting swap), ENB detection, portal pass, space lighting, Present hook |
 | `Pictures/` | Doorway pictures: capture, cache, composite |
 | `Bridge/`, `Diag/` | Test tooling (agent mode, the TCP bridge, perf, sampler); `Diag/Telemetry.h` is the no-op sink the portal code reports to |
@@ -120,7 +121,7 @@ Tests:
   Aimed at a door reference in the other space, the player crosses at an angle beside the
   doorway, and the engine moved them out of the frame's collision, under Belethor's porch.
 
-Scripts beside the MCP server (for loops, and commands with no MCP tool such as `shown_rooms`):
+Scripts beside the MCP server (for loops, and commands with no MCP tool such as `schedule`):
 - The bridge serves several clients at once (127.0.0.1:47800, one JSON request per line).
 - Run with `PYTHONPATH=. uv run python script.py` in `tools/skyrim-mcp`, then `import server`:
   `server.bridge.call(cmd, **args)` for a bridge command,
@@ -224,7 +225,7 @@ Frame rate:
   `SeamlessTestMarkarthMines`: walk out of the house, `player.moveto 16E47`, then the routes' `move`
   and walk steps. `place_go understone-keep-front` from inside the house only moves the player
   within the house (its cell is `Wilderness`).
-- `shown_rooms` returns frame times (`frames`) and the main thread's time in the player view
+- `schedule` returns the scheduler's state (`schedule`, `warm`), frame times (`frames`) and the main thread's time in the player view
   (`mergedCull.viewMs`, culling and draw submission).
 - `profile {file, seconds}` samples the main thread now; `travel_profile {file}` for 1.5 s from
   the next crossing. The first second or two after a merge is the light-occlusion rays catching up

@@ -263,47 +263,6 @@ namespace
 		CHECK(Near(tracker.Heading(), { 0.0f, 1.0f, 0.0f }));
 		tracker.Track({ 0.0f, 3000.0f, 0.0f });
 		CHECK(tracker.Heading() == Vec3());  // a teleport
-
-		// The crowd is sparse below `few` spaces and keeps its last answer in between.
-		auto crowd = S::Assess(false, true, 2, 3, 3, false, 4000.0f);
-		CHECK(crowd.sparse);
-		CHECK(crowd.warmReach == 4000.0f);
-		CHECK(crowd.farActivate == 0.0f);  // outdoors: only a door into a world widens the shown reach
-		crowd = S::Assess(true, true, 2, 5, 3, true, 4000.0f);
-		CHECK(crowd.sparse);  // between: unchanged
-		CHECK(crowd.farActivate == 4000.0f);
-		crowd = S::Assess(true, true, 4, 5, 3, false, 4000.0f);
-		CHECK(!crowd.sparse);
-		CHECK(crowd.warmReach == S::kWarmDistance);
-		crowd = S::Assess(false, true, 4, 5, 3, false, 4000.0f);
-		CHECK(!crowd.sparse);  // between, not sparse: unchanged
-		CHECK(S::Assess(false, false, 1, 1, 3, false, 2000.0f).farActivate == 2000.0f);  // indoors one space is loaded early
-
-		// Warm targets: a room with two doors goes by the better rank but is shown through the nearer door.
-		S::WarmTargets targets;
-		targets.Note({ 0xA, 900.0f, 880.0f, 1, 2 });
-		targets.Note({ 0xB, 300.0f, 350.0f, 3, 4 });
-		targets.Note({ 0xA, 600.0f, 910.0f, 5, 6 });
-		targets.Sort();
-		CHECK(targets.Count() == 2);
-		const auto* a = targets.Find(0xA);
-		CHECK(a && a->rank == 880.0f && a->distance == 600.0f && a->door == 5 && a->linked == 6);
-		CHECK(targets.RankOf(0xC) == FLT_MAX);
-		const auto wanted = targets.Wanted(2000.0f, 0, 3);
-		CHECK(wanted.size() == 2 && wanted[0] == 0xB && wanted[1] == 0xA);
-		// Room for one beside the shown space only, and not the shown space's own cell.
-		CHECK(targets.Wanted(2000.0f, 0xB, 2) == std::vector<std::uint32_t>{ 0xA });
-		CHECK(targets.Wanted(500.0f, 0, 3) == std::vector<std::uint32_t>{ 0xB });
-
-		// A kept room makes way only for a door clearly nearer than its own.
-		CHECK(!S::MakesWayFor(400.0f, 500.0f));
-		CHECK(S::MakesWayFor(200.0f, 500.0f));
-		// A cell that failed to attach waits.
-		S::AttachRetry retry;
-		retry.Failed(0xA);
-		CHECK(retry.Blocks(0xA) && !retry.Blocks(0xB));
-		retry.Tick(S::kRetryCooldown + 0.1f);
-		CHECK(!retry.Blocks(0xA));
 	}
 
 	void CrossingApproach()

@@ -8,4 +8,9 @@ namespace Portal::EngineHooks
 {
 	// Once, with the portal on, after the other modules' hooks.
 	void Install();
+
+	// The player uses a_door as the activate key does (DoorActivateHook): a seamless door is opened,
+	// or shut if a use opened it, and never taken the engine's way. False for a door that is not one
+	// (the caller activates it as usual). Also the bridge's activate.
+	bool UseDoor(RE::TESObjectREFR* a_door);
 }

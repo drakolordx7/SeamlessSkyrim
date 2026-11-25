@@ -26,9 +26,18 @@ namespace Bridge::Support
 		return static_cast<RE::FormID>(std::stoul(text, nullptr, 16));
 	}
 
+	RE::FormID LookupInPlugin(std::string_view a_plugin, RE::FormID a_localId)
+	{
+		const auto id = RE::TESDataHandler::GetSingleton()->LookupFormID(a_localId, a_plugin);
+		if (!id) {
+			throw std::runtime_error(std::format("{}:{:06X} is not a form of a loaded plugin", a_plugin, a_localId));
+		}
+		return id;
+	}
+
 	RE::TESObjectREFR* RequireRef(const json& a_args, const char* a_key)
 	{
-		const auto id = ParseFormID(a_args.at(a_key));
+		const auto id = a_args.contains("plugin") ? LookupInPlugin(a_args.at("plugin").get<std::string>(), ParseFormID(a_args.at("id"))) : ParseFormID(a_args.at(a_key));
 		auto*      ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(id);
 		if (!ref) {
 			throw std::runtime_error(std::format("{:08X} is not a loaded reference", id));

@@ -17,7 +17,7 @@ namespace Portal::MergedView
 	inline constexpr float kShowAtOnceSeconds = 3.0f;
 
 	// Before the renderer can ask (Render::SceneQuery), whether or not portals are on; and the
-	// settings ([Portals] bMerge, bMergeOutdoors, bPauseUnseenRooms).
+	// settings ([Portals] bMerge, bMergeOutdoors).
 	void Install();
 
 	// [Portals] bMerge (on by default): from outside, draw the interior merged into the world.
@@ -29,13 +29,6 @@ namespace Portal::MergedView
 	// and the distant LOD put into an interior's scene) is bMergeOutdoors: indoors the LOD stays
 	// loaded, only hidden, and the sky's dome stays in the scene (bridge outdoors_probe).
 	[[nodiscard]] bool Mergeable(const RE::TESObjectCELL* a_here, const RE::TESObjectCELL* a_behindDoor);
-
-	// [Portals] bPauseUnseenRooms (on by default): a kept room (loaded out of sight) is paused (not
-	// simulated, its lights not updated, not drawn).
-	[[nodiscard]] bool PauseUnseenRooms();
-	void               SetPauseUnseenRooms(bool a_pause);
-	// Kept rooms are paused (PauseUnseenRooms).
-	[[nodiscard]] bool KeptRoomPaused();
 
 	// Where a space merged through a_portal stands.
 	[[nodiscard]] Spaces::RemoteCell::Placement PlacementOf(const Active& a_portal, const Doors::Mapping& a_mapping);
