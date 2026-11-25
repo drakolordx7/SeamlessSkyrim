@@ -60,7 +60,7 @@ namespace Pictures
 		}
 		const auto* picture = Cache::Find(Render::D3D::Device(), a_door, false);
 		const auto [width, height] = Camera::SizeFor(Camera::kRoomCamera.extent, PictureHeight(), Camera::AspectOf(ToCore(a_corners)));
-		return !picture || picture->version < Cache::kVersion || picture->extent != Camera::kRoomCamera.extent || picture->width != width || picture->height != height;
+		return !picture || picture->extent != Camera::kRoomCamera.extent || picture->width != width || picture->height != height;
 	}
 
 	void Capture(const View& a_view, const Source& a_source, RE::FormID a_door, bool a_outdoors, bool a_gate, const Corners& a_corners)
@@ -118,7 +118,7 @@ namespace Pictures
 		// One at another size or extent (the size was changed since, or it was taken with the
 		// player's view) is taken again at once. The capture camera's is kept: from its fixed place
 		// it comes out the same.
-		const bool sized = picture.width == width && picture.height == height && picture.extent == extent && picture.version == Cache::kVersion;
+		const bool sized = picture.width == width && picture.height == height && picture.extent == extent;
 		if (picture.view && sized && (withCamera || now - picture.taken < Cache::kRetake)) {
 			return;
 		}
@@ -171,11 +171,9 @@ namespace Pictures
 		context->GenerateMips(picture.view);
 		picture.taken = now;
 		picture.diskTried = true;
-		picture.depth = true;
 		picture.takenFrom = withCamera ? cameraPlace : frame.PlaceOf(eye);
 		picture.extent = extent;
 		picture.lightScale = std::max(a_source.lightScale, 0.01f);
-		picture.version = Cache::kVersion;
 		D3D11_TEXTURE2D_DESC staging{ width, height, 1, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, { 1, 0 }, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0 };
 		ID3D11Texture2D*     copy = nullptr;
 		if (SUCCEEDED(device->CreateTexture2D(&staging, nullptr, &copy))) {

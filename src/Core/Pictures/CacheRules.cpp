@@ -47,7 +47,7 @@ namespace Core::Pictures
 
 	bool HeaderValid(const std::uint32_t (&a_header)[4], std::uint32_t a_widest, std::uint32_t a_highest)
 	{
-		return a_header[0] == kMagic && a_header[1] >= 1 && a_header[1] <= kVersion && a_header[2] >= 1 && a_header[2] <= a_widest && a_header[3] >= 1 &&
+		return a_header[0] == kMagic && a_header[1] == kVersion && a_header[2] >= 1 && a_header[2] <= a_widest && a_header[3] >= 1 &&
 		       a_header[3] <= a_highest;
 	}
 

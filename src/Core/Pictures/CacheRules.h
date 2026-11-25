@@ -14,11 +14,12 @@
 // off its texels, and which pictures are let go of.
 namespace Core::Pictures
 {
-	// 2: alpha is how far behind the doorway each texel's surface is, and the header is followed by
-	// where the picture was taken from and the part of the door's plane it covers. A version 1
-	// picture is drawn flat until it is taken again. 3: as 2, taken without the room's people. 4:
-	// without the room's front wall (a capture camera's of an older version is taken again). 5: the
-	// sky left out of a texel's average where anything else is in it; a gate's from further back.
+	// The file layout and what is drawn into it: alpha is how far behind the doorway each texel's
+	// surface is, and the header is followed by where the picture was taken from and the part of the
+	// door's plane it covers; taken without the room's people or its front wall, the sky left out of
+	// a texel's average where anything else is in it, a gate's from further back. Only this version
+	// is read; changing the layout or what a picture holds bumps it, and files of any other are
+	// taken again.
 	inline constexpr std::uint32_t kVersion = 5;
 	inline constexpr std::uint32_t kMagic = 0x57445353;  // "SSDW"
 
@@ -43,11 +44,10 @@ namespace Core::Pictures
 	// The key as a file name stem.
 	[[nodiscard]] std::string FileStem(std::string_view a_key);
 
-	// The file: four 32-bit words, magic, version, width, height. The widest and highest a picture
-	// was ever written at bound what a damaged header can ask for.
+	// The file: four 32-bit words, magic, version, width, height, then where the picture was taken
+	// from and what it covers, then the texels. The widest and highest a picture was ever written
+	// at bound what a damaged header can ask for.
 	[[nodiscard]] bool HeaderValid(const std::uint32_t (&a_header)[4], std::uint32_t a_widest, std::uint32_t a_highest);
-	// Version 2 on: where the picture was taken from and what it covers follow the header.
-	[[nodiscard]] inline bool HasDepth(std::uint32_t a_version) { return a_version >= 2; }
 
 	// How bright a room is, from its texels: the geometric mean of their luminance (a texel with
 	// nothing there is not part of the room), as the room's own light scaled it.

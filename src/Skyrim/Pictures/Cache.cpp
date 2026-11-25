@@ -162,16 +162,12 @@ namespace Pictures::Cache
 				if (file.read(reinterpret_cast<char*>(header), sizeof(header)) && Core::Pictures::HeaderValid(header, widest, highest)) {
 					float          place[4]{};
 					Camera::Extent extent = Camera::kDoorwayOnly;
-					const bool     depth = Core::Pictures::HasDepth(header[1]);
-					if (!depth || (file.read(reinterpret_cast<char*>(place), sizeof(place)) && file.read(reinterpret_cast<char*>(extent.data()), sizeof(extent)))) {
+					if (file.read(reinterpret_cast<char*>(place), sizeof(place)) && file.read(reinterpret_cast<char*>(extent.data()), sizeof(extent))) {
 						std::vector<std::uint16_t> texels(std::size_t{ header[2] } * header[3] * 4);
 						if (file.read(reinterpret_cast<char*>(texels.data()), texels.size() * sizeof(std::uint16_t)) && MakeView(a_device, picture, texels.data(), header[2], header[3])) {
-							picture.depth = depth;
 							picture.takenFrom = { place[0], place[1], place[2] };
 							picture.extent = extent;
-							// 0 in the pictures taken before it was written.
-							picture.lightScale = place[3] > 0.0f ? place[3] : 1.0f;
-							picture.version = header[1];
+							picture.lightScale = place[3];
 							if (!a_outdoors) {
 								picture.brightness = Brightness(texels.data(), header[2], header[3], header[2] * Camera::kBytesPerTexel, picture.lightScale);
 							}
