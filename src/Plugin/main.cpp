@@ -3,6 +3,7 @@
 #include "Portal/NpcTravel.h"
 #include "Portal/PortalManager.h"
 #include "Plugin/Frame.h"
+#include "Plugin/Settings.h"
 #include "Portal/Travel.h"
 #include "UI/Menu.h"
 #include "Diag/Probe.h"
@@ -25,6 +26,7 @@ namespace
 		switch (a_msg->type) {
 		case SKSE::MessagingInterface::kDataLoaded:
 			// Event sources, the data handler and the renderer's swap chain all exist by now.
+			Plugin::Settings::Load();
 			Portal::Manager::Install();
 			if (Portal::Manager::HooksInstalled()) {
 				Portal::NpcTravel::Install();

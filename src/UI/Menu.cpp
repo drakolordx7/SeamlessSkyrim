@@ -2,30 +2,51 @@
 
 #include "Doors/Settings.h"
 #include "Doors/DoorUse.h"
+#include "Pictures/Camera.h"
 #include "Pictures/DoorwaySnapshot.h"
+#include "Plugin/Settings.h"
 #include "Portal/PortalManager.h"
 #include "Render/Backend.h"
 
-#include "Engine/Paths.h"
 #include "SKSEMenuFramework.h"
 
 namespace
 {
-	// What is set here is written to SeamlessSkyrim.ini, as the ini's comments say of these keys
-	// ("Also in the in-game menu"): kept for the session only, every setting was back at the next
-	// start of the game.
-	void Save(const wchar_t* a_key, int a_value)
+	using Plugin::Settings::Id;
+
+	// What is set here is kept in the user ini (Settings::SaveUser), never in the shipped one.
+	void Save(Id a_id, int a_value)
 	{
-		const auto ini = Paths::PluginDirectory() / "SeamlessSkyrim.ini";
-		::WritePrivateProfileStringW(L"Portals", a_key, std::to_wstring(a_value).c_str(), ini.c_str());
+		Plugin::Settings::SaveUser(a_id, a_value);
 	}
 
 	// A slider is written once, when it is let go: dragged, it changes every frame.
-	void SaveWhenReleased(const wchar_t* a_key, int a_value)
+	void SaveWhenReleased(Id a_id, int a_value)
 	{
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
-			Save(a_key, a_value);
+			Save(a_id, a_value);
 		}
+	}
+
+	std::string MegabytesText(double a_bytes)
+	{
+		const double megabytes = a_bytes / 1e6;
+		return megabytes < 10.0 ? std::format("{:.1f}", megabytes) : std::format("{:.0f}", megabytes);
+	}
+
+	// What one room door's picture takes on disk and in video memory at this doorway height.
+	double RoomPictureBytes(int a_height)
+	{
+		const auto [width, height] = Pictures::Camera::SizeFor(Pictures::Camera::kRoomCamera.extent, a_height, Pictures::Camera::kNarrowest);
+		return static_cast<double>(width) * height * Pictures::Camera::kBytesPerTexel;
+	}
+
+	// How many times fewer texels a doorway-only picture (a door to the outdoors) has than a room's.
+	long DoorwayOnlyShare(int a_height)
+	{
+		const auto [roomWidth, roomHeight] = Pictures::Camera::SizeFor(Pictures::Camera::kRoomCamera.extent, a_height, Pictures::Camera::kNarrowest);
+		const auto [width, height] = Pictures::Camera::SizeFor(Pictures::Camera::kDoorwayOnly, a_height, Pictures::Camera::kNarrowest);
+		return std::lround(static_cast<double>(roomWidth) * roomHeight / (static_cast<double>(width) * height));
 	}
 
 	// The door pair of the doorway the player is at, for the correction controls.
@@ -73,7 +94,7 @@ namespace
 
 		ImGui::TextWrapped("Rendering: %s", Render::Backend::Name());
 		if (available && !Render::Backend::CanMerge()) {
-			ImGui::TextWrapped("Rooms aren't drawn into the world with this renderer (see [Render] sBackend in SeamlessSkyrim.ini).");
+			ImGui::TextWrapped("Rooms aren't drawn into the world with this renderer (see [Render] sBackend in %s).", Plugin::Settings::kShippedFile);
 		}
 
 		ImGui::NewLine();
@@ -84,11 +105,11 @@ namespace
 		}
 		ImGui::EndDisabled();
 		if (!available) {
-			ImGui::TextWrapped("Off for this session: set bEnabled=1 under [Portals] in SeamlessSkyrim.ini and restart the game.");
+			ImGui::TextWrapped("Off for this session: set bEnabled=1 under [Portals] in %s and restart the game.", Plugin::Settings::kShippedFile);
 		} else {
 			// Not written to the ini: off there, the game starts without the mod's hooks, and this
 			// box can't switch it on again.
-			ImGui::TextWrapped("For this session; to keep it off, set bEnabled=0 in SeamlessSkyrim.ini.");
+			ImGui::TextWrapped("For this session; to keep it off, set bEnabled=0 in %s.", Plugin::Settings::kUserFile);
 		}
 
 		ImGui::NewLine();
@@ -96,7 +117,7 @@ namespace
 		bool merge = Portal::Manager::MergeEnabled();
 		if (ImGui::Checkbox("Draw rooms into the world (seen from outside)", &merge)) {
 			Portal::Manager::SetMergeEnabled(merge);
-			Save(L"bMerge", merge);
+			Save(Id::kMerge, merge);
 		}
 
 		ImGui::NewLine();
@@ -105,7 +126,7 @@ namespace
 		if (ImGui::SliderInt("Rooms active at once", &shown, 1, Portal::Manager::kMaxShownRooms)) {
 			Portal::Manager::SetShownRooms(shown);
 		}
-		SaveWhenReleased(L"iShownRooms", shown);
+		SaveWhenReleased(Id::kShownRooms, shown);
 		ImGui::TextWrapped("Outdoors, the rooms behind the nearest doors are loaded, so a doorway opens at once when you walk up, "
 						   "and each open door shows its own room. Counts the room you're at; 1 = only that one. Each costs "
 						   "memory, a short frame when it loads, frame time while its doorway is on screen, and its people "
@@ -120,7 +141,7 @@ namespace
 		bool pause = Portal::Manager::PauseUnseenRooms();
 		if (ImGui::Checkbox("Pause rooms nobody can see", &pause)) {
 			Portal::Manager::SetPauseUnseenRooms(pause);
-			Save(L"bPauseUnseenRooms", pause);
+			Save(Id::kPauseUnseenRooms, pause);
 		}
 		ImGui::TextWrapped("A loaded room whose doorway is out of view isn't simulated or drawn until it comes into view; "
 						   "the room at the door you're at always runs.");
@@ -130,7 +151,7 @@ namespace
 		bool step = Portal::Manager::StepExterior();
 		if (ImGui::Checkbox("Street physics while indoors (people outside walk)", &step)) {
 			Portal::Manager::SetStepExterior(step);
-			Save(L"bStepExteriorFromInside", step);
+			Save(Id::kStepExteriorFromInside, step);
 		}
 
 		ImGui::NewLine();
@@ -140,7 +161,7 @@ namespace
 			constexpr const char* labels[]{ "As set for each door", "All open (locked ones too)", "All shut until used" };
 			if (ImGui::Combo("Doors", &force, labels, static_cast<int>(std::size(labels)))) {
 				Portal::DoorUse::SetForce(static_cast<Portal::DoorUse::Force>(force));
-				Save(L"iForceDoors", force);
+				Save(Id::kForceDoors, force);
 			}
 			ImGui::TextWrapped("A door opens when you or someone else uses it, and shuts a few seconds after nobody stands in it. "
 							   "City gates and doors set to always open stand open. All shut: those too stay shut until used.");
@@ -149,11 +170,13 @@ namespace
 		ImGui::NewLine();
 
 		float doorDistance = Portal::Manager::DoorOpenDistance();
-		if (ImGui::SliderFloat("Door reach (game units)", &doorDistance, 150.0f, 1000.0f, "%.0f")) {
+		const auto& reach = Plugin::Settings::Of(Id::kDoorOpenDistance);
+		if (ImGui::SliderFloat("Door reach (game units)", &doorDistance, static_cast<float>(reach.min), static_cast<float>(reach.max), "%.0f")) {
 			Portal::Manager::SetDoorOpenDistance(doorDistance);
 		}
-		SaveWhenReleased(L"iDoorOpenDistance", static_cast<int>(std::lround(doorDistance)));
-		ImGui::TextWrapped("The space behind a door starts loading 300 units beyond this and is let go 700 units beyond it.");
+		SaveWhenReleased(Id::kDoorOpenDistance, static_cast<int>(std::lround(doorDistance)));
+		ImGui::TextWrapped("The space behind a door starts loading %.0f units beyond this and is let go %.0f units beyond it.",
+			Portal::Manager::kLoadAhead, Portal::Manager::kLoadAhead + Portal::Manager::kReleaseBeyond);
 
 		ImGui::NewLine();
 
@@ -161,11 +184,16 @@ namespace
 			// Presets rather than a slider: each size is a texture and a file per door, so a few
 			// steps that double are all that's worth offering.
 			constexpr int         heights[]{ 64, 128, 192, 256, 384, 512 };
-			// The sizes on disk are a door into a room's: its picture reaches past the doorway (3.5
-			// times as wide, 1.75 times as high) at twice the density (Snapshot's kCameraExtent and
-			// kCameraDensity).
-			constexpr const char* labels[]{ "48 x 64 (0.6 MB per door)", "96 x 128 (2.4 MB per door, default)", "144 x 192 (5.4 MB per door)",
-				"192 x 256 (9.6 MB per door)", "288 x 384 (22 MB per door)", "384 x 512 (39 MB per door)" };
+			// The sizes on disk are a door into a room's: its picture reaches past the doorway at
+			// twice the density (Pictures::Camera).
+			static const std::vector<std::string> labels = [&] {
+				std::vector<std::string> texts;
+				for (const int height : heights) {
+					texts.push_back(std::format("{} x {} ({} MB per door{})", Pictures::Camera::WidthFor(height), height,
+						MegabytesText(RoomPictureBytes(height)), height == Plugin::Settings::Of(Id::kDoorwayPictureHeight).def ? ", default" : ""));
+				}
+				return texts;
+			}();
 			const int current = Portal::Snapshot::PictureHeight();
 			// An ini value between the presets shows as the nearest one.
 			int index = 0;
@@ -174,13 +202,18 @@ namespace
 					index = i;
 				}
 			}
-			if (ImGui::Combo("Doorway picture size (texels)", &index, labels, static_cast<int>(std::size(labels)))) {
+			std::vector<const char*> items;
+			for (const auto& label : labels) {
+				items.push_back(label.c_str());
+			}
+			if (ImGui::Combo("Doorway picture size (texels)", &index, items.data(), static_cast<int>(items.size()))) {
 				Portal::Snapshot::SetPictureHeight(heights[index]);
-				Save(L"iDoorwayPictureHeight", heights[index]);
+				Save(Id::kDoorwayPictureHeight, heights[index]);
 			}
 			ImGui::TextWrapped("The blurred picture a doorway shows while the space behind it loads, in texels across the doorway. "
 							   "Larger is sharper; each door is taken again at the new size when next seen open (doors to the outdoors "
-							   "keep one per part of the day, of the doorway only: a 25th of the size).");
+							   "keep one per part of the day, of the doorway only: a %ldth of the size).",
+				DoorwayOnlyShare(Plugin::Settings::Of(Id::kDoorwayPictureHeight).def));
 			// Until another click: the result of this one, so the click visibly did something.
 			static std::optional<int> deleted;
 			if (ImGui::Button("Delete all doorway pictures")) {

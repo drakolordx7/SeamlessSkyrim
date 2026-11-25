@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Settings changed in the in-game menu are kept in `SeamlessSkyrim_User.ini` and survive updates;
+  `SeamlessSkyrim.ini` is no longer written. A key in the user file wins over the shipped one.
+- The old `iWarmPortals` key is no longer read (`iShownRooms` replaced it); `bWorldDoors` and
+  `iMergedCullStreet` are gone.
+
 ## 0.6.0
 
 ### Doors

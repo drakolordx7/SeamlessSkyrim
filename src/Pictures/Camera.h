@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pictures/DoorwaySnapshot.h"
+#include "Plugin/Settings.h"
 
 // Where a doorway's picture is taken from and what part of the door's plane it covers, and how
 // many texels it gets.
@@ -54,9 +55,12 @@ namespace Pictures::Camera
 	// quarters of it. Small on purpose: shown blurred, a hundred texels across are all it needs. A
 	// room door's picture (the capture camera's) is 2.4 MB on disk at the default size, 3.2 MB of
 	// video memory with its mipmaps; sixteen times that at the largest.
-	inline constexpr int kDefaultHeight = 128;
-	inline constexpr int kMinHeight = 32;
-	inline constexpr int kMaxHeight = 512;
+	inline constexpr auto kHeightSetting = Plugin::Settings::Of(Plugin::Settings::Id::kDoorwayPictureHeight);
+	inline constexpr int  kDefaultHeight = kHeightSetting.def;
+	inline constexpr int  kMinHeight = kHeightSetting.min;
+	inline constexpr int  kMaxHeight = kHeightSetting.max;
+	// Half-float RGBA, in video memory and on disk.
+	inline constexpr int kBytesPerTexel = 8;
 	// A doorway's shape: three quarters as wide as high, or wider (a double door, a city gate: at
 	// three quarters its picture had a third or less of the texels across that it had up, the
 	// street seen through Solitude's gate smeared sideways). Its own shape there, in sixteenths.

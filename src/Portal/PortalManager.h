@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Plugin/Settings.h"
 #include "Portal/Active.h"
 
 struct IDXGISwapChain;
@@ -12,7 +13,7 @@ namespace Portal::Manager
 	using Active = Portal::Active;
 	using DoorPrompt = Portal::DoorPrompt;
 
-	// Reads Data/SKSE/Plugins/SeamlessSkyrim.ini ([Portals] bEnabled, on by default) and hooks
+	// Takes its settings from Plugin::Settings (bEnabled, on by default) and hooks
 	// the events the manager reacts to. Call at kDataLoaded.
 	void Install();
 
@@ -113,7 +114,14 @@ namespace Portal::Manager
 	// For the in-game menu (main thread).
 	void                SetStepExterior(bool a_step);
 	[[nodiscard]] bool  StepExterior();
-	// How close (game units) the player comes before the space behind a door loads (300 units
+	// The other side starts loading this much further out than the door opens (time to load it
+	// while walking up) and is let go kReleaseBeyond further out still (hysteresis, so standing at
+	// the boundary doesn't attach/detach every frame). Both follow the door distance: loading at a
+	// fixed 1200 units, a shop merely walked past was loaded and held while the door walked to
+	// waited.
+	inline constexpr float kLoadAhead = 300.0f;
+	inline constexpr float kReleaseBeyond = 400.0f;
+	// How close (game units) the player comes before the space behind a door loads (kLoadAhead
 	// further out) and the door can be walked through. [Portals] iDoorOpenDistance.
 	[[nodiscard]] float DoorOpenDistance();
 	void                SetDoorOpenDistance(float a_distance);
@@ -124,7 +132,7 @@ namespace Portal::Manager
 	// on the game's own shaders, where the others stay loaded out of sight).
 	[[nodiscard]] int ShownRooms();
 	void              SetShownRooms(int a_count);
-	inline constexpr int kMaxShownRooms = 4;
+	inline constexpr int kMaxShownRooms = Plugin::Settings::Of(Plugin::Settings::Id::kShownRooms).max;
 	// [Portals] bPauseUnseenRooms (on by default): a kept room nobody can see is paused (not
 	// simulated, its lights not updated, not drawn) until its doorway comes into view.
 	[[nodiscard]] bool PauseUnseenRooms();

@@ -7,9 +7,6 @@
 - SE 1.5.97 with the Community Shaders fork: not tried (the fork builds for SE; Community Shaders
   isn't installed in the 1.5.97 test game).
 - The skylight (the indoor stand-in for the sun) in The Drunken Huntsman turns off when seen from outside (jarring).
-- Settings changed in the in-game menu are written into the shipped `SeamlessSkyrim.ini`
-  (`Menu.cpp`, `Save`): an update replaces them with the new defaults. The door tunings had the
-  same problem and now have their own file (`SeamlessSkyrim_Doors_User.ini`).
 - Markarth: the market attack at the start of The Forsworn Conspiracy played again, not every
   time (user). Not reproduced: no save from before the quest. Possibly the same lost-item bug fixed with
   `belethors-dropped-item-out-and-in`, or the purge of the city's cells after a gate trip

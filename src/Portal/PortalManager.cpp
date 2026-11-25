@@ -28,6 +28,7 @@
 #include "Portal/Travel.h"
 #include "Spaces/RemoteCell.h"
 #include "Spaces/Tuning.h"
+#include "Plugin/Settings.h"
 #include "Portal/ShapeSet.h"
 #include "Portal/StreetLOD.h"
 #include "Portal/WaterReflections.h"
@@ -119,15 +120,7 @@ namespace
 
 	// The reach of a portal's door: the space behind it loads kLoadAhead further out ([Portals]
 	// iDoorOpenDistance; it was the distance doors swung open at, before they were opened by use).
-	float           doorOpenRadius = 450.0f;
-	constexpr float kMinDoorOpenRadius = 150.0f;
-	constexpr float kMaxDoorOpenRadius = 1000.0f;
-	// The other side starts loading this much further out than the door opens (time to load it
-	// while walking up) and is let go further out still (hysteresis, so standing at the boundary
-	// doesn't attach/detach every frame). Both follow the door distance: loading at a fixed 1200
-	// units, a shop merely walked past was loaded and held while the door walked to waited.
-	constexpr float kLoadAhead = 300.0f;
-	constexpr float kReleaseBeyond = 400.0f;
+	float           doorOpenRadius = static_cast<float>(Plugin::Settings::Of(Plugin::Settings::Id::kDoorOpenDistance).def);
 	// Few doors around the player (the scan, NearestPortalDoor): nothing competes for what is loaded,
 	// so it is loaded from much further out without spaces being swapped as the player moves.
 	// Outdoors the kept rooms reach further (warmReach); indoors, where one space is loaded, and
@@ -135,9 +128,9 @@ namespace
 	// doesn't apply).
 	bool            sparse = false;
 	float           farActivate = 0.0f;
-	float           NearRadius() { return doorOpenRadius + kLoadAhead; }
+	float           NearRadius() { return doorOpenRadius + Portal::Manager::kLoadAhead; }
 	float           ActivateRadius() { return std::max(NearRadius(), farActivate); }
-	float           ReleaseRadius() { return ActivateRadius() + kReleaseBeyond; }
+	float           ReleaseRadius() { return ActivateRadius() + Portal::Manager::kReleaseBeyond; }
 	// A different door must be this much closer before we switch portals.
 	constexpr float kSwitchMargin = 200.0f;
 	// How long after a space behind a door is attached its references skip the engine's fade-in
@@ -181,7 +174,7 @@ namespace
 	// doorway beside it, as many as the render backend can mask (Render::Backend::MergedRooms).
 	// Kept loaded and drawn were two settings; a room kept loaded but drawn as a picture was only
 	// ever a wait cut short.
-	int                             shownRoomsSetting = 2;
+	int                             shownRoomsSetting = Plugin::Settings::Of(Plugin::Settings::Id::kShownRooms).def;
 	// [Portals] bPauseUnseenRooms: a kept room nobody can see (kept out of sight, or merged beside
 	// the shown one with its doorway off screen) is paused: not stepped, lights not updated, not
 	// drawn, its people not on screen. Facing away, each kept room cost about 1 ms a frame.
@@ -297,7 +290,6 @@ namespace
 	float                                  attachHoldoff = 0.0f;
 	std::string                            lastEvent = "none";
 	std::optional<float>                   approachLimit;  // camera pull-in this frame, see Approach
-	bool                                   worldDoors = true;  // [Portals] bWorldDoors
 
 	struct Candidate
 	{
@@ -380,7 +372,7 @@ namespace
 		// parent cell yet; it stands outdoors in its worldspace.
 		auto*       cell = linked->GetParentCell();
 		auto* const linkedWorld = cell ? (cell->IsInteriorCell() ? nullptr : cell->GetRuntimeData().worldSpace) : linked->GetWorldspace();
-		const bool  sameWorld = linkedWorld && !a_here->IsInteriorCell() && (!worldDoors || linkedWorld == a_here->GetRuntimeData().worldSpace);
+		const bool  sameWorld = linkedWorld && !a_here->IsInteriorCell() && linkedWorld == a_here->GetRuntimeData().worldSpace;
 		if ((!cell && !linkedWorld) || cell == a_here || sameWorld) {
 			return nullptr;
 		}
@@ -2126,40 +2118,27 @@ namespace Portal::Manager
 		Portal::Doors::SetHost({ .prompt = Prompt, .hasPicture = Portal::Snapshot::HasPicture, .spaceShown = SpaceShown, .portalLink = PortalLink });
 		// Before the fork can ask, whether or not portals are on.
 		::Render::RegisterScene(sceneQuery);
-		const auto ini = Paths::PluginDirectory() / "SeamlessSkyrim.ini";
-		enabled = ::GetPrivateProfileIntW(L"Portals", L"bEnabled", 1, ini.c_str()) != 0;
-		mergeEnabled = ::GetPrivateProfileIntW(L"Portals", L"bMerge", 1, ini.c_str()) != 0;
-		worldDoors = ::GetPrivateProfileIntW(L"Portals", L"bWorldDoors", 1, ini.c_str()) != 0;
-		SetDoorOpenDistance(static_cast<float>(::GetPrivateProfileIntW(L"Portals", L"iDoorOpenDistance", 450, ini.c_str())));
-		Portal::DoorUse::SetForce(static_cast<Portal::DoorUse::Force>(std::clamp(static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iForceDoors", 0, ini.c_str())), 0, 2)));
-		Portal::Snapshot::SetPictureHeight(static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iDoorwayPictureHeight", 128, ini.c_str())));
-		walkIntoRooms = ::GetPrivateProfileIntW(L"Portals", L"bWalkIntoRooms", 0, ini.c_str()) != 0;
-		mergeOutdoors = ::GetPrivateProfileIntW(L"Portals", L"bMergeOutdoors", 1, ini.c_str()) != 0;
-		// 0 off, 1 the merged room left out whole when it can't be seen, 2 also shape by shape.
-		MergedCull::SetMode(static_cast<MergedCull::Mode>(std::clamp(static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iMergedCull", 2, ini.c_str())), 0, 2)));
-		// The same for the street merged into an interior, at most; off, it changes the sun's shadows
-		// (see MergedCull::SetStreetMode).
-		MergedCull::SetStreetMode(static_cast<MergedCull::Mode>(std::clamp(static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iMergedCullStreet", 0, ini.c_str())), 0, 2)));
-		// iWarmPortals (rooms kept loaded) was replaced by iShownRooms; an ini that still has only the
-		// old key keeps its count.
-		const int keptBefore = static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iWarmPortals", 2, ini.c_str()));
-		SetShownRooms(static_cast<int>(::GetPrivateProfileIntW(L"Portals", L"iShownRooms", keptBefore, ini.c_str())));
-		pauseUnseen = ::GetPrivateProfileIntW(L"Portals", L"bPauseUnseenRooms", 1, ini.c_str()) != 0;
+		using Plugin::Settings::Id;
+		using Plugin::Settings::Bool;
+		using Plugin::Settings::Int;
+		enabled = Bool(Id::kEnabled);
+		mergeEnabled = Bool(Id::kMerge);
+		SetDoorOpenDistance(static_cast<float>(Int(Id::kDoorOpenDistance)));
+		Portal::DoorUse::SetForce(static_cast<Portal::DoorUse::Force>(Int(Id::kForceDoors)));
+		Portal::Snapshot::SetPictureHeight(Int(Id::kDoorwayPictureHeight));
+		walkIntoRooms = Bool(Id::kWalkIntoRooms);
+		mergeOutdoors = Bool(Id::kMergeOutdoors);
+		MergedCull::SetMode(static_cast<MergedCull::Mode>(Int(Id::kMergedCull)));
+		SetShownRooms(Int(Id::kShownRooms));
+		pauseUnseen = Bool(Id::kPauseUnseenRooms);
 		// Precision patches the engine's world step loop (ID 77851 + 0x407) with a pre-step hook
 		// that takes its own locks for whichever world is stepped; stepping a second world in the
 		// step job deadlocked the game in that hook (main thread waiting for the job, ID 35409).
 		// Without stepping, NPCs behind the door don't move physically until the player is there.
-		// [Portals] iStepRemoteHavok: 0 = never (NPCs behind a door hang in the air, arms out),
-		// 1 = inside the engine's step job, 2 = on the main thread at the end of the frame.
-		// Default: 2 with Precision loaded (see RemoteCell::StepAtEndOfFrame), else 1.
-		const bool precision = ::GetModuleHandleW(L"Precision.dll") != nullptr;
-		const int  step = ::GetPrivateProfileIntW(L"Portals", L"iStepRemoteHavok", -1, ini.c_str());
-		const int  stepMode = step < 0 ? (precision ? 2 : 1) : step;
-		const bool stepRemote = stepMode != 0;
-		Spaces::tuning.stepInJob = stepMode == 1;
-		Spaces::tuning.stepExterior = ::GetPrivateProfileIntW(L"Portals", L"bStepExteriorFromInside", 1, ini.c_str()) != 0;
-		Spaces::tuning.handOverStreet = ::GetPrivateProfileIntW(L"Portals", L"bHandOverStreet", 1, ini.c_str()) != 0;
-		logger::info("portal: remote Havok stepping mode {}{}", stepMode, precision ? " (Precision is loaded)" : "");
+		// See Settings kStepRemoteHavok for the modes; the default is 2 with Precision loaded
+		// (see RemoteCell::StepAtEndOfFrame), else 1.
+		const bool stepRemote = Int(Id::kStepRemoteHavok) != 0;
+		Spaces::LoadTuning();
 		// The hooks below patch engine code in the draw, cull, physics and travel paths. With
 		// portals off they did nothing yet were all there, one more thing to clash with other
 		// mods' hooks (as with Precision's in the physics step). They can't be put in later when
@@ -2167,7 +2146,7 @@ namespace Portal::Manager
 		// can't be patched safely under them. Agent sessions get them always (portals_enable).
 		hooksInstalled = enabled || Diag::AgentMode();
 		if (!hooksInstalled) {
-			logger::info("portal: off in {}; no hooks installed (switching on needs a restart)", ini.string());
+			logger::info("portal: off in {}; no hooks installed (switching on needs a restart)", Paths::PluginDirectory().string());
 			return;
 		}
 		// Before anything asks whether a room can be merged (Mergeable).
@@ -2202,7 +2181,7 @@ namespace Portal::Manager
 			}
 		}
 		RE::PlayerCharacter::GetSingleton()->AsBGSActorCellEventSource()->AddEventSink(&cellSink);
-		logger::info("portal: manager installed, {} ({})", enabled ? "enabled" : "disabled", ini.string());
+		logger::info("portal: manager installed, {} ({})", enabled ? "enabled" : "disabled", Paths::PluginDirectory().string());
 	}
 
 	bool HooksInstalled()
@@ -2912,7 +2891,8 @@ namespace Portal::Manager
 
 	void SetDoorOpenDistance(float a_distance)
 	{
-		doorOpenRadius = std::clamp(a_distance, kMinDoorOpenRadius, kMaxDoorOpenRadius);
+		const auto& reach = Plugin::Settings::Of(Plugin::Settings::Id::kDoorOpenDistance);
+		doorOpenRadius = std::clamp(a_distance, static_cast<float>(reach.min), static_cast<float>(reach.max));
 	}
 
 	std::optional<Active> CurrentPortal()

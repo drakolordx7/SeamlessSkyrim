@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Plugin/Settings.h"
+
 namespace Spaces
 {
-	// What the bridge (and [Portals] at startup) can change about how a remote space is kept.
+	// What the bridge (and the settings at startup) can change about how a remote space is kept.
 	struct Tuning
 	{
 		// false: a room's world is stepped on the main thread at the end of the frame instead of
@@ -21,4 +23,14 @@ namespace Spaces
 	};
 
 	inline Tuning tuning;
+
+	// Startup, once Settings are loaded and before the hooks that read it are installed.
+	// InstallGridHook may switch handOverStreet off again afterwards.
+	inline void LoadTuning()
+	{
+		using Plugin::Settings::Id;
+		tuning.stepInJob = Plugin::Settings::Int(Id::kStepRemoteHavok) == 1;
+		tuning.stepExterior = Plugin::Settings::Bool(Id::kStepExteriorFromInside);
+		tuning.handOverStreet = Plugin::Settings::Bool(Id::kHandOverStreet);
+	}
 }

@@ -3,7 +3,7 @@
 #include "Diag/Probe.h"
 #include "Diag/Telemetry.h"
 #include "Engine/LoadScreen.h"
-#include "Engine/Paths.h"
+#include "Plugin/Settings.h"
 
 namespace
 {
@@ -53,9 +53,8 @@ namespace Portal::TravelTrace
 		if (!Diag::AgentMode()) {
 			return;
 		}
-		wchar_t folder[MAX_PATH]{};
-		const auto ini = Paths::PluginDirectory() / "SeamlessSkyrim.ini";
-		if (::GetPrivateProfileStringW(L"Portals", L"sProfileCrossingsTo", L"", folder, MAX_PATH, ini.c_str()) > 0) {
+		const auto& folder = Plugin::Settings::String(Plugin::Settings::Id::kProfileCrossingsTo);
+		if (!folder.empty()) {
 			profileAllTo = folder;
 			std::error_code error;
 			std::filesystem::create_directories(profileAllTo, error);

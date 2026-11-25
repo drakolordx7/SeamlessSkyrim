@@ -1,6 +1,6 @@
 #include "Render/Backend.h"
 
-#include "Engine/Paths.h"
+#include "Plugin/Settings.h"
 #include "Render/Native/Native.h"
 
 namespace Render::Backend
@@ -310,12 +310,9 @@ namespace Render::Backend
 
 		std::string ReadChoice()
 		{
-			const auto ini = Paths::PluginDirectory() / "SeamlessSkyrim.ini";
-			wchar_t    buffer[32]{};
-			::GetPrivateProfileStringW(L"Render", L"sBackend", L"auto", buffer, static_cast<DWORD>(std::size(buffer)), ini.c_str());
 			std::string choice;
-			for (const wchar_t* c = buffer; *c; ++c) {
-				choice += static_cast<char>(std::tolower(static_cast<unsigned char>(*c & 0x7F)));
+			for (const wchar_t c : Plugin::Settings::String(Plugin::Settings::Id::kBackend)) {
+				choice += static_cast<char>(std::tolower(static_cast<unsigned char>(c & 0x7F)));
 			}
 			return choice;
 		}
