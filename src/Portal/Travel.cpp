@@ -127,7 +127,7 @@ namespace
 	void SetArrivalDoorOpen(bool a_open)
 	{
 		if (a_open && arrival) {
-			Portal::Doors::Open(RE::TESForm::LookupByID<RE::TESObjectREFR>(arrival->door), arrivalDoor, true);
+			Portal::Doors::Open(RE::TESForm::LookupByID<RE::TESObjectREFR>(arrival->door), arrivalDoor, { .hide = true });
 		} else if (!a_open) {
 			Portal::Doors::Close(arrivalDoor);
 		}

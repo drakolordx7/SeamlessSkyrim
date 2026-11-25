@@ -1,6 +1,6 @@
 #include "Doors/DoorUse.h"
 
-#include "Doors/DoorPair.h"
+#include "Doors/Geometry.h"
 
 namespace
 {
@@ -103,6 +103,27 @@ namespace Portal::DoorUse
 			doors.push_back(entry.linked);
 		}
 		return doors;
+	}
+
+	void PlayDoorSound(RE::FormID a_door, RE::FormID a_linked, bool a_open)
+	{
+		auto* here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
+		for (const auto id : { a_door, a_linked }) {
+			auto* door = RE::TESForm::LookupByID<RE::TESObjectREFR>(id);
+			auto* base = door ? door->GetBaseObject() : nullptr;
+			auto* form = base ? base->As<RE::TESObjectDOOR>() : nullptr;
+			auto* sound = form ? (a_open ? form->openSound : form->closeSound) : nullptr;
+			if (!sound || !door->Get3D() || !SameSpace(door->GetParentCell(), here)) {
+				continue;
+			}
+			RE::BSSoundHandle handle;
+			if (RE::BSAudioManager::GetSingleton()->GetSoundHandle(handle, sound)) {
+				handle.SetPosition(door->GetPosition());
+				handle.SetObjectToFollow(door->Get3D());
+				handle.Play();
+			}
+			return;
+		}
 	}
 
 	void NoteActorUse(RE::FormID a_door)

@@ -6,8 +6,14 @@
 
 #include "Portal/CameraLimit.h"
 #include "Portal/Pristine.h"
-#include "Doors/DoorPair.h"
 #include "Doors/DoorUse.h"
+#include "Doors/Geometry.h"
+#include "Doors/Hold.h"
+#include "Doors/Host.h"
+#include "Doors/Pair.h"
+#include "Doors/Policy.h"
+#include "Doors/Settings.h"
+#include "Doors/Swing.h"
 #include "Pictures/DoorwaySnapshot.h"
 #include "Portal/LightOcclusion.h"
 #include "Portal/LightScene.h"
@@ -219,8 +225,7 @@ namespace
 		float                                seconds = 0.0f;  // since the merge began
 		Portal::Doors::OpenState             sourceDoor;
 		Portal::Doors::OpenState             linkedDoor;
-		float                                swing = 0.0f;   // 0..1, how far the swung door has swung open
-		bool                                 opening = false;  // the swing's direction (SwingStep)
+		Portal::Doors::Swing                 swing;  // of the swung door (swungDoor)
 		RE::FormID                           swungDoor = 0;  // which of the pair that is (Doors::SwingingDoor)
 		std::vector<Portal::Doors::OpenState> extraDoors;
 		bool                                 extraScanned = false;
@@ -319,8 +324,6 @@ namespace
 		heading = length > 500.0f ? RE::NiPoint3() : step / length;
 	}
 
-	bool Outdoors(RE::TESObjectREFR* a_door);
-
 	// A city gate (outdoors, into another worldspace) is many times a house door's size and seen
 	// from far down the road: it counts as nearer than it is, in which door is shown and in how far
 	// out its space loads and is let go. Not by a fixed amount: a house door must still win when
@@ -333,7 +336,7 @@ namespace
 	float Reach(const RE::NiPoint3& a_origin, RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
 	{
 		const float distance = a_origin.GetDistance(a_door->GetPosition());
-		return Outdoors(a_door) && Outdoors(a_linked) ? distance * kGateWeight : distance;
+		return Portal::Doors::Outdoors(a_door) && Portal::Doors::Outdoors(a_linked) ? distance * kGateWeight : distance;
 	}
 
 	// What doors are ordered by: the reach, a little less for a door ahead of the player and a
@@ -554,127 +557,13 @@ namespace
 	// A city gate's far gate (OpenDoor): the cells of both worldspaces share one Havok world, and
 	// the other worldspace's gate, closed, stands a few units behind the player's own.
 	Portal::Doors::OpenState openFarGate;
-	float                    openDoorSwing = 0.0f;  // 0..1, how far the panel has swung open
-
-	// The room's door is the one swung from both sides of a doorway: from outside as part of the
-	// merged room, from inside as the portal's door. Walking through hands it from one to the
-	// other; closing it and swinging it open again from scratch swept it through the view of a
-	// player standing in the doorway. A door let go of is left open for a moment, and the next
-	// opener of the same door takes it over where it is.
-	//
-	// Several at once: walking out, the room's door is let go of by the crossing, and the street
-	// door the same frame by the merge taking over from the portal. With one slot the second
-	// replaced the first, and the room's door, seen from the street, swung open again from shut
-	// through the camera standing in the doorway.
-	// Where a door's swing stands: its progress and direction (SwingStep). The two go together: the
-	// progress means a different opening on the opening curve than on the shutting one, and a door
-	// taken over half open with the shutting direction (the merge taking it from the portal, every
-	// opener starting out "shutting") jumped back nearly shut and swung open a second time.
-	struct SwingState
-	{
-		float amount = 0.0f;
-		bool  opening = false;
-	};
-
-	struct LetGo
-	{
-		SwingState swing;
-		float seconds = 0.0f;  // since it was let go of
-	};
-	std::unordered_map<RE::FormID, LetGo> letGo;
-
-	void LetGoOf(RE::FormID a_door, float a_amount, bool a_opening)
-	{
-		letGo[a_door] = { { a_amount, a_opening }, 0.0f };
-	}
-
-	// Where to start a door's swing: where it was left, if it was just let go of.
-	SwingState TakeOver(RE::FormID a_door)
-	{
-		const auto it = letGo.find(a_door);
-		if (it == letGo.end()) {
-			return {};
-		}
-		const auto swing = it->second.swing;
-		letGo.erase(it);
-		return swing;
-	}
-
-	void ExpireLetGo(float a_delta)
-	{
-		for (auto it = letGo.begin(); it != letGo.end();) {
-			if ((it->second.seconds += a_delta) > 3.0f) {
-				Portal::Doors::Unswing(it->first);
-				it = letGo.erase(it);
-			} else {
-				++it;
-			}
-		}
-	}
+	Portal::Doors::Swing     openSwing;  // how far the panel has swung open
 
 	// Far enough past ReleaseRadius (fast travel on horseback), a door still swinging is let go
 	// anyway. Past it, by reach (Reach), as ReleaseRadius is: a fixed distance stood inside a gate's
 	// release reach and a sparse street's, and those were let go at once, swinging or not.
 	constexpr float kForceReleaseBeyond = 1350.0f;
 	bool            doorWanted = false;  // the portal's door swings towards open (else towards shut): Wanted
-
-	// How far open a_door is a_t of the way through its swing (0 .. 1), a_opening or shutting: its own
-	// animation's (Doors::SwingAmount), as when the game opens it.
-	float SwingEase(RE::TESObjectREFR* a_door, float a_t, bool a_opening)
-	{
-		return Portal::Doors::SwingAmount(a_door, a_t, a_opening);
-	}
-
-	// One step of a_door's swing progress towards a_wanted, its direction kept in a_opening. Turned
-	// round half way, the progress is taken from where the other direction's animation is as far
-	// open: kept as it was, the door jumped.
-	float SwingStep(RE::TESObjectREFR* a_door, float a_t, bool& a_opening, bool a_wanted, float a_delta)
-	{
-		if (a_wanted != a_opening && a_t > 0.0f && a_t < 1.0f) {
-			const float amount = SwingEase(a_door, a_t, a_opening);
-			float       best = a_t, bestOff = FLT_MAX;
-			for (int i = 0; i <= 200; ++i) {
-				const float t = static_cast<float>(i) / 200.0f;
-				if (const float off = std::abs(SwingEase(a_door, t, a_wanted) - amount); off < bestOff) {
-					bestOff = off;
-					best = t;
-				}
-			}
-			a_t = best;
-		}
-		a_opening = a_wanted;
-		const float step = a_delta / Portal::Doors::SwingSeconds(a_door, a_wanted);
-		return std::clamp(a_t + (a_wanted ? step : -step), 0.0f, 1.0f);
-	}
-
-	bool openDoorOpening = false;  // the direction of openDoorSwing (SwingStep)
-
-	// A door outdoors, also one whose exterior cell isn't loaded (a persistent door, a game loaded
-	// indoors).
-	bool Outdoors(RE::TESObjectREFR* a_door)
-	{
-		auto* cell = a_door ? a_door->GetParentCell() : nullptr;
-		return cell ? !cell->IsInteriorCell() : a_door && a_door->GetWorldspace();
-	}
-
-	// Which of a pair's two doors the portal swings (Doors::SwingingDoor), the other one hidden.
-	RE::FormID SwingingDoorOf(RE::TESObjectREFR* a_source, RE::TESObjectREFR* a_linked)
-	{
-		return Portal::Doors::SwingingDoor(a_source->GetFormID(), Outdoors(a_source), a_linked->GetFormID(), Outdoors(a_linked));
-	}
-
-	// ---- what opens a door -------------------------------------------------------------------
-	// A door doesn't open as the player comes near. It opens when someone uses it (DoorUse: the
-	// player, an NPC reaching for it) and shuts a few seconds after; it stands open for good when
-	// it is a city gate, set to stand open always (once its doorway has a picture to show from
-	// afar: never seen open, it showed the plain colour), or every door is to (the global force).
-	// Forced shut, only a use opens it.
-
-	// A city gate: outdoors on both sides.
-	bool Gate(RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
-	{
-		return Outdoors(a_door) && Outdoors(a_linked);
-	}
 
 	// The space behind the door is drawn in its doorway (merged, the portal ready, or a room beside),
 	// not a stand-in's picture.
@@ -684,80 +573,9 @@ namespace
 		return (portal && portal->sourceDoor == a_door && (remote.merged || Portal::Manager::ReadyPortal())) || BesideDoor(a_door);
 	}
 
-	// A door out of a building (a_door indoors, its pair outdoors) shows the street only live, never
-	// a picture of it: the street's pictures, taken from inside and drawn with their depth, broke up
-	// into streaks seen from beside the doorway, and drawn flat they looked nothing like the street.
-	// So such a door opens from inside only once its street is shown (StandsOpen), and has no
-	// stand-in.
-	bool StreetShownLive(RE::TESObjectREFR* a_door, bool a_linkedOutdoors)
-	{
-		return !Outdoors(a_door) && a_linkedOutdoors;
-	}
-
-	// The pair stands open whoever uses it (it can't be shut), and already before the space behind
-	// it is there: it is never seen shut, so never seen opening either. a_door: the one in the
-	// player's space; its linked door needn't be loaded.
-	bool OpenFromAfar(RE::TESObjectREFR* a_door, RE::FormID a_linked, bool a_linkedOutdoors)
-	{
-		using Portal::DoorUse::Force;
-		switch (Portal::DoorUse::GetForce()) {
-		case Force::kAllOpen:
-			return true;
-		case Force::kAllShut:
-			return false;
-		case Force::kNone:
-			break;
-		}
-		const bool outdoors = Outdoors(a_door);
-		const auto key = Portal::Doors::CorrectionDoor(a_door->GetFormID(), outdoors, a_linked, a_linkedOutdoors);
-		return (outdoors && a_linkedOutdoors) ||
-		       (!StreetShownLive(a_door, a_linkedOutdoors) && Portal::Doors::AlwaysOpen(key) && Portal::Snapshot::HasPicture(a_door->GetFormID(), a_linkedOutdoors));
-	}
-
-	bool OpenFromAfar(RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
-	{
-		return OpenFromAfar(a_door, a_linked->GetFormID(), Outdoors(a_linked));
-	}
-
-	// The pair stands open whoever uses it (it can't be shut): from afar, or set to stand open always
-	// and its space shown. The picture is only taken of a doorway seen open: from inside Understone
-	// Keep, never seen open from there, the doors stood shut for good. Such a door was seen shut
-	// until its space came, so it swings open then (OpenFromAfar's are shown open at once).
-	bool StandsOpen(RE::TESObjectREFR* a_door, RE::FormID a_linked, bool a_linkedOutdoors)
-	{
-		if (OpenFromAfar(a_door, a_linked, a_linkedOutdoors)) {
-			return true;
-		}
-		const bool outdoors = Outdoors(a_door);
-		const auto key = Portal::Doors::CorrectionDoor(a_door->GetFormID(), outdoors, a_linked, a_linkedOutdoors);
-		return Portal::DoorUse::GetForce() == Portal::DoorUse::Force::kNone && Portal::Doors::AlwaysOpen(key) && SpaceShown(a_door->GetFormID());
-	}
-
-	bool StandsOpen(RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
-	{
-		return StandsOpen(a_door, a_linked->GetFormID(), Outdoors(a_linked));
-	}
-
-	// The pair's doors are to be open now.
-	bool Wanted(RE::TESObjectREFR* a_door, RE::FormID a_linked, bool a_linkedOutdoors)
-	{
-		return StandsOpen(a_door, a_linked, a_linkedOutdoors) || Portal::DoorUse::Used(a_door->GetFormID()) || Portal::DoorUse::Used(a_linked);
-	}
-
-	bool Wanted(RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
-	{
-		return Wanted(a_door, a_linked->GetFormID(), Outdoors(a_linked));
-	}
-
-	RE::TESObjectREFR* LinkedOf(RE::TESObjectREFR* a_door)
-	{
-		auto* teleport = a_door ? a_door->extraList.GetByType<RE::ExtraTeleport>() : nullptr;
-		return teleport && teleport->teleportData ? teleport->teleportData->linkedDoor.get().get() : nullptr;
-	}
-
 	RE::FormID openDoorSwung = 0;  // the door OpenDoor swings: the source, or the linked door seen through it
 
-	SwingState TakeOverDoor(RE::FormID a_door);
+	void TakeOverDoor(Portal::Doors::Swing& a_swing, RE::FormID a_door);
 
 	void OpenDoor(RE::TESObjectREFR* a_door, const RE::NiPoint3& a_inward, float a_delta)
 	{
@@ -773,32 +591,29 @@ namespace
 		const auto portal = GetActive();
 		const bool gate = here && !here->IsInteriorCell() && portal && portal->cell && !portal->cell->IsInteriorCell();
 		auto*      linked = portal ? Lookup(portal->linkedDoor) : nullptr;
-		const bool farSwings = linked && SwingingDoorOf(a_door, linked) == linked->GetFormID();
+		const bool farSwings = linked && Portal::Doors::SwingingDoor(a_door, linked) == linked->GetFormID();
 		auto*      swungDoor = farSwings ? linked : a_door;
 		const auto swung = swungDoor->GetFormID();
 		if (openDoor.door != a_door->GetFormID() || openDoorSwung != swung) {
-			Portal::Doors::Unswing(openDoor.door);
-			Portal::Doors::Unswing(openDoorSwung);
-			const auto taken = TakeOverDoor(swung);
-			openDoorSwing = taken.amount;
-			openDoorOpening = taken.opening;
+			Portal::Doors::RestoreLeaves(openDoor.door);
+			Portal::Doors::RestoreLeaves(openDoorSwung);
+			TakeOverDoor(openSwing, swung);
 			openDoorSwung = swung;
 		}
-		letGo.erase(swung);  // held again: not to be put back shut when the let-go expires
-		// Only from shut: the picture that makes a door open from afar is taken while it swings open
-		// the first time, and snapped open then it jumped.
-		const bool wasShut = openDoorSwing <= 0.0f;
+		Portal::Doors::Swing::Reclaim(swung);
 		// Timed by the door that swings; the space behind, holding it, may still be loading.
 		auto* timed = swungDoor->Get3D() ? swungDoor : a_door;
-		openDoorSwing = SwingStep(timed, openDoorSwing, openDoorOpening, doorWanted, a_delta);
-		if (doorWanted && wasShut && linked && OpenFromAfar(a_door, linked)) {
-			openDoorSwing = 1.0f;  // stands open: never seen opening
+		// Only from shut: the picture that makes a door open from afar is taken while it swings open
+		// the first time, and snapped open then it jumped.
+		const bool wasShut = openSwing.Step(timed, doorWanted, a_delta);
+		if (doorWanted && wasShut && linked && Portal::Doors::OpenFromAfar(a_door, linked)) {
+			openSwing.SnapOpen();
 		}
-		if (openDoorSwing <= 0.0f) {
+		if (openSwing.Shut()) {
 			// Swung shut: an ordinary door again, solid, a gate shown. The portal isn't drawn on
 			// it any more (DoorwayOpen); its quad lies on the panel's face.
-			Portal::Doors::Unswing(a_door->GetFormID());
-			Portal::Doors::Unswing(openDoorSwung);
+			Portal::Doors::RestoreLeaves(a_door->GetFormID());
+			Portal::Doors::RestoreLeaves(openDoorSwung);
 			Portal::Doors::Close(openDoor);
 			Portal::Doors::Close(openFarGate);
 			remote.RestorePassage();
@@ -807,14 +622,14 @@ namespace
 		const auto settings = linked ? Portal::Doors::CorrectionDoor(a_door, linked)->GetFormID() : a_door->GetFormID();
 		const bool hide = farSwings;
 		if (openDoor.door == a_door->GetFormID() && openDoor.hidden != hide) {
-			Portal::Doors::Unswing(openDoor.door);
+			Portal::Doors::RestoreLeaves(openDoor.door);
 		}
-		Portal::Doors::Open(a_door, openDoor, hide, gate);
+		Portal::Doors::Open(a_door, openDoor, { .hide = hide, .passable = gate });
 		// Walking out of Whiterun the player stood on its housing, 25 units short of the doorway,
 		// once the view out was there, and wasn't carried through. The far gate is drawn by the
 		// portal pass: swung open when it is the one that swings, else hidden.
 		if (gate && linked) {
-			Portal::Doors::Open(linked, openFarGate, !farSwings, true);
+			Portal::Doors::Open(linked, openFarGate, { .hide = !farSwings, .passable = true });
 			if (const auto mapping = Portal::Doors::TryCompute(*portal)) {
 				remote.ClearPassage(mapping->sourceCenter, mapping->inward, mapping->halfWidth, mapping->halfHeight);
 			}
@@ -825,21 +640,21 @@ namespace
 		if (farSwings) {
 			// Into the space behind, in its own coordinates (the portal pass draws it where it is).
 			if (const auto mapping = Portal::Doors::TryCompute(*portal)) {
-				Portal::Doors::Swing(linked, mapping->toLinked.rotate * mapping->inward, SwingEase(timed, openDoorSwing, openDoorOpening), settings);
+				openSwing.Turn(timed, linked, mapping->toLinked.rotate * mapping->inward, settings);
 			}
 		} else if (!hide) {
-			Portal::Doors::Swing(a_door, RE::NiPoint3{ -a_inward.x, -a_inward.y, 0.0f }, SwingEase(timed, openDoorSwing, openDoorOpening), settings);
+			openSwing.Turn(timed, a_door, RE::NiPoint3{ -a_inward.x, -a_inward.y, 0.0f }, settings);
 		} else {
-			Portal::Doors::Unswing(a_door->GetFormID());
+			Portal::Doors::RestoreLeaves(a_door->GetFormID());
 		}
 	}
 
 	void CloseDoor()
 	{
 		if (openDoor.door) {
-			LetGoOf(openDoorSwung ? openDoorSwung : openDoor.door, openDoorSwing, openDoorOpening);
+			openSwing.LetGo(openDoorSwung ? openDoorSwung : openDoor.door);
 		}
-		openDoorSwing = 0.0f;
+		openSwing.Reset();
 		openDoorSwung = 0;
 		Portal::Doors::Close(openDoor);
 		Portal::Doors::Close(openFarGate);
@@ -899,7 +714,7 @@ namespace
 		}
 		auto* door = Lookup(a_portal.sourceDoor);
 		if (pictureWait.gaveUp ||
-			!Portal::Snapshot::CameraPictureWanted(a_portal.sourceDoor, Portal::Doors::Quad(door, RE::PlayerCharacter::GetSingleton()->GetPosition(), true))) {
+			!Portal::Snapshot::CameraPictureWanted(a_portal.sourceDoor, Portal::Doors::Quad(door, RE::PlayerCharacter::GetSingleton()->GetPosition(), { .behindPanel = true }))) {
 			return false;
 		}
 		const auto now = std::chrono::steady_clock::now();
@@ -931,8 +746,7 @@ namespace
 		bool                     gate = false;        // outdoors on both sides
 		bool                     picture = true;      // its doorway shows the picture (a gate only if set to)
 		bool                     handedOver = false;  // the real space took the door over; the picture fades
-		float                    swing = 0.0f;        // 0..1
-		bool                     opening = false;     // the swing's direction (SwingStep)
+		Portal::Doors::Swing     swing;               // of the door swinging
 		float                    fade = 1.0f;         // the picture's, once handed over
 		// The door the player just came out of: its picture is of the space they were standing in a
 		// moment ago, and that space fading in over it read as a delay, not as a door opening.
@@ -1008,9 +822,9 @@ namespace
 	RE::FormID StandInSwinging(RE::TESObjectREFR* a_door, DoorwayStandIn& a_standIn)
 	{
 		const auto id = a_door->GetFormID();
-		const auto key = Portal::Doors::CorrectionDoor(id, Outdoors(a_door), a_standIn.linked, a_standIn.outdoors);
+		const auto key = Portal::Doors::CorrectionDoor(Portal::Doors::Side(a_door), { a_standIn.linked, a_standIn.outdoors });
 		a_standIn.picture = !a_standIn.gate || Portal::Doors::PictureFromAfar(key);
-		return a_standIn.picture ? Portal::Doors::SwingingDoor(id, Outdoors(a_door), a_standIn.linked, a_standIn.outdoors) : id;
+		return a_standIn.picture ? Portal::Doors::SwingingDoor(Portal::Doors::Side(a_door), { a_standIn.linked, a_standIn.outdoors }) : id;
 	}
 
 	// Shut again, the stand-in's door and, when the far door is the one swung, that one too: taken
@@ -1018,9 +832,9 @@ namespace
 	// it standing open.
 	void UnswingStandIn(RE::FormID a_door, const DoorwayStandIn& a_standIn)
 	{
-		Portal::Doors::Unswing(a_door);
+		Portal::Doors::RestoreLeaves(a_door);
 		if (a_standIn.swinging && a_standIn.swinging != a_door && a_standIn.swinging != openDoorSwung) {
-			Portal::Doors::Unswing(a_standIn.swinging);
+			Portal::Doors::RestoreLeaves(a_standIn.swinging);
 		}
 	}
 
@@ -1057,11 +871,11 @@ namespace
 		const auto add = [&](RE::TESObjectREFR* a_door) {
 			const auto linked = PortalLink(a_door, a_here);
 			// A door out of a building shows the street only live (StreetShownLive).
-			if (!linked || StreetShownLive(a_door, Outdoors(linked.get())) || Portal::Doors::PortalOff(a_door->GetFormID()) || Portal::Doors::PortalOff(linked->GetFormID()) ||
+			if (!linked || Portal::Doors::StreetShownLive(a_door, Portal::Doors::Outdoors(linked.get())) || Portal::Doors::PortalOff(a_door->GetFormID()) || Portal::Doors::PortalOff(linked->GetFormID()) ||
 				std::ranges::any_of(standInDoors, [&](const StandInDoor& a_known) { return a_known.door == a_door->GetFormID(); })) {
 				return;
 			}
-			standInDoors.push_back({ a_door->GetFormID(), linked->GetFormID(), Outdoors(linked.get()) });
+			standInDoors.push_back({ a_door->GetFormID(), linked->GetFormID(), Portal::Doors::Outdoors(linked.get()) });
 		};
 		RE::TES::GetSingleton()->ForEachReferenceInRange(a_player, kStandInReach, [&](RE::TESObjectREFR* a_ref) {
 			add(a_ref);
@@ -1072,7 +886,7 @@ namespace
 		std::ranges::copy(Portal::DoorUse::UsedDoors(), std::back_inserter(doors));
 		for (const auto id : doors) {
 			auto* door = Lookup(id);
-			for (auto* candidate : { door, LinkedOf(door) }) {
+			for (auto* candidate : { door, Portal::Doors::LinkedOf(door) }) {
 				if (InView(candidate, a_here) && candidate->Get3D()) {
 					add(candidate);
 				}
@@ -1094,21 +908,19 @@ namespace
 		for (const auto& candidate : standInDoors) {
 			auto* door = Lookup(candidate.door);
 			// Not a door the portal holds open itself (swinging shut after its space was let go).
-			if (standIns.contains(candidate.door) || !door || !door->Get3D() || real(candidate.door) || (openDoor.door == candidate.door && openDoorSwing > 0.0f) ||
-				!Wanted(door, candidate.linked, candidate.outdoors)) {
+			if (standIns.contains(candidate.door) || !door || !door->Get3D() || real(candidate.door) || (openDoor.door == candidate.door && !openSwing.Shut()) ||
+				!Portal::Doors::Wanted(door, { candidate.linked, candidate.outdoors })) {
 				continue;
 			}
 			auto& standIn = standIns[candidate.door];
 			standIn.linked = candidate.linked;
 			standIn.outdoors = candidate.outdoors;
-			standIn.gate = candidate.outdoors && Outdoors(door);
+			standIn.gate = candidate.outdoors && Portal::Doors::Outdoors(door);
 			standIn.cameThrough = Portal::Travel::ArrivalDoor() == candidate.door;
 			standIn.swinging = StandInSwinging(door, standIn);
-			const auto taken = TakeOver(standIn.swinging);
-			standIn.swing = taken.amount;
-			standIn.opening = taken.opening;
-			if (StandsOpen(door, candidate.linked, candidate.outdoors)) {
-				standIn.swing = 1.0f;  // stands open: never seen opening
+			standIn.swing.TakeOver(standIn.swinging);
+			if (Portal::Doors::StandsOpen(door, { candidate.linked, candidate.outdoors })) {
+				standIn.swing.SnapOpen();
 			}
 			standIn.inwardInCell = Portal::Doors::ToShown(door).rotate.Transpose() * AwayFrom(door, origin);
 		}
@@ -1117,7 +929,7 @@ namespace
 			auto&      standIn = it->second;
 			auto*      door = Lookup(id);
 			if (standIn.handedOver) {
-				const bool portalHolds = openDoor.door == id && openDoorSwing > 0.0f;
+				const bool portalHolds = openDoor.door == id && !openSwing.Shut();
 				if (!real(id) && !portalHolds) {
 					// The real space went while the picture was fading (the portal let go): the stand-in
 					// holds the door again, from where the portal left it. Erased instead, the door had
@@ -1125,9 +937,7 @@ namespace
 					// hidden near door back for a frame.
 					standIn.handedOver = false;
 					standIn.fade = 1.0f;
-					const auto taken = TakeOver(standIn.swinging);
-					standIn.swing = taken.amount;
-					standIn.opening = taken.opening;
+					standIn.swing.TakeOver(standIn.swinging);
 				} else {
 					standIn.fade -= a_delta / kStandInFadeSeconds;
 					if (standIn.fade <= 0.0f || !real(id)) {
@@ -1148,17 +958,18 @@ namespace
 			if (real(id)) {
 				// The real space is there: whoever opens the door for it now takes it over where the
 				// stand-in left it (the merged room's own door, standing in the same place, among them).
-				LetGoOf(standIn.swinging, standIn.swing, standIn.opening);
+				standIn.swing.LetGo(standIn.swinging);
 				standIn.handedOver = true;
 				standIn.fade = standIn.cameThrough ? 0.0f : 1.0f;
 				++it;
 				continue;
 			}
-			standIn.swing = SwingStep(door, standIn.swing, standIn.opening, Wanted(door, standIn.linked, standIn.outdoors), a_delta);
-			if (StandsOpen(door, standIn.linked, standIn.outdoors)) {
-				standIn.swing = 1.0f;
+			const Portal::Doors::Side farSide{ standIn.linked, standIn.outdoors };
+			standIn.swing.Step(door, Portal::Doors::Wanted(door, farSide), a_delta);
+			if (Portal::Doors::StandsOpen(door, farSide)) {
+				standIn.swing.SnapOpen();
 			}
-			if (standIn.swing <= 0.0f) {
+			if (standIn.swing.Shut()) {
 				UnswingStandIn(id, standIn);
 				Portal::Doors::Close(standIn.open);
 				it = standIns.erase(it);
@@ -1167,11 +978,11 @@ namespace
 			// The menu may have turned it round meanwhile.
 			standIn.swinging = StandInSwinging(door, standIn);
 			const bool farSwings = standIn.swinging != id;
-			Portal::Doors::Open(door, standIn.open, farSwings, false, true);
+			Portal::Doors::Open(door, standIn.open, { .hide = farSwings, .solid = true });
 			if (farSwings) {
 				// Its door is the one behind, not there yet: this one is hidden, and the picture shows
 				// the doorway open (the far door swung in it, if it was taken while that stood open).
-				Portal::Doors::Unswing(id);
+				Portal::Doors::RestoreLeaves(id);
 			} else {
 				auto*      linked = Lookup(standIn.linked);
 				const auto settings = linked ? Portal::Doors::CorrectionDoor(door, linked)->GetFormID() : id;
@@ -1180,10 +991,10 @@ namespace
 				// from one side of the gateway to the other when the portal took the gate over. Not
 				// where the gates stand apart: there its leaves would swing into the masked passage.
 				const bool intoFar = standIn.gate &&
-				                     Portal::Doors::SwingingDoor(id, true, standIn.linked, true) == standIn.linked &&
+				                     Portal::Doors::SwingingDoor({ id, true }, { standIn.linked, true }) == standIn.linked &&
 				                     GateDepth(door, standIn.linked, AwayFrom(door, origin)) <= kGatesApart;
 				const auto away = Portal::Doors::ToShown(door).rotate * standIn.inwardInCell;
-				Portal::Doors::Swing(door, intoFar ? away : away * -1.0f, SwingEase(door, standIn.swing, standIn.opening), settings);
+				standIn.swing.Turn(door, door, intoFar ? away : away * -1.0f, settings);
 			}
 			++it;
 		}
@@ -1193,17 +1004,17 @@ namespace
 	// where it was let go of. The space becomes ready in the middle of a frame (RemoteCell::Update),
 	// after the stand-ins were updated: the portal's door handling took the door that frame, before
 	// the stand-in had let go of it, and swung it open again from shut.
-	SwingState TakeOverDoor(RE::FormID a_door)
+	void TakeOverDoor(Portal::Doors::Swing& a_swing, RE::FormID a_door)
 	{
 		for (auto& [id, standIn] : standIns) {
 			if (!standIn.handedOver && standIn.swinging == a_door) {
 				standIn.handedOver = true;
 				standIn.fade = standIn.cameThrough ? 0.0f : 1.0f;
-				letGo.erase(a_door);
-				return { standIn.swing, standIn.opening };
+				standIn.swing.LetGo(a_door);
+				break;
 			}
 		}
-		return TakeOver(a_door);
+		a_swing.TakeOver(a_door);
 	}
 
 	// The street's distant land, objects and trees (BGSTerrainManager's nodes under "LODRoot"),
@@ -1555,7 +1366,7 @@ namespace
 					break;
 				}
 				logger::info("portal: doorway passage through {:08X} '{}'", blocker->GetFormID(), blocker->GetBaseObject() ? blocker->GetBaseObject()->GetName() : "");
-				Portal::Doors::Open(blocker, passage.emplace_back(), false);
+				Portal::Doors::Open(blocker, passage.emplace_back());
 			}
 		}
 	}
@@ -1760,7 +1571,7 @@ namespace
 		}
 		// A shut door is walked into, not through: the building behind it is left solid, and the
 		// player isn't held at the doorway's height against it.
-		if (remote.merged ? primaryRoom->swing <= 0.0f : openDoorSwing <= 0.0f) {
+		if (remote.merged ? primaryRoom->swing.Shut() : openSwing.Shut()) {
 			if (!passage.empty()) {
 				ClosePassage();
 			}
@@ -1804,7 +1615,7 @@ namespace
 			// Not while sitting, lying or in a conversation: the switch would carry the player out of it.
 			const bool busy = a_player->AsActorState()->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal || RE::MenuTopicManager::GetSingleton()->speaker;
 			if (switching && !merged && !busy && here && here->IsInteriorCell() && !a_portal.cell->IsInteriorCell() && Mergeable(a_portal.cell, here) && depth < 0.0f &&
-				openDoorSwing > 0.0f && !upstairs) {
+				!openSwing.Shut() && !upstairs) {
 				const bool inView = DoorwayInView(mapping, kSeenMargin);
 				if ((inView && heading && -depth <= kRoomSwitchOutViewDepth) || (-depth <= kRoomSwitchOutDepth && heading)) {
 					crossCooldown = 1.0f;
@@ -2006,49 +1817,6 @@ namespace
 		point = mapping.toLinked.Invert() * (from + direction * distance);
 	}
 
-	// The far end of a door the player's use is the manager's (DoorActivateHook): a seamless
-	// door, seen from the player's space. Null for any other.
-	RE::TESObjectREFR* UsedPairOf(RE::TESObjectREFR* a_door)
-	{
-		auto* here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
-		auto  linked = here ? PortalLink(a_door, here) : nullptr;
-		if (!linked || Portal::Doors::PortalOff(a_door->GetFormID()) || Portal::Doors::PortalOff(linked->GetFormID())) {
-			return nullptr;
-		}
-		return linked.get();
-	}
-
-	// The door's own open or close sound (its base form's), from the door of the pair in the
-	// player's space: the other one stands in a space drawn moved, or not at all, and was heard
-	// from wherever its cell has it.
-	void PlayDoorSound(RE::FormID a_door, RE::FormID a_linked, bool a_open)
-	{
-		auto* here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
-		for (const auto id : { a_door, a_linked }) {
-			auto* door = Lookup(id);
-			auto* base = door ? door->GetBaseObject() : nullptr;
-			auto* form = base ? base->As<RE::TESObjectDOOR>() : nullptr;
-			auto* sound = form ? (a_open ? form->openSound : form->closeSound) : nullptr;
-			if (!sound || !door->Get3D() || !InPlayerSpace(door, here)) {
-				continue;
-			}
-			RE::BSSoundHandle handle;
-			if (RE::BSAudioManager::GetSingleton()->GetSoundHandle(handle, sound)) {
-				handle.SetPosition(door->GetPosition());
-				handle.SetObjectToFollow(door->Get3D());
-				handle.Play();
-			}
-			return;
-		}
-	}
-
-	// Open because the player or an NPC used it, so using it shuts it.
-	bool ClosableDoor(RE::TESObjectREFR* a_door)
-	{
-		auto* linked = LinkedOf(a_door);
-		return linked && Portal::DoorUse::Used(a_door->GetFormID()) && !StandsOpen(a_door, linked);
-	}
-
 	// An open doorway has no collision for the crosshair to find its door by (Doors::Open): a door
 	// opened by a use is found by its doorway, which the crosshair passes through, to be shut.
 	void PickOpenDoorway(RE::CrosshairPickData* a_pick, const RE::NiPoint3& a_origin, const RE::NiPoint3& a_direction)
@@ -2070,7 +1838,7 @@ namespace
 		RE::NiPoint3       at;
 		for (const auto id : used) {
 			auto* door = Lookup(id);
-			if (!door || !door->Get3D() || !InPlayerSpace(door, here) || !Portal::Doors::IsOpen(id) || !ClosableDoor(door)) {
+			if (!door || !door->Get3D() || !InPlayerSpace(door, here) || !Portal::Doors::IsOpen(id) || !Portal::Doors::ClosableDoor(door)) {
 				continue;
 			}
 			const auto  c = Portal::Doors::ShownQuad(door, a_origin);
@@ -2186,16 +1954,16 @@ namespace
 	{
 		static bool Thunk(RE::TESObjectDOOR* a_door, RE::TESObjectREFR* a_target, RE::TESObjectREFR* a_activator, std::uint8_t a_arg3, RE::TESBoundObject* a_object, std::int32_t a_count)
 		{
-			if (auto* linked = enabled && a_target && a_activator == RE::PlayerCharacter::GetSingleton() ? UsedPairOf(a_target) : nullptr) {
+			if (auto* linked = enabled && a_target && a_activator == RE::PlayerCharacter::GetSingleton() ? Portal::Doors::UsedPairOf(a_target) : nullptr) {
 				const auto id = a_target->GetFormID();
-				if (StandsOpen(a_target, linked)) {
+				if (Portal::Doors::StandsOpen(a_target, linked)) {
 					logger::info("portal: door {:08X} used: stands open", id);
 				} else if (Portal::DoorUse::Used(id)) {
 					if (Portal::DoorUse::Shut(id)) {
-						PlayDoorSound(id, linked->GetFormID(), false);
+						Portal::DoorUse::PlayDoorSound(id, linked->GetFormID(), false);
 					}
 				} else if (Portal::DoorUse::Use(id, linked->GetFormID())) {
-					PlayDoorSound(id, linked->GetFormID(), true);
+					Portal::DoorUse::PlayDoorSound(id, linked->GetFormID(), true);
 				}
 				return true;
 			}
@@ -2231,7 +1999,7 @@ namespace
 		RE::BSEventNotifyControl ProcessEvent(const RE::TESActivateEvent* a_event, RE::BSTEventSource<RE::TESActivateEvent>*) override
 		{
 			// Opened or shut (DoorActivateHook), not travelled through.
-			if (a_event && a_event->objectActivated && a_event->actionRef.get() == RE::PlayerCharacter::GetSingleton() && UsedPairOf(a_event->objectActivated.get())) {
+			if (a_event && a_event->objectActivated && a_event->actionRef.get() == RE::PlayerCharacter::GetSingleton() && Portal::Doors::UsedPairOf(a_event->objectActivated.get())) {
 				return RE::BSEventNotifyControl::kContinue;
 			}
 			// The player used a door the normal way.
@@ -2272,7 +2040,7 @@ namespace
 		if (a_player->IsMoving() && crossCooldown <= 0.0f) {
 			for (const auto& [id, standIn] : standIns) {
 				auto* ref = Lookup(id);
-				if (standIn.handedOver || standIn.swing < 0.5f || !ref || !ref->Get3D() || !InPlayerSpace(ref, a_here) || ref->IsLocked()) {
+				if (standIn.handedOver || standIn.swing.Amount() < 0.5f || !ref || !ref->Get3D() || !InPlayerSpace(ref, a_here) || ref->IsLocked()) {
 					continue;
 				}
 				const auto  center = Portal::Doors::Center(ref);
@@ -2334,6 +2102,7 @@ namespace Portal::Manager
 {
 	void Install()
 	{
+		Portal::Doors::SetHost({ .prompt = Prompt, .hasPicture = Portal::Snapshot::HasPicture, .spaceShown = SpaceShown, .portalLink = PortalLink });
 		const auto ini = Paths::PluginDirectory() / "SeamlessSkyrim.ini";
 		enabled = ::GetPrivateProfileIntW(L"Portals", L"bEnabled", 1, ini.c_str()) != 0;
 		mergeEnabled = ::GetPrivateProfileIntW(L"Portals", L"bMerge", 1, ini.c_str()) != 0;
@@ -2616,14 +2385,14 @@ namespace Portal::Manager
 		{
 			for (const auto id : Portal::DoorUse::TakeActorUses()) {
 				auto* door = Lookup(id);
-				auto* linked = LinkedOf(door);
+				auto* linked = Portal::Doors::LinkedOf(door);
 				auto* base = door ? door->GetBaseObject() : nullptr;
 				const bool locked = door && door->IsLocked() && Portal::DoorUse::GetForce() != Portal::DoorUse::Force::kAllOpen;
 				if (!linked || !base || static_cast<RE::TESObject*>(base)->IsMarker() || locked || Doors::PortalOff(id) || Doors::PortalOff(linked->GetFormID())) {
 					continue;
 				}
 				if (Portal::DoorUse::Use(id, linked->GetFormID())) {
-					PlayDoorSound(id, linked->GetFormID(), true);
+					Portal::DoorUse::PlayDoorSound(id, linked->GetFormID(), true);
 				}
 			}
 		}
@@ -2639,17 +2408,17 @@ namespace Portal::Manager
 				doors.push_back(a_linked);
 			};
 			if (const auto portal = GetActive()) {
-				if (remote.merged ? primaryRoom->swing >= kOpen : openDoor.door == portal->sourceDoor && openDoorSwing >= kOpen) {
+				if (remote.merged ? primaryRoom->swing.Amount() >= kOpen : openDoor.door == portal->sourceDoor && openSwing.Amount() >= kOpen) {
 					add(portal->sourceDoor, portal->linkedDoor);
 				}
 			}
 			for (const auto& beside : besideRooms) {
-				if (beside.state->swing >= kOpen) {
+				if (beside.state->swing.Amount() >= kOpen) {
 					add(beside.sourceDoor, beside.linkedDoor);
 				}
 			}
 			for (const auto& [id, standIn] : standIns) {
-				if (!standIn.handedOver && standIn.swing >= kOpen) {
+				if (!standIn.handedOver && standIn.swing.Amount() >= kOpen) {
 					add(id, standIn.linked);
 				}
 			}
@@ -2698,10 +2467,7 @@ namespace Portal::Manager
 	void ForgetDoors()
 	{
 		DropStandIns();
-		for (const auto& [door, left] : letGo) {
-			Portal::Doors::Unswing(door);
-		}
-		letGo.clear();
+		Portal::Doors::Swing::ForgetAll();
 		standInDoors.clear();
 		standInScanTimer = 0.0f;
 		standInScanCell = nullptr;
@@ -2714,7 +2480,7 @@ namespace Portal::Manager
 		Portal::WaterReflections::Update();
 		approachLimit.reset();
 		Portal::Doors::HidePrompt();
-		ExpireLetGo(a_delta);
+		Portal::Doors::Swing::Expire(a_delta);
 		if (pendingUse) {
 			FinishPendingUse();
 		}
@@ -2766,7 +2532,7 @@ namespace Portal::Manager
 		TrackHeading(player->GetPosition());
 		NoteActorUses();
 		for (const auto& [door, linked] : Portal::DoorUse::Update(a_delta)) {
-			PlayDoorSound(door, linked, false);
+			Portal::DoorUse::PlayDoorSound(door, linked, false);
 		}
 		const auto candidate = CandidateDoor(player, a_delta);
 		if (const auto portal = GetActive()) {
@@ -2790,7 +2556,7 @@ namespace Portal::Manager
 			}
 			// A door a stand-in will hold open is let go open, to be taken over where it is: swung shut
 			// first, it swung open again right after.
-			const bool keepOpen = door && linkedDoor && !off && !locked && Wanted(door, linkedDoor);
+			const bool keepOpen = door && linkedDoor && !off && !locked && Portal::Doors::Wanted(door, linkedDoor);
 			doorWanted = keepOpen;
 			if (end && (DoorShut() || keepOpen || reach > ReleaseRadius() + kForceReleaseBeyond)) {
 				if (better && candidate->cell == portal->cell && !remote.merged) {
@@ -2864,7 +2630,7 @@ namespace Portal::Manager
 		if (const auto portal = GetActive()) {
 			remote.Update(a_delta);
 			// Also while the door is still swinging shut after the portal stopped being ready.
-			if (const auto mapping = Doors::TryCompute(*portal); mapping && (ActivePortal() || (openDoor.door == portal->sourceDoor && openDoorSwing > 0.0f))) {
+			if (const auto mapping = Doors::TryCompute(*portal); mapping && (ActivePortal() || (openDoor.door == portal->sourceDoor && !openSwing.Shut()))) {
 				OpenDoor(Lookup(portal->sourceDoor), mapping->inward, a_delta);
 			}
 			// Loaded from further out than usual (farActivate), the space is only merged where it would
@@ -3268,16 +3034,16 @@ namespace Portal::Manager
 	DoorPrompt Prompt(RE::FormID a_door)
 	{
 		auto* door = Lookup(a_door);
-		auto* linked = door && enabled ? UsedPairOf(door) : nullptr;
+		auto* linked = door && enabled ? Portal::Doors::UsedPairOf(door) : nullptr;
 		return !linked                     ? DoorPrompt::kOpen :
-		       StandsOpen(door, linked)    ? DoorPrompt::kNone :
+		       Portal::Doors::StandsOpen(door, linked)    ? DoorPrompt::kNone :
 		       DoorUse::Used(a_door)       ? DoorPrompt::kClose :
 		                                     DoorPrompt::kOpen;
 	}
 
 	bool DoorwayOpen()
 	{
-		return openDoorSwing > 0.0f;
+		return !openSwing.Shut();
 	}
 
 	bool ToneBlendOn()
@@ -3336,7 +3102,7 @@ namespace Portal::Manager
 		// portal can be let go without a doorway left open onto nothing.
 		bool DoorShut()
 		{
-			return remote.merged ? primaryRoom->swing <= 0.0f : openDoorSwing <= 0.0f;
+			return remote.merged ? primaryRoom->swing.Shut() : openSwing.Shut();
 		}
 
 		// Some doorways have a second door in the same frame (Riverwood Trader: 00070E69, not a
@@ -3354,7 +3120,7 @@ namespace Portal::Manager
 					if (a_ref && a_ref != a_source && base && base->Is(RE::FormType::Door) && a_ref->Get3D() &&
 						a_ref->GetPosition().GetDistance(a_center) < 120.0f &&
 						std::ranges::none_of(a_room.extraDoors, [&](const Doors::OpenState& a_open) { return a_open.door == a_ref->GetFormID(); })) {
-						Doors::Open(a_ref, a_room.extraDoors.emplace_back(), true);
+						Doors::Open(a_ref, a_room.extraDoors.emplace_back(), { .hide = true });
 					}
 					return RE::BSContainer::ForEachResult::kContinue;
 				});
@@ -3758,32 +3524,29 @@ namespace Portal::Manager
 			const bool street = primary && MergedOutdoors();
 			auto*      room = street ? source : linked;
 			const auto intoRoom = street ? RE::NiPoint3{ -mapping.inward.x, -mapping.inward.y, 0.0f } : mapping.inward;
-			auto*      swung = SwingingDoorOf(source, linked) == source->GetFormID() ? source : linked;
+			auto*      swung = Doors::SwingingDoor(source, linked) == source->GetFormID() ? source : linked;
 			const auto settings = Doors::CorrectionDoor(source, linked)->GetFormID();
 			if (a_room.swungDoor && a_room.swungDoor != swung->GetFormID()) {
-				Doors::Unswing(a_room.swungDoor);  // turned round in the menu
+				Doors::RestoreLeaves(a_room.swungDoor);  // turned round in the menu
 			}
 			a_room.swungDoor = swung->GetFormID();
-			if (a_room.swing == 0.0f) {
-				const auto taken = TakeOverDoor(swung->GetFormID());
-				a_room.swing = taken.amount;
-				a_room.opening = taken.opening;
+			if (a_room.swing.Shut()) {
+				TakeOverDoor(a_room.swing, swung->GetFormID());
 			}
-			letGo.erase(swung->GetFormID());
-			const bool wasShut = a_room.swing <= 0.0f;  // see OpenDoor
-			a_room.swing = SwingStep(swung, a_room.swing, a_room.opening, a_wanted, a_delta);
-			if (a_wanted && wasShut && OpenFromAfar(source, linked)) {
-				a_room.swing = 1.0f;  // stands open: never seen opening
+			Doors::Swing::Reclaim(swung->GetFormID());
+			const bool wasShut = a_room.swing.Step(swung, a_wanted, a_delta);  // see OpenDoor
+			if (a_wanted && wasShut && Doors::OpenFromAfar(source, linked)) {
+				a_room.swing.SnapOpen();
 			}
 			// Shut, the doorway is a door again: solid, nothing to walk into, and the door standing in it
 			// is the player's space's. The merged space is drawn only beyond the doorway's plane, and its
 			// door shut on that plane wasn't drawn at all: from inside Belethor's, the street door
 			// (the one that swings) left the doorway open on the street. Shut, both stand in one place.
-			const bool shut = a_room.swing <= 0.0f;
+			const bool shut = a_room.swing.Shut();
 			auto*      shown = shut ? source : swung;
-			Doors::Open(source, a_room.sourceDoor, shown != source, false, shut);
-			Doors::Open(linked, a_room.linkedDoor, shown != linked, false, shut);
-			Doors::Swing(swung, swung == room ? intoRoom : intoRoom * -1.0f, SwingEase(swung, a_room.swing, a_room.opening), settings);
+			Doors::Open(source, a_room.sourceDoor, { .hide = shown != source, .solid = shut });
+			Doors::Open(linked, a_room.linkedDoor, { .hide = shown != linked, .solid = shut });
+			a_room.swing.Turn(swung, swung, swung == room ? intoRoom : intoRoom * -1.0f, settings);
 			if (!std::exchange(a_room.extraScanned, true)) {
 				HideDoorsInDoorway(a_room, source, mapping.sourceCenter);
 			}
@@ -3853,7 +3616,7 @@ namespace Portal::Manager
 			// the world's: drawn through the house's walls once the door opened again.)
 			constexpr float kNearlyShut = 0.3f;
 			const float     clear = mapping.halfDepth + static_cast<float>(::Render::Doorway::kMargin) + 1.0f;
-			const float     shift = a_room.swing <= 0.0f ? clear : swung == linked && a_room.swing < kNearlyShut ? -clear : 0.0f;
+			const float     shift = a_room.swing.Shut() ? clear : swung == linked && a_room.swing.Amount() < kNearlyShut ? -clear : 0.0f;
 			const auto      center = mapping.sourceCenter + mapping.inward * shift;
 			const float door[12] = { center.x, center.y, center.z, mapping.inward.x, mapping.inward.y, 0.0f, mapping.inward.y, -mapping.inward.x, 0.0f, mapping.halfWidth,
 				mapping.halfHeight, cameraInside ? 1.0f : 0.0f };
@@ -3867,7 +3630,7 @@ namespace Portal::Manager
 				if (auto* roomDoor = linked->Get3D()) {
 					cull.keep.emplace_back(roomDoor);
 				}
-				cull.doorShut = a_room.swing <= 0.0f;
+				cull.doorShut = a_room.swing.Shut();
 				cull.street = street;
 				if (cull.street && mergedLOD) {
 					cull.roots.emplace_back(mergedLOD->root.get());
@@ -4004,10 +3767,10 @@ namespace Portal::Manager
 			// The room's door, the one swung (UpdateMerged), left where it is to be taken over.
 			for (const auto* state : { &a_room.sourceDoor, &a_room.linkedDoor }) {
 				if (state->door && !state->hidden) {
-					LetGoOf(state->door, a_room.swing, a_room.opening);
+					a_room.swing.LetGo(state->door);
 				}
 			}
-			a_room.swing = 0.0f;
+			a_room.swing.Reset();
 			a_room.swungDoor = 0;
 			Doors::Close(a_room.sourceDoor);
 			Doors::Close(a_room.linkedDoor);
@@ -4176,7 +3939,7 @@ namespace Portal::Manager
 				// Drawn while its door is to be open (Wanted), and on while it swings shut.
 				const auto  shown = std::ranges::find_if(besideRooms, [&](const BesideRoom& a_room) { return a_room.cell == cell && a_room.sourceDoor == door->GetFormID(); });
 				const float distance = origin.GetDistance(door->GetPosition());
-				if (!Wanted(door, linked) && (shown == besideRooms.end() || shown->state->swing <= 0.0f)) {
+				if (!Portal::Doors::Wanted(door, linked) && (shown == besideRooms.end() || shown->state->swing.Shut())) {
 					continue;
 				}
 				picks.push_back({ &space, door->GetFormID(), linked->GetFormID(), distance });
@@ -4241,7 +4004,7 @@ namespace Portal::Manager
 				}
 				auto* door = Lookup(beside.sourceDoor);
 				auto* linked = Lookup(beside.linkedDoor);
-				const bool open = door && linked && Wanted(door, linked);
+				const bool open = door && linked && Portal::Doors::Wanted(door, linked);
 				UpdateMerged(*beside.state, *space, Active{ beside.sourceDoor, beside.linkedDoor, beside.cell, space->Generation() }, beside.slot, open, a_delta, a_culls);
 			}
 		}
@@ -4384,7 +4147,7 @@ namespace Portal::Manager
 		static std::optional<std::chrono::steady_clock::time_point> since;
 		const auto portal = GetActive();
 		const bool open = portal && !standIns.contains(portal->sourceDoor) &&
-		                  (remote.merged ? primaryRoom->swing >= 1.0f : (ActivePortal() && openDoor.door == portal->sourceDoor && openDoorSwing >= 1.0f));
+		                  (remote.merged ? primaryRoom->swing.Amount() >= 1.0f : (ActivePortal() && openDoor.door == portal->sourceDoor && openSwing.Amount() >= 1.0f));
 		if (!open) {
 			since.reset();
 			return std::nullopt;
@@ -4400,7 +4163,7 @@ namespace Portal::Manager
 		const bool outdoors = portal->cell && !portal->cell->IsInteriorCell();
 		const bool gate = outdoors && here && !here->IsInteriorCell();
 		// A city gate only when it shows one (StandInSwinging): a picture nobody sees is megabytes on disk.
-		if (gate && !Portal::Doors::PictureFromAfar(Portal::Doors::CorrectionDoor(portal->sourceDoor, true, portal->linkedDoor, true))) {
+		if (gate && !Portal::Doors::PictureFromAfar(Portal::Doors::CorrectionDoor({ portal->sourceDoor, true }, { portal->linkedDoor, true }))) {
 			return std::nullopt;
 		}
 		// Nor the street from inside: shown only live (StreetShownLive).
@@ -4619,7 +4382,7 @@ namespace Portal::Manager
 			{ "standIns", [] {
 				 json out = json::array();
 				 for (const auto& [id, standIn] : standIns) {
-					 out.push_back({ { "door", std::format("{:08X}", id) }, { "swinging", std::format("{:08X}", standIn.swinging) }, { "swing", standIn.swing },
+					 out.push_back({ { "door", std::format("{:08X}", id) }, { "swinging", std::format("{:08X}", standIn.swinging) }, { "swing", standIn.swing.Amount() },
 						 { "fade", standIn.fade }, { "handedOver", standIn.handedOver }, { "outdoors", standIn.outdoors }, { "cameThrough", standIn.cameThrough } });
 				 }
 				 return out;
@@ -4670,7 +4433,7 @@ namespace Portal::Manager
 				 for (const auto& room : besideRooms) {
 					 const auto* space = KeptSpace(room.cell);
 					 beside.push_back({ { "cell", Probe::DescribeCell(room.cell) }, { "door", std::format("{:08X}", room.sourceDoor) }, { "slot", room.slot },
-						 { "swing", room.state->swing }, { "shapes", room.state->shapes.size() }, { "seen", room.seen }, { "paused", room.paused },
+						 { "swing", room.state->swing.Amount() }, { "shapes", room.state->shapes.size() }, { "seen", room.seen }, { "paused", room.paused },
 						 { "lightScene", space ? LightScene::Describe(space->Scene(), space->Cell3D()) : json(nullptr) } });
 				 }
 				 json parked = json::array();
