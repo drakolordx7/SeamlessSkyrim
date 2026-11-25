@@ -1,5 +1,5 @@
 {
-  "_note": "Where the author's test saves (routes' {\"load\": name}) were, for a machine without them: {\"place\": stored place} or {\"coc\": cell}, then \"console\" commands. Inferred from the routes and places; see run_step/start_from in server.py. A save file with the same name in the saves folder wins.",
+  "_note": "Where the author's test saves (routes' {\"load\": name}) were, for a machine without them: {\"place\": stored place} or {\"coc\": cell}, then \"console\" commands. A save file with the same name in the saves folder wins. Otherwise the game is first loaded from the clean new-game save SeamlessTestBase (make_base_save; in the test profile's own saves) when starting from the main menu, then coc/cow and the position are applied. Inferred from the routes and places; see start_from in server.py.",
   "SeamlessTestBelethors": {
     "place": "belethors-inside-front-door"
   },

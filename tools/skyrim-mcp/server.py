@@ -42,7 +42,10 @@ import retools
 #   SKYRIM_LAUNCH       "mo2" (default: ModOrganizer.exe moshortcut://:<SKYRIM_MO2_EXE>, so the mods
 #                       are in the game's virtual file system) or "skse" (skse64_loader.exe directly)
 #   SKYRIM_MO2_DIR      the portable MO2 folder holding ModOrganizer.exe
-#   SKYRIM_MO2_PROFILE  MO2 profile (default "Default")
+#   SKYRIM_MO2_PROFILE  MO2 profile (default "SeamlessTest": a copy of the user's Default that the Skyrim
+#                       project's build.py keeps in sync; own saves folder, autosaves off, so test runs
+#                       never touch the user's saves. game_launch refuses a profile without LocalSaves)
+#   SKYRIM_BASE_SAVE    the clean new-game save routes start from (default "SeamlessTestBase", make_base_save)
 #   SKYRIM_MO2_EXE      the executable's title in MO2 (default "SKSE")
 #   SKYRIM_GAME_DIR     the game folder: SkyrimSE.exe, for the disassembler (default: MO2's Stock Game)
 #   SKYRIM_DOCS_DIR     Documents\My Games\Skyrim Special Edition (SKSE and plugin logs go there)
@@ -58,7 +61,8 @@ def _settings() -> dict[str, str]:
 
 _cfg = _settings()
 MO2_DIR = Path(_cfg.get("mo2_dir", r"D:\AI\Active\Skyrim\instance"))
-MO2_PROFILE = _cfg.get("mo2_profile", "Default")
+MO2_PROFILE = _cfg.get("mo2_profile", "SeamlessTest")
+BASE_SAVE = _cfg.get("base_save", "SeamlessTestBase")
 MO2_EXE_TITLE = _cfg.get("mo2_exe", "SKSE")
 LAUNCH_MODE = _cfg.get("launch", "mo2")
 GAME_DIR = Path(_cfg.get("game_dir", str(MO2_DIR / "Stock Game")))
@@ -483,6 +487,40 @@ def mo2_running() -> bool:
     return any((proc.info["name"] or "").lower() == "modorganizer.exe" for proc in psutil.process_iter(["name"]))
 
 
+def profile_dir() -> Path:
+    return MO2_DIR / "profiles" / MO2_PROFILE
+
+
+def check_profile_saves() -> None:
+    """Saves of a run must land in the profile's own folder, never in the Documents one (the user's)."""
+    settings = profile_dir() / "settings.ini"
+    text = settings.read_text("utf-8", "replace") if settings.exists() else ""
+    if "LocalSaves=true" not in text or "LocalSettings=true" not in text:
+        raise BridgeError(f"MO2 profile '{MO2_PROFILE}' is missing or has no local saves/INIs ({settings}): build.py makes it (modlist.yaml test_profile)")
+
+
+def mo2_selected_profile() -> str | None:
+    ini = MO2_DIR / "ModOrganizer.ini"
+    for line in ini.read_text("utf-8", "replace").splitlines() if ini.exists() else []:
+        if line.startswith("selected_profile="):
+            return line.split("(", 1)[1].rsplit(")", 1)[0] if "(" in line else line.split("=", 1)[1]
+    return None
+
+
+def restore_mo2_profile(wanted: str | None, wait: float = 30) -> None:
+    """MO2 may remember the profile it was started with (-p): put the user's own one back once MO2 has closed."""
+    deadline = time.monotonic() + wait
+    while mo2_running() and time.monotonic() < deadline:
+        time.sleep(1)
+    ini = MO2_DIR / "ModOrganizer.ini"
+    if wanted and not mo2_running() and mo2_selected_profile() not in (None, wanted):
+        text = ini.read_text("utf-8", "replace")
+        ini.write_text(text.replace(f"selected_profile=@ByteArray({mo2_selected_profile()})", f"selected_profile=@ByteArray({wanted})"), "utf-8", newline="")
+
+
+launched_selected_profile: str | None = None
+
+
 def launch_command() -> tuple[list[str], Path]:
     if LAUNCH_MODE == "mo2":
         # MO2 starts the game inside its virtual file system with MO2's own environment, which is
@@ -507,8 +545,13 @@ def game_launch(save: str | None = None, timeout_seconds: float = 300, backgroun
         # A second ModOrganizer.exe hands the launch to the one that is open, and that one's
         # environment has no agent variables: the game would start without the bridge.
         return {"error": "Mod Organizer 2 is open: close it, a game it starts has no agent bridge"}
+    if LAUNCH_MODE == "mo2":
+        check_profile_saves()
+        global launched_selected_profile
+        launched_selected_profile = mo2_selected_profile()
     if save and not save_exists(save):
-        save = None
+        # A route's author's save: the clean base save stands in when it exists (starts.json then places the player).
+        save = BASE_SAVE if save in load_json(STARTS_FILE) and save_exists(BASE_SAVE) else None
     background.enabled = background_mode
     background.parked_hwnd = 0
     background.remember_user_window()
@@ -570,11 +613,13 @@ def game_quit(force: bool = False, timeout_seconds: float = 30) -> dict[str, Any
             bridge.call("console", command="qqq")
             proc.wait(timeout=timeout_seconds)
             bridge.close()
+            restore_mo2_profile(launched_selected_profile)
             return {"quit": True, "method": "qqq"}
         except (BridgeError, psutil.TimeoutExpired):
             pass
     proc.kill()
     bridge.close()
+    restore_mo2_profile(launched_selected_profile)
     return {"quit": True, "method": "kill"}
 
 
@@ -727,6 +772,42 @@ def walk_stop() -> dict[str, Any]:
     return bridge.call("walk_stop")
 
 
+@mcp.tool()
+def make_base_save(name: str = "", settle_seconds: float = 90) -> dict[str, Any]:
+    """Make the clean start routes load (default SeamlessTestBase): a new game from the main menu (`coc`
+    into Whiterun), every message box that pauses it answered No (the Survival Mode prompt: `d`, `e`
+    through the bridge) until the game has run quietly for a while, then saved in the test profile's own
+    saves folder. Launches the game if it isn't running (a game that is must be ours, at the main menu)."""
+    name = name or BASE_SAVE
+    if not game_process():
+        game_launch()
+    else:
+        agent_game()
+    background.remember_user_window()
+    background.guard(settle_seconds + 60)
+    bridge.call("console", command="coc WhiterunPlainsDistrict03")
+    time.sleep(3)
+    wait_until_in_game(90)
+    answered, quiet_since, start = 0, time.monotonic(), time.monotonic()
+    while time.monotonic() - start < settle_seconds or time.monotonic() - quiet_since < 25:
+        if bridge.call("state").get("paused"):
+            bridge.call("key", code=SCAN_CODES["d"], repeat=1)  # menus move with WASD; the arrow keys did nothing
+            time.sleep(0.5)
+            bridge.call("key", code=SCAN_CODES["e"], repeat=1)
+            answered += 1
+            quiet_since = time.monotonic()
+            time.sleep(1.5)
+        else:
+            time.sleep(2)
+        if time.monotonic() - start > settle_seconds + 240:
+            raise BridgeError("the game stays paused after answering its message boxes: look at a screenshot")
+    bridge.call("save_game", name=name)
+    time.sleep(3)
+    if not save_exists(name):
+        raise BridgeError(f"saved '{name}' but {save_dir() / (name + '.ess')} does not exist")
+    return {"saved": name, "folder": str(save_dir()), "messageBoxesAnswered": answered}
+
+
 # ---- tools: places and routes -------------------------------------------------------------
 #
 # A test scene is usually "stand here, look there" after a fixed walk. Replayed by hand that was
@@ -827,6 +908,8 @@ def start_from(name: str) -> dict[str, Any]:
     if name not in starts:
         raise ValueError(f"no save '{name}' in {save_dir()} and no start for it in starts.json (known: {', '.join(sorted(starts))})")
     start = starts[name]
+    if not (bridge.call("state").get("inGame")) and save_exists(BASE_SAVE):
+        load_game(BASE_SAVE)  # from the main menu: the clean new game, no popups; then coc/cow to the place
     if "place" in start:
         state = go_to_place(start["place"])
     else:
