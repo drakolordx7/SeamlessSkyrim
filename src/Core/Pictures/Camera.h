@@ -1,14 +1,16 @@
 #pragma once
 
-#include "Skyrim/Pictures/DoorwaySnapshot.h"
-#include "Skyrim/Plugin/Settings.h"
+#include <array>
+#include <cstdint>
+#include <utility>
+
+#include "Core/Math/Shapes.h"
+#include "Core/Math/Transform.h"
 
 // Where a doorway's picture is taken from and what part of the door's plane it covers, and how
 // many texels it gets.
-namespace Pictures::Camera
+namespace Core::Pictures::Camera
 {
-	using Corners = Portal::Snapshot::Corners;
-
 	// A place in the doorway's own terms: across and up as fractions of its width and height from
 	// the bottom corner, and the distance behind it (negative in front). The door's corners move
 	// with the door between sessions; where the picture was taken from has to move with them.
@@ -51,14 +53,6 @@ namespace Pictures::Camera
 	// a_eyeUp: the eye's height in the doorway's heights (Frame::PlaceOf).
 	[[nodiscard]] DoorwayPlace PlaceOf(const CameraShape& a_shape, float a_eyeUp);
 
-	// The size pictures are taken at, as the doorway's height in texels; the width is three
-	// quarters of it. Small on purpose: shown blurred, a hundred texels across are all it needs. A
-	// room door's picture (the capture camera's) is 2.4 MB on disk at the default size, 3.2 MB of
-	// video memory with its mipmaps; sixteen times that at the largest.
-	inline constexpr auto kHeightSetting = Plugin::Settings::Of(Plugin::Settings::Id::kDoorwayPictureHeight);
-	inline constexpr int  kDefaultHeight = kHeightSetting.def;
-	inline constexpr int  kMinHeight = kHeightSetting.min;
-	inline constexpr int  kMaxHeight = kHeightSetting.max;
 	// Half-float RGBA, in video memory and on disk.
 	inline constexpr int kBytesPerTexel = 8;
 	// A doorway's shape: three quarters as wide as high, or wider (a double door, a city gate: at
@@ -67,32 +61,43 @@ namespace Pictures::Camera
 	inline constexpr float kNarrowest = 0.75f;
 	inline constexpr float kWidest = 3.0f;
 
-	[[nodiscard]] int  PictureHeight();
-	void               SetPictureHeight(int a_height);
-	[[nodiscard]] float AspectOf(const Corners& a_corners);
-	[[nodiscard]] UINT  WidthFor(UINT a_height);
+	[[nodiscard]] float AspectOf(const Quad& a_corners);
+	// The width of a picture of a_height texels at the narrowest shape.
+	[[nodiscard]] std::uint32_t WidthFor(std::uint32_t a_height);
 	// A picture's size in texels: the doorway at the size set and its shape (AspectOf), times the extent.
-	[[nodiscard]] std::pair<UINT, UINT> SizeFor(const Extent& a_extent, int a_doorwayHeight, float a_aspect);
+	[[nodiscard]] std::pair<std::uint32_t, std::uint32_t> SizeFor(const Extent& a_extent, int a_doorwayHeight, float a_aspect);
 
 	// The doorway's frame: corner 0 and its edges, and its normal turned away from a_eye (so the
 	// same whichever order the corners come in for the side it is seen from).
 	struct Frame
 	{
-		RE::NiPoint3 origin;
-		RE::NiPoint3 across;
-		RE::NiPoint3 up;
-		RE::NiPoint3 inward;
+		Vec3 origin;
+		Vec3 across;
+		Vec3 up;
+		Vec3 inward;
 
-		Frame(const Corners& a_corners, const RE::NiPoint3& a_eye);
+		Frame(const Quad& a_corners, const Vec3& a_eye);
 
-		[[nodiscard]] DoorwayPlace PlaceOf(const RE::NiPoint3& a_point) const;
-		[[nodiscard]] RE::NiPoint3 PointAt(const DoorwayPlace& a_place) const;
+		[[nodiscard]] DoorwayPlace PlaceOf(const Vec3& a_point) const;
+		[[nodiscard]] Vec3         PointAt(const DoorwayPlace& a_place) const;
+	};
+
+	// A camera of its own for the doorway's picture, in front of the doorway's middle and looking
+	// straight through it, wide enough to see the room beside and above it too. A picture taken
+	// with the player's view had only what the doorway let through from where they stood, so a
+	// step aside showed the doorway's edge smeared over what the wall had hidden; and from a
+	// fixed place the picture is the same whoever takes it.
+	struct CaptureCamera
+	{
+		Transform transform;  // in the player's space, as an NiCamera's (looking along its rotation's first column)
+		float     left = 0.0f, right = 0.0f, bottom = 0.0f, top = 0.0f;  // the frustum at distance 1
+		float     toDoorway = 0.0f;  // the door plane's distance ahead, in the player's space
 	};
 
 	// Looking along the doorway's normal, so its plane is parallel to the image: the picture's
 	// texels are evenly spread over the door's plane, as the draw reads them.
-	[[nodiscard]] Portal::Snapshot::CaptureCamera For(RE::FormID a_door, const Frame& a_frame, const CameraShape& a_shape, const DoorwayPlace& a_place);
+	[[nodiscard]] CaptureCamera For(const Frame& a_frame, const CameraShape& a_shape, const DoorwayPlace& a_place);
 
 	// Where a place on the door's plane is in the capture camera's image, in clip space.
-	[[nodiscard]] std::array<float, 4> Clip(const Portal::Snapshot::CaptureCamera& a_camera, const Frame& a_frame, float a_across, float a_up);
+	[[nodiscard]] std::array<float, 4> Clip(const CaptureCamera& a_camera, const Frame& a_frame, float a_across, float a_up);
 }

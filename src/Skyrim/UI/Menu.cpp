@@ -2,7 +2,7 @@
 
 #include "Skyrim/Doors/Settings.h"
 #include "Skyrim/Doors/DoorUse.h"
-#include "Skyrim/Pictures/Camera.h"
+#include "Skyrim/Pictures/Cache.h"
 #include "Skyrim/Pictures/DoorwaySnapshot.h"
 #include "Skyrim/Plugin/Settings.h"
 #include "Skyrim/Portal/MergedView.h"
@@ -83,8 +83,8 @@ namespace
 		bool enabled = Portal::Manager::Enabled();
 		const bool available = Portal::Manager::HooksInstalled();
 
-		ImGui::TextWrapped("Rendering: %s", Render::Backend::Name());
-		if (available && !Render::Backend::CanMerge()) {
+		ImGui::TextWrapped("Rendering: %s", Render::Backend::Current().Name());
+		if (available && !Render::Backend::Current().CanMerge()) {
 			ImGui::TextWrapped("Rooms aren't drawn into the world with this renderer (see [Render] sBackend in %s).", Plugin::Settings::kShippedFile);
 		}
 
@@ -122,7 +122,7 @@ namespace
 						   "and each open door shows its own room. Counts the room you're at; 1 = only that one. Each costs "
 						   "memory, a short frame when it loads, frame time while its doorway is on screen, and its people "
 						   "are simulated.");
-		if (Render::Backend::MergedRooms() < 2) {
+		if (Render::Backend::Current().MergedRooms() < 2) {
 			ImGui::TextWrapped("This renderer draws one room at a time: the others stay loaded out of sight, and their open doors "
 							   "show a picture.");
 		}
@@ -185,7 +185,7 @@ namespace
 				}
 				return texts;
 			}();
-			const int current = Portal::Snapshot::PictureHeight();
+			const int current = Pictures::PictureHeight();
 			// An ini value between the presets shows as the nearest one.
 			int index = 0;
 			for (int i = 0; i < static_cast<int>(std::size(heights)); ++i) {
@@ -198,7 +198,7 @@ namespace
 				items.push_back(label.c_str());
 			}
 			if (ImGui::Combo("Doorway picture size (texels)", &index, items.data(), static_cast<int>(items.size()))) {
-				Portal::Snapshot::SetPictureHeight(heights[index]);
+				Pictures::SetPictureHeight(heights[index]);
 				Plugin::Settings::SaveUser(Id::kDoorwayPictureHeight, heights[index]);
 			}
 			ImGui::TextWrapped("The blurred picture a doorway shows while the space behind it loads, in texels across the doorway. "
@@ -208,7 +208,7 @@ namespace
 			// Until another click: the result of this one, so the click visibly did something.
 			static std::optional<int> deleted;
 			if (ImGui::Button("Delete all doorway pictures")) {
-				deleted = Portal::Snapshot::DeleteAll();
+				deleted = Pictures::Cache::DeleteAll();
 			}
 			if (deleted) {
 				ImGui::SameLine();

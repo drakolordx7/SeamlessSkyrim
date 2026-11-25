@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Skyrim/Pictures/PictureSize.h"
+
 // Pictures of doorways, for a door that swings open before the space behind it has loaded
 // (StandIns). Whenever a doorway stands fully open on the real space, what is seen through
 // it is copied out of the frame, small, and kept per door (on disk, in SeamlessSkyrim_Doorways);
@@ -11,7 +13,7 @@
 // taken from: drawn flat on the doorway it read as a board standing in it, nothing behind it
 // moving as the player did. It is drawn as the room in relief instead, the eye's ray marched
 // through it.
-namespace Portal::Snapshot
+namespace Pictures
 {
 	// The main view as the doorway is drawn with (Render::MainView).
 	struct View
@@ -52,18 +54,12 @@ namespace Portal::Snapshot
 		float lightScale = 1.0f;
 	};
 
-	// A camera of its own for the doorway's picture, in front of the doorway's middle and looking
-	// straight through it, wide enough to see the room beside and above it too. A picture taken
-	// with the player's view had only what the doorway let through from where they stood, so a
-	// step aside showed the doorway's edge smeared over what the wall had hidden; and from a
-	// fixed place the picture is the same whoever takes it. The portal pass draws one frame with
-	// it into the targets not on screen (the doorway keeps the last picture for that frame).
+	// A doorway's capture camera (Core::Pictures::Camera::CaptureCamera). The portal pass draws one
+	// frame with it into the targets not on screen (the doorway keeps the last picture for that frame).
 	struct CaptureCamera
 	{
-		RE::FormID      door = 0;
-		RE::NiTransform transform;  // in the player's space, as an NiCamera's (looking along its rotation's first column)
-		float           left = 0.0f, right = 0.0f, bottom = 0.0f, top = 0.0f;  // the frustum at distance 1
-		float           toDoorway = 0.0f;  // the door plane's distance ahead, in the player's space
+		RE::FormID                         door;
+		Camera::CaptureCamera camera;
 	};
 
 	// Render (main thread), after the world is drawn into the main target and before first person:
@@ -119,20 +115,6 @@ namespace Portal::Snapshot
 	// Draw, a picture taken just before turning to third person or walking through waited for the
 	// next doorway seen, and was never written if the game was quit first.
 	void Flush();
-
-	// The size pictures are taken at, as their height in texels; the width is three quarters of it.
-	// Pictures already taken keep their size until taken again (at once, when next seen).
-	int  PictureHeight();
-	void SetPictureHeight(int a_height);
-
-	// Any thread: every picture deleted from disk (returns how many) and, at the main thread's next
-	// use, from memory. Each door is taken again when next seen open.
-	int DeleteAll();
-
-	// How bright the room behind a door is drawn with its own light, in the units of
-	// Render::SceneMeter (MergedView::RoomLightScale compares the two): its picture, divided by the
-	// light scale it was taken with. Without one, the rooms' with pictures; none before any.
-	std::optional<float> RoomBrightness(RE::FormID a_door);
 
 	json Describe();
 }

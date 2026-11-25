@@ -368,67 +368,21 @@ namespace Render::Backend
 		} else {
 			UseNative(Enb::Present() ? "no Community Shaders; ENB runs on the game's own shaders" : "no Community Shaders: the game's own shaders");
 		}
-		logger::info("render: backend {} ({})", Name(), why);
+		logger::info("render: backend {} ({})", current->Name(), why);
 	}
 
-	const char* Name() { return current->Name(); }
-	bool        CanMerge() { return current->CanMerge(); }
-	int         MergedRooms() { return current->MergedRooms(); }
-	bool        CanMaskGate() { return current->CanMaskGate(); }
-	bool        CanShadowPortal() { return current->CanShadowPortal(); }
-	bool        MasksPrecipitation() { return current->MasksPrecipitation(); }
-	bool        CutsPortalShader(RE::BSShader::Type a_type) { return current->CutsPortalShader(a_type); }
-
-	// Rooms past what the backend merges are not sent.
-	void SetMergedDoor(int a_room, const std::optional<DoorRect>& a_door)
-	{
-		if (a_room >= 0 && a_room < MergedRooms()) {
-			current->SetMergedDoor(a_room, a_door);
-		}
-	}
-
-	void SetMergedLighting(int a_room, const std::optional<SpaceLight>& a_light)
-	{
-		if (a_room >= 0 && a_room < MergedRooms()) {
-			current->SetMergedLighting(a_room, a_light);
-		}
-	}
-
-	void SetMergedDaylight(int a_room, const std::optional<Daylight>& a_daylight)
-	{
-		if (a_room >= 0 && a_room < MergedRooms()) {
-			current->SetMergedDaylight(a_room, a_daylight);
-		}
-	}
-
-	void SetMergedFog(const std::optional<SpaceFog>& a_fog) { current->SetMergedFog(a_fog); }
-	void SetFrontFog(const std::optional<SpaceFog>& a_fog) { current->SetFrontFog(a_fog); }
-	void SetGatePassage(float a_depth) { current->SetGatePassage(a_depth); }
-	void SetInteriorSun(bool a_on) { current->SetInteriorSun(a_on); }
-	void SettleSkylighting() { current->SettleSkylighting(); }
-	void SetPortalClip(const std::optional<ClipPlane>& a_plane) { current->SetPortalClip(a_plane); }
-	void SetPortalWorldspace(RE::TESWorldSpace* a_worldspace) { current->SetPortalWorldspace(a_worldspace); }
-
-	void SetPortalShadows(RE::BSShadowDirectionalLight* a_light, void* a_shadowMaps, void* a_volumetricShadowMaps)
-	{
-		current->SetPortalShadows(a_light, a_shadowMaps, a_volumetricShadowMaps);
-	}
-
-	void BeginPortalPass(RE::NiDirectionalLight* a_sun, bool a_interior, const RE::NiCamera* a_camera) { current->BeginPortalPass(a_sun, a_interior, a_camera); }
-	void EndPortalPass() { current->EndPortalPass(); }
-
-	bool OutdoorSunDirection(float a_hour, const float* a_position, float* a_towardSun) { return current->OutdoorSunDirection(a_hour, a_position, a_towardSun); }
+	Interface& Current() { return *current; }
 
 	json Describe()
 	{
 		json out = {
-			{ "backend", Name() },
+			{ "backend", current->Name() },
 			{ "why", why },
-			{ "canMerge", CanMerge() },
+			{ "canMerge", current->CanMerge() },
 			{ "communityShadersLoaded", communityShadersLoaded },
 			{ "communityShadersFork", communityShadersFork },
-			{ "mergedRooms", MergedRooms() },
-			{ "masksGates", CanMaskGate() },
+			{ "mergedRooms", current->MergedRooms() },
+			{ "masksGates", current->CanMaskGate() },
 			{ "enb", Enb::Describe() },
 		};
 		out.update(current->DescribeState());

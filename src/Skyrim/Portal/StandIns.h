@@ -7,12 +7,12 @@
 // The doorway before the space behind it is there. A door used to stay shut until the space behind
 // it had loaded: on a slow computer, walked up to and stood at, shut. A door that is to open
 // (Doors::Wanted) now swings open whatever the load, and its doorway shows a blurred picture of
-// what was last seen through it (Portal::Snapshot), or a plain colour, until the real space takes
+// what was last seen through it (Pictures, DoorwaySnapshot.h), or a plain colour, until the real space takes
 // over and the picture fades out. The door's collision stays: there is nothing to walk into yet. A
 // city gate shows its picture too, if set to (Gates).
 namespace Portal::StandIns
 {
-	// A doorway to fill with a stand-in picture (Portal::Snapshot) or one to photograph.
+	// A doorway to fill with a stand-in picture (Pictures, DoorwaySnapshot.h) or one to photograph.
 	struct DoorwayFill
 	{
 		RE::FormID door;      // in the player's space
@@ -80,13 +80,13 @@ namespace Portal::StandIns
 	[[nodiscard]] std::optional<DoorwayFill> SnapshotChance();
 
 	// A door into a room has its doorway picture taken with a camera of its own
-	// (Portal::Snapshot::CaptureCamera), which only the portal pass can draw with: merged, the room
+	// (Pictures::CaptureCamera), which only the portal pass can draw with: merged, the room
 	// is drawn with the world, and it is merged as soon as it has loaded. Once per door (the
 	// picture is kept), the merge waits for it: a moment for the room's late lights, then the
 	// frames it takes. Merged anyway if it doesn't come. a_mergeable: the room would be merged now;
 	// returns true while the merge waits.
 	[[nodiscard]] bool WaitForPicture(const Active& a_portal, const RE::TESObjectCELL* a_here, bool a_mergeable);
 	// Render: the door whose room waits to be merged until the portal pass has drawn its doorway
-	// picture with the capture camera (Portal::Snapshot::CameraPictureWanted), or 0.
+	// picture with the capture camera (Pictures::CameraPictureWanted), or 0.
 	[[nodiscard]] RE::FormID PictureWanted();
 }

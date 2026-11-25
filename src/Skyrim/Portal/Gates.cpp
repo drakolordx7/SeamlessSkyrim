@@ -133,7 +133,7 @@ namespace Portal::Gates
 		std::optional<float> passage;
 		Render::DoorRect     door;
 		const auto           portal = Manager::ActivePortal();
-		if (portal && ::Render::Backend::CanMaskGate() && IsGate(a_here, portal->cell)) {
+		if (portal && ::Render::Backend::Current().CanMaskGate() && IsGate(a_here, portal->cell)) {
 			if (const auto mapping = Doors::TryCompute(*portal)) {
 				const auto  farGate = mapping->toLinked * mapping->sourceCenter - mapping->sourceCenter;
 				const float depth = farGate.x * mapping->inward.x + farGate.y * mapping->inward.y;
@@ -145,18 +145,18 @@ namespace Portal::Gates
 			}
 		}
 		// Room 0 is a merged room's while one is.
-		if (!passage && !Manager::Space().Merged() && ::Render::Backend::CanMaskGate() && !a_here->IsInteriorCell()) {
+		if (!passage && !Manager::Space().Merged() && ::Render::Backend::Current().CanMaskGate() && !a_here->IsInteriorCell()) {
 			passage = StandInGatePassage(door);
 		}
 		if (passage) {
-			::Render::Backend::SetMergedDoor(0, door);
-			::Render::Backend::SetGatePassage(*passage);
+			::Render::Backend::Current().SetMergedDoor(0, door);
+			::Render::Backend::Current().SetGatePassage(*passage);
 			gateMasked = true;
 		} else if (std::exchange(gateMasked, false)) {
 			if (!Manager::Space().Merged()) {
-				::Render::Backend::SetMergedDoor(0, std::nullopt);
+				::Render::Backend::Current().SetMergedDoor(0, std::nullopt);
 			}
-			::Render::Backend::SetGatePassage(0.0f);
+			::Render::Backend::Current().SetGatePassage(0.0f);
 		}
 	}
 

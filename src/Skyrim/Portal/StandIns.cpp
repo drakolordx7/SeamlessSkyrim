@@ -305,7 +305,7 @@ namespace Portal::StandIns
 		}
 		auto* door = RE::TESForm::LookupByID<RE::TESObjectREFR>(a_portal.sourceDoor);
 		if (pictureWait.gaveUp ||
-			!Portal::Snapshot::CameraPictureWanted(a_portal.sourceDoor, Portal::Doors::Quad(door, RE::PlayerCharacter::GetSingleton()->GetPosition(), { .behindPanel = true }))) {
+			!Pictures::CameraPictureWanted(a_portal.sourceDoor, Portal::Doors::Quad(door, RE::PlayerCharacter::GetSingleton()->GetPosition(), { .behindPanel = true }))) {
 			return false;
 		}
 		const auto now = std::chrono::steady_clock::now();

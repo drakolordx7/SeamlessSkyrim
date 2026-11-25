@@ -167,7 +167,7 @@ namespace Render::PortalPass
 				return false;
 			}
 			const auto type = a_pass->shader->shaderType.get();
-			if (::Render::Backend::CutsPortalShader(type)) {
+			if (::Render::Backend::Current().CutsPortalShader(type)) {
 				return false;
 			}
 			const auto& bound = a_pass->geometry->worldBound;
@@ -289,11 +289,11 @@ namespace Render::PortalPass
 		void DrawMainPrecipitation(RE::ShadowSceneNode* a_root)
 		{
 			// Not cut at the far door: this rain is the main view's, in the main view's coordinates.
-			::Render::Backend::EndPortalPass();
-			::Render::Backend::SetPortalClip(std::nullopt);
+			::Render::Backend::Current().EndPortalPass();
+			::Render::Backend::Current().SetPortalClip(std::nullopt);
 			auto* sun = a_root->GetRuntimeData().sunLight;
 			auto* camera = RE::Main::WorldRootCamera();
-			::Render::Backend::BeginPortalPass(sun ? skyrim_cast<RE::NiDirectionalLight*>(sun->light.get()) : nullptr, false, camera);
+			::Render::Backend::Current().BeginPortalPass(sun ? skyrim_cast<RE::NiDirectionalLight*>(sun->light.get()) : nullptr, false, camera);
 			auto* precip = RE::Sky::GetSingleton()->precip;
 			ResetAccumulator(portalAccumulator.get());
 			auto& data = portalAccumulator->GetRuntimeData();
@@ -612,7 +612,7 @@ namespace Render::PortalPass
 			for (auto& descriptor : lightData.shadowmapDescriptors) {
 				ResetAccumulator(descriptor.shaderAccumulator.get());
 			}
-			::Render::Backend::SetPortalShadows(light, portalShadowMaps[0].depthSRV, portalShadowMaps[1].depthSRV);
+			::Render::Backend::Current().SetPortalShadows(light, portalShadowMaps[0].depthSRV, portalShadowMaps[1].depthSRV);
 		}
 
 		// Doors standing in the far door's doorway besides the far door itself: a second, ordinary door
@@ -848,7 +848,7 @@ namespace Render::PortalPass
 		return freedPassesThisSubmit;
 	}
 
-	json Draw(const Active& a_portal, const ScreenRect& a_doorway, const std::optional<Portal::Snapshot::CaptureCamera>& a_capture, bool a_fullTarget)
+	json Draw(const Active& a_portal, const ScreenRect& a_doorway, const std::optional<Pictures::CaptureCamera>& a_capture, bool a_fullTarget)
 	{
 		auto* root = Portal::LightScene::Get();
 		auto* mainCamera = RE::Main::WorldRootCamera();
@@ -879,16 +879,16 @@ namespace Render::PortalPass
 		}
 		const auto mapping = Portal::Doors::Compute(a_portal);
 		const bool capturing = a_capture.has_value();
-		portalCamera->local = mapping.toLinked * (capturing ? a_capture->transform : mainCamera->world);
+		portalCamera->local = mapping.toLinked * (capturing ? ToNi(a_capture->camera.transform) : mainCamera->world);
 		// A gate's mapping is scaled (Doors::Compute) for where the camera stands; what it sees from
 		// there doesn't change with its own scale.
 		portalCamera->local.scale = 1.0f;
 		if (capturing) {
 			auto& frustum = portalCamera->GetRuntimeData2().viewFrustum;
-			frustum.fLeft = a_capture->left;
-			frustum.fRight = a_capture->right;
-			frustum.fBottom = a_capture->bottom;
-			frustum.fTop = a_capture->top;
+			frustum.fLeft = a_capture->camera.left;
+			frustum.fRight = a_capture->camera.right;
+			frustum.fBottom = a_capture->camera.bottom;
+			frustum.fTop = a_capture->camera.top;
 		}
 		RE::NiUpdateData update;
 		portalCamera->Update(update);
@@ -901,7 +901,7 @@ namespace Render::PortalPass
 		const auto&        rotate = portalCamera->world.rotate;
 		const RE::NiPoint3 forward{ rotate.entry[0][0], rotate.entry[1][0], rotate.entry[2][0] };  // NiCamera looks along local +X
 		// A gate's mapping is scaled: the capture camera stands that much further from the far gate.
-		const float        toDoor = capturing ? a_capture->toDoorway * mapping.toLinked.scale : (Portal::Doors::Center(linked) - portalCamera->world.translate).Dot(forward);
+		const float        toDoor = capturing ? a_capture->camera.toDoorway * mapping.toLinked.scale : (Portal::Doors::Center(linked) - portalCamera->world.translate).Dot(forward);
 		// The capture camera cuts just past the door plane: its
 		// picture reaches beyond the doorway, where the room's front wall and the door's frame
 		// stood within the 20 units kept for the doorway quad, slivers at the plane that the
@@ -1007,14 +1007,14 @@ namespace Render::PortalPass
 
 		// The other side's sun and ambient, before its shadows are drawn with that sun.
 		const auto background = SpaceLighting::ApplyRemoteLighting(root, a_portal.cell);
-		const bool shadowed = !a_portal.cell->IsInteriorCell() && ::Render::Backend::CanShadowPortal();
+		const bool shadowed = !a_portal.cell->IsInteriorCell() && ::Render::Backend::Current().CanShadowPortal();
 		if (shadowed) {
 			const Diag::Scope scope("portal shadows");
 			Diag::GpuBegin("gpu portal shadows");
 			RenderPortalShadows(root, portalCamera.get());
 			Diag::GpuEnd("gpu portal shadows");
 		}
-		::Render::Backend::SetPortalWorldspace(a_portal.cell->IsInteriorCell() ? nullptr : a_portal.cell->GetRuntimeData().worldSpace);
+		::Render::Backend::Current().SetPortalWorldspace(a_portal.cell->IsInteriorCell() ? nullptr : a_portal.cell->GetRuntimeData().worldSpace);
 
 		// Same sequence as the engine's menu-3D renderer (ID 52727): bind with clear, let the clear
 		// happen now (the engine clears lazily, when the binding is applied), then bind without.
@@ -1065,11 +1065,11 @@ namespace Render::PortalPass
 			through.Unitize();
 			const auto face = Portal::Doors::Center(linked) - through * Portal::Doors::Size(linked).halfDepth;
 			farDoorClip = ClipPlane{ ToCore(through), face.Dot(through) };
-			::Render::Backend::SetPortalClip(farDoorClip);
+			::Render::Backend::Current().SetPortalClip(farDoorClip);
 		}
 		{
 			auto* sun = root->GetRuntimeData().sunLight;
-			::Render::Backend::BeginPortalPass(sun ? skyrim_cast<RE::NiDirectionalLight*>(sun->light.get()) : nullptr, a_portal.cell->IsInteriorCell(), portalCamera.get());
+			::Render::Backend::Current().BeginPortalPass(sun ? skyrim_cast<RE::NiDirectionalLight*>(sun->light.get()) : nullptr, a_portal.cell->IsInteriorCell(), portalCamera.get());
 		}
 
 		portalFrame += 1;
@@ -1115,7 +1115,7 @@ namespace Render::PortalPass
 		// Not for the main view's rain drawn into the picture next (its own pass, see
 		// DrawMainPrecipitation); EndPortalPass puts the world's shadows back.
 		if (shadowed) {
-			::Render::Backend::SetPortalShadows(nullptr, nullptr, nullptr);
+			::Render::Backend::Current().SetPortalShadows(nullptr, nullptr, nullptr);
 		}
 		// The weather's rain falls through a city gate too. Not in a doorway picture: it is kept,
 		// and would show its streaks standing still in any weather.
@@ -1137,8 +1137,8 @@ namespace Render::PortalPass
 			}
 			portalHiddenDrawn = 0;
 		}
-		::Render::Backend::EndPortalPass();
-		::Render::Backend::SetPortalClip(std::nullopt);
+		::Render::Backend::Current().EndPortalPass();
+		::Render::Backend::Current().SetPortalClip(std::nullopt);
 
 
 		// SubmitAccumulator loads the portal camera into the renderer's camera state, including the

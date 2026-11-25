@@ -48,6 +48,11 @@
 	return { a_color.red, a_color.green, a_color.blue };
 }
 
+[[nodiscard]] inline Core::Quad ToCore(const std::array<RE::NiPoint3, 4>& a_corners)
+{
+	return { ToCore(a_corners[0]), ToCore(a_corners[1]), ToCore(a_corners[2]), ToCore(a_corners[3]) };
+}
+
 [[nodiscard]] inline std::array<RE::NiPoint3, 4> ToNi(const Core::Quad& a_quad)
 {
 	return { ToNi(a_quad[0]), ToNi(a_quad[1]), ToNi(a_quad[2]), ToNi(a_quad[3]) };

@@ -101,7 +101,7 @@ namespace Portal::StreetMerge
 		static bool wasInside = false;
 		const bool  inside = cell && cell->IsInteriorCell();
 		if (cell && wasInside && !inside) {
-			::Render::Backend::SettleSkylighting();
+			::Render::Backend::Current().SettleSkylighting();
 		}
 		if (cell) {
 			wasInside = inside;

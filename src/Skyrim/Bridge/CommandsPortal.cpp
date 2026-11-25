@@ -5,7 +5,7 @@
 #include "Skyrim/Bridge/PortalDiagnostics.h"
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Doors/Settings.h"
-#include "Skyrim/Pictures/DoorwaySnapshot.h"
+#include "Skyrim/Pictures/Cache.h"
 #include "Skyrim/Portal/MergedCull.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
@@ -34,7 +34,7 @@ namespace Bridge
 			// As the menu's button: every door's picture deleted, on disk and in memory, so a door is
 			// seen as never seen open again (an always-open door shut until its space is there).
 			{ "pictures_delete", { [](const json&) {
-				 return json{ { "deleted", Portal::Snapshot::DeleteAll() } };
+				 return json{ { "deleted", Pictures::Cache::DeleteAll() } };
 			 } } },
 			{ "portal_merge", { [](const json& a) {
 				 if (a.contains("enabled")) {
@@ -76,22 +76,6 @@ namespace Bridge
 				 const auto shift = Portal::Doors::Shift(key->GetFormID());
 				 return json{ { "key", std::format("{:08X}", key->GetFormID()) }, { "turn", Portal::Doors::Correction(key->GetFormID()) },
 					 { "shift", { shift.x, shift.y, shift.z } } };
-			 } } },
-			// Diagnostics / measuring: the merged room's cull (Portal/MergedCull.h), mode 0-3, rooms
-			// (through portals) on or off.
-			{ "merged_cull", { [](const json& a) {
-				 if (a.contains("mode")) {
-					 Portal::MergedCull::SetMode(static_cast<Portal::MergedCull::Mode>(std::clamp(a.at("mode").get<int>(), 0, 3)));
-				 }
-				 if (a.contains("rooms")) {
-					 Portal::MergedCull::SetRoomCull(a.at("rooms").get<bool>());
-				 }
-				 if (a.contains("street")) {
-					 Portal::MergedCull::SetStreetMode(static_cast<Portal::MergedCull::Mode>(std::clamp(a.at("street").get<int>(), 0, 2)));
-				 }
-				 auto result = Portal::MergedCull::Describe();
-				 result["frames"] = FrameHooks::FrameStats();
-				 return result;
 			 } } },
 			// Testing without touching the ini: {count} as [Portals] iShownRooms, {pause} as
 			// bPauseUnseenRooms.

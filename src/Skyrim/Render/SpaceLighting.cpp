@@ -182,7 +182,7 @@ namespace Render::SunDirections
 		}
 		const float position[3] = { x * *xExtreme, *yExtreme, std::abs(*xExtreme) - std::abs(x * *xExtreme) };
 		float       towardSun[3]{};
-		if (::Render::Backend::OutdoorSunDirection(hour, position, towardSun)) {
+		if (::Render::Backend::Current().OutdoorSunDirection(hour, position, towardSun)) {
 			if (a_synced) {
 				*a_synced = true;
 			}

@@ -22,7 +22,7 @@ namespace Portal::LightOcclusion
 	// remote cell is drawn to where its Havok world has it: identity for the portal pass; for a room
 	// merged into the world (its 3D moved to the door, its physics left in place) the door mapping.
 	// a_interior: the remote space is an interior, with nothing around its shell. a_slot: the
-	// room's (Render::Backend::SetMergedDoor). 0, the shown space, is set every frame and first; the
+	// room's (Render::Backend::Interface::SetMergedDoor). 0, the shown space, is set every frame and first; the
 	// others for rooms merged beside it (a null world when there is none).
 	void SetWorld(int a_slot, RE::bhkWorld* a_world, const RE::NiTransform& a_toPhysics = {},
 		const std::optional<RoomDoor>& a_door = std::nullopt, bool a_interior = false);

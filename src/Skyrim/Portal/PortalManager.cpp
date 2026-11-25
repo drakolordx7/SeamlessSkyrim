@@ -291,7 +291,7 @@ namespace Portal::Manager
 
 	void Install()
 	{
-		Portal::Doors::SetHost({ .prompt = Prompt, .hasPicture = Portal::Snapshot::HasPicture, .spaceShown = SpaceShown, .portalLink = Selection::PortalLink });
+		Portal::Doors::SetHost({ .prompt = Prompt, .hasPicture = Pictures::HasPicture, .spaceShown = SpaceShown, .portalLink = Selection::PortalLink });
 		MergedView::Install();
 		using Plugin::Settings::Id;
 		using Plugin::Settings::Bool;
@@ -299,7 +299,7 @@ namespace Portal::Manager
 		enabled = Bool(Id::kEnabled);
 		Selection::Install();
 		Portal::DoorUse::SetForce(static_cast<Portal::DoorUse::Force>(Int(Id::kForceDoors)));
-		Portal::Snapshot::SetPictureHeight(Int(Id::kDoorwayPictureHeight));
+		Pictures::SetPictureHeight(Int(Id::kDoorwayPictureHeight));
 		MergedCull::SetMode(static_cast<MergedCull::Mode>(Int(Id::kMergedCull)));
 		// Precision patches the engine's world step loop (ID 77851 + 0x407) with a pre-step hook
 		// that takes its own locks for whichever world is stepped; stepping a second world in the
@@ -325,7 +325,7 @@ namespace Portal::Manager
 		RemoteCell::InstallGridHook();
 		Render::Frame::Install();
 		Render::Frame::Prewarm();
-		Portal::Snapshot::Prewarm();
+		Pictures::Prewarm();
 		Portal::Travel::Install();
 		Portal::CameraLimit::Install();
 		Portal::StreetLOD::Install();

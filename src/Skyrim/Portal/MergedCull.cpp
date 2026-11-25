@@ -23,7 +23,6 @@ namespace Portal::MergedCull
 		}
 
 		Mode                mode = Mode::kShapes;
-		Mode                streetMode = Mode::kOff;
 		std::vector<Room>   rooms;  // main thread, as is the view
 
 		// Shown again after the view; only what was shown before, so the cull never undoes another
@@ -43,7 +42,6 @@ namespace Portal::MergedCull
 		// the room the camera stands in) and on through their portals are drawn, each tested
 		// against what is seen of it; the other rooms not at all. Drawn whole within the doorway's
 		// view, the keep's halls behind walls cost half the frame.
-		bool roomCull = true;
 		struct SeenRoom
 		{
 			const RE::BSMultiBoundRoom* room;
@@ -533,19 +531,18 @@ namespace Portal::MergedCull
 			const auto& door = room->door;
 			// The camera stands in the room: it is the space seen everywhere, but for its rooms the
 			// camera can't see into.
-			const bool inside = door.cameraMerged && mode != Mode::kHideAll;
+			const bool inside = door.cameraMerged;
 			if (inside) {
 				++stats.cameraInside;
 				stats.lastWhy = "camera in the room";
-				if (!roomCull || !HasRooms(a_room)) {
+				if (!HasRooms(a_room)) {
 					return;
 				}
 			}
 			// The street casts the sun's shadows (Interior Sun), into the room too: hidden whole while
 			// the doorway was off screen, the sunlit patches on the room's walls changed; shape by
-			// shape, a porch beam's shadow seen through the doorway thinned. Off unless asked for.
-			const auto wanted = room->street && mode != Mode::kHideAll ? std::min(mode, streetMode) : mode;
-			if (wanted == Mode::kOff) {
+			// shape, a porch beam's shadow seen through the doorway thinned. Not culled.
+			if (room->street) {
 				stats.lastWhy = "street: not culled";
 				return;
 			}
@@ -555,13 +552,12 @@ namespace Portal::MergedCull
 			}
 			doorCenter = ToNi(door.center);
 			const char* none = inside                                               ? nullptr :
-			                   mode == Mode::kHideAll                               ? "hidden by hand" :
 			                   a_unseen                                             ? "camera in another room" :
 			                   room->doorShut                                      ? "door shut" :
 			                   !Core::Doorway::Planes(door, ToCore(camera->world.translate), planes) ? "camera behind the door plane" :
 			                   !DoorwayInView(door)                                 ? "doorway off screen" :
 			                                                                          nullptr;
-			if (!none && wanted == Mode::kWhole) {
+			if (!none && mode == Mode::kWhole) {
 				stats.lastWhy = inside ? "camera in the room" : "doorway seen";
 				return;
 			}
@@ -594,9 +590,7 @@ namespace Portal::MergedCull
 					if (none) {
 						HideAll(root);
 					} else {
-						if (roomCull) {
-							SeeRooms(cell, door, *camera, inside);
-						}
+						SeeRooms(cell, door, *camera, inside);
 						// From inside, only rooms are culled: the engine culls the rest against the view.
 						if (inside) {
 							current = {};
@@ -621,7 +615,7 @@ namespace Portal::MergedCull
 		{
 			stats.lastTested = 0;
 			lastRoomsSeen = lastRoomsTotal = 0;
-			lastRoomsWhy = roomCull ? "no room graph" : "off";
+			lastRoomsWhy = "no room graph";
 			if (rooms.empty() || mode == Mode::kOff) {
 				stats.lastWhy = rooms.empty() ? "nothing merged" : "off";
 				return;
@@ -712,22 +706,10 @@ namespace Portal::MergedCull
 		}
 	}
 
-	void SetRoomCull(bool a_on)
-	{
-		roomCull = a_on;
-		stats.index = 0;
-	}
-
 	void SetMode(Mode a_mode)
 	{
 		mode = a_mode;
 		// The view times are compared per mode.
-		stats.index = 0;
-	}
-
-	void SetStreetMode(Mode a_mode)
-	{
-		streetMode = a_mode;
 		stats.index = 0;
 	}
 
@@ -745,7 +727,6 @@ namespace Portal::MergedCull
 		};
 		return {
 			{ "mode", static_cast<int>(mode) },
-			{ "streetMode", static_cast<int>(streetMode) },
 			{ "merged", rooms.size() },
 			{ "views", stats.views },
 			{ "cameraInside", stats.cameraInside },
@@ -756,7 +737,7 @@ namespace Portal::MergedCull
 			{ "lastHidden", stats.lastHidden },
 			{ "viewMs", summary(stats.viewMs) },
 			{ "cullMs", summary(stats.cullMs) },
-			{ "rooms", { { "on", roomCull }, { "seen", lastRoomsSeen }, { "of", lastRoomsTotal }, { "why", lastRoomsWhy } } },
+			{ "rooms", { { "seen", lastRoomsSeen }, { "of", lastRoomsTotal }, { "why", lastRoomsWhy } } },
 		};
 	}
 }

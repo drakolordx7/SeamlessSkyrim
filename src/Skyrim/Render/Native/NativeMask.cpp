@@ -44,7 +44,7 @@ namespace
 	// Set from the portal code (main thread, as is rendering).
 	std::mutex                stateLock;
 	std::optional<Door>       door;                // under stateLock
-	float                     gatePassage = 0.0f;  // under stateLock; Render::Backend::SetGatePassage
+	float                     gatePassage = 0.0f;  // under stateLock; Render::Backend::Interface::SetGatePassage
 	std::optional<ClipPlane>  portalClip;          // under stateLock
 	std::atomic<bool>         portalPass = false;
 	bool                      ready = false;

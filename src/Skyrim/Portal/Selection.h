@@ -26,7 +26,7 @@ namespace Portal::Selection
 	// Outdoors, how many rooms behind doors are active at once, the nearest door's included
 	// (1 = that one only): the others are the rooms behind the nearest other doors, kept loaded so
 	// they open at once, and those whose door is open are drawn in it, merged beside the shown one,
-	// as many as the render backend can mask (Render::Backend::MergedRooms: 1 on the game's own
+	// as many as the render backend can mask (Render::Backend::Interface::MergedRooms: 1 on the game's own
 	// shaders, where the others stay loaded out of sight).
 	[[nodiscard]] int ShownRooms();
 	void              SetShownRooms(int a_count);

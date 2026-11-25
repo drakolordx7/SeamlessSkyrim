@@ -21,13 +21,13 @@ namespace Pictures
 		// An interior never seen through its door: a dim grey, a little lighter than a dark room.
 		constexpr RE::NiColor kPlainInside{ 0.08f, 0.08f, 0.08f };
 
-		Portal::Snapshot::View SnapshotView()
+		Pictures::View SnapshotView()
 		{
 			auto&                  mainView = Render::CurrentMainView();
 			const auto             eye = mainView.posAdjust.getEye();
 			const auto             previousEye = mainView.previousPosAdjust.getEye();
 			const auto             view = mainView.cameraData.getEye();
-			Portal::Snapshot::View out;
+			Pictures::View out;
 			std::memcpy(out.viewProj, &view.viewProjMat, sizeof(out.viewProj));
 			double matrix[16], inverse[16];
 			for (int i = 0; i < 16; ++i) {
@@ -75,13 +75,13 @@ namespace Pictures
 		// another size, never the one asked for, and Whiterun's gate was captured every other frame for
 		// good, every other frame showing the picture of the frame before (the view through it
 		// stuttered, and lagged a turn by a frame half the time).
-		Portal::Snapshot::Corners CaptureCorners(RE::FormID a_door, bool a_gate, const RE::NiPoint3& a_viewer)
+		Pictures::Corners CaptureCorners(RE::FormID a_door, bool a_gate, const RE::NiPoint3& a_viewer)
 		{
 			return Portal::Doors::Quad(Portal::Doors::Door(a_door), a_viewer, { .behindPanel = !a_gate, .wholeMesh = a_gate });
 		}
 
 		// The picture the portal pass drew this frame with the capture camera.
-		void TakeCameraPicture(const Portal::Snapshot::View& a_view, const Render::PortalPass::CaptureDrawn& a_drawn, const RE::NiPoint3& a_viewer)
+		void TakeCameraPicture(const Pictures::View& a_view, const Render::PortalPass::CaptureDrawn& a_drawn, const RE::NiPoint3& a_viewer)
 		{
 			// Not while Lux's lights not yet known to stand clear of some of the room were half on there;
 			// the manager asks again, and the next capture frame measures further.
@@ -90,17 +90,17 @@ namespace Pictures
 			}
 			// Whether or not the doorway is settled otherwise (a room waits to be merged for this).
 			Guarded([&] {
-				const Portal::Snapshot::Source source{ Render::PortalPass::DrawingTargets().color.SRV, Render::PortalPass::DrawingTargets().depth.depthSRV, a_drawn.nearClip, a_drawn.farClip, true };
-				Portal::Snapshot::Capture(a_view, source, a_drawn.door, a_drawn.outdoors, a_drawn.gate, CaptureCorners(a_drawn.door, a_drawn.gate, a_viewer));
+				const Pictures::Source source{ Render::PortalPass::DrawingTargets().color.SRV, Render::PortalPass::DrawingTargets().depth.depthSRV, a_drawn.nearClip, a_drawn.farClip, true };
+				Pictures::Capture(a_view, source, a_drawn.door, a_drawn.outdoors, a_drawn.gate, CaptureCorners(a_drawn.door, a_drawn.gate, a_viewer));
 			});
 		}
 
 		// The doorway shown open on the real space, photographed: from the world's own frame when the
 		// space is merged, else from the portal pass's.
-		void TakeViewPicture(const Portal::Snapshot::View& a_view, const Portal::StandIns::DoorwayFill& a_chance, bool a_merged, const RE::NiPoint3& a_viewer)
+		void TakeViewPicture(const Pictures::View& a_view, const Portal::StandIns::DoorwayFill& a_chance, bool a_merged, const RE::NiPoint3& a_viewer)
 		{
 			Guarded([&] {
-				Portal::Snapshot::Source source;
+				Pictures::Source source;
 				auto*                    renderer = RE::BSGraphics::Renderer::GetSingleton();
 				if (a_merged) {
 					source.color = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN].SRV;
@@ -112,7 +112,7 @@ namespace Pictures
 				} else {
 					source = { Render::PortalPass::ShownTargets().color.SRV, Render::PortalPass::ShownTargets().depth.depthSRV, Render::PortalPass::NearClip(), Render::PortalPass::FarClip(), false };
 				}
-				Portal::Snapshot::Capture(a_view, source, a_chance.door, a_chance.outdoors, a_chance.gate, CaptureCorners(a_chance.door, a_chance.gate, a_viewer));
+				Pictures::Capture(a_view, source, a_chance.door, a_chance.outdoors, a_chance.gate, CaptureCorners(a_chance.door, a_chance.gate, a_viewer));
 			});
 		}
 
@@ -141,16 +141,16 @@ namespace Pictures
 		}
 	}
 
-	std::optional<Portal::Snapshot::CaptureCamera> CaptureCameraFor(const Portal::Active& a_portal, bool a_forFile)
+	std::optional<Pictures::CaptureCamera> CaptureCameraFor(const Portal::Active& a_portal, bool a_forFile)
 	{
 		// Taken here, so a pass drawn again is the capture camera's too.
-		auto capture = Portal::Snapshot::TakeCaptureRequest();
+		auto capture = Pictures::TakeCaptureRequest();
 		// Every other frame at most: a room takes several to measure its lights for (UpdateDoorwayPictures),
 		// and the doorway on screen stays still while one is drawn.
 		static bool capturedLastFrame = false;
 		if (const auto door = Portal::StandIns::PictureWanted(); !capture && door == a_portal.sourceDoor && !capturedLastFrame) {
 			auto* camera = RE::Main::WorldRootCamera();
-			capture = Portal::Snapshot::CameraFor(door, Portal::Doors::Quad(Portal::Doors::Door(door), camera->world.translate, { .behindPanel = true }), camera->world.translate);
+			capture = Pictures::CameraFor(door, Portal::Doors::Quad(Portal::Doors::Door(door), camera->world.translate, { .behindPanel = true }), camera->world.translate);
 		}
 		// A diagnostic file wants the player's view; the request is asked for again.
 		if (capture && (a_forFile || capture->door != a_portal.sourceDoor)) {
@@ -162,7 +162,7 @@ namespace Pictures
 
 	void UpdateDoorwayPictures(bool a_realShown)
 	{
-		Portal::Snapshot::Flush();
+		Pictures::Flush();
 		const auto view = SnapshotView();
 		// Before any stand-in picture is drawn into it: the eye adapts to the real view.
 		Render::SceneMeter::Measure(RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN].SRV, view.width, view.height);
@@ -191,15 +191,15 @@ namespace Pictures
 			Guarded([&] {
 				// Shown: an always-open door of the street merged into a room is drawn moved with it.
 				const auto corners = Portal::Doors::ShownQuad(Portal::Doors::Door(standIn.door), viewer, { .behindPanel = !standIn.gate, .wholeMesh = standIn.gate });
-				using Kind = Portal::Snapshot::Adaptation::Kind;
-				Portal::Snapshot::Adaptation adaptation{ Kind::kNone, look.daylight };
+				using Kind = Pictures::Adaptation::Kind;
+				Pictures::Adaptation adaptation{ Kind::kNone, look.daylight };
 				if (standIn.outdoors && hereIndoors) {
 					adaptation.kind = Kind::kOutdoorsFromRoom;
 				} else if (!standIn.outdoors && !hereIndoors) {
 					adaptation.kind = Kind::kRoomFromOutdoors;
 					adaptation.lightScale = Portal::MergedView::RoomLightScale(standIn.door);
 				}
-				Portal::Snapshot::Draw(view, standIn.door, standIn.outdoors, standIn.gate, corners, standIn.alpha, standIn.outdoors ? look.plain : kPlainInside, adaptation);
+				Pictures::Draw(view, standIn.door, standIn.outdoors, standIn.gate, corners, standIn.alpha, standIn.outdoors ? look.plain : kPlainInside, adaptation);
 			});
 		}
 	}

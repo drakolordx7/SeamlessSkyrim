@@ -170,8 +170,7 @@ Tests:
   Aimed at a door reference in the other space, the player crosses at an angle beside the
   doorway, and the engine moved them out of the frame's collision, under Belethor's porch.
 
-Scripts beside the MCP server (for loops, and commands with no MCP tool such as `shown_rooms`,
-`merged_cull`):
+Scripts beside the MCP server (for loops, and commands with no MCP tool such as `shown_rooms`):
 - The bridge serves several clients at once (127.0.0.1:47800, one JSON request per line).
 - Run with `PYTHONPATH=. uv run python script.py` in `tools/skyrim-mcp`, then `import server`:
   `server.bridge.call(cmd, **args)` for a bridge command,
@@ -275,14 +274,11 @@ Frame rate:
   `SeamlessTestMarkarthMines`: walk out of the house, `player.moveto 16E47`, then the routes' `move`
   and walk steps. `place_go understone-keep-front` from inside the house only moves the player
   within the house (its cell is `Wilderness`).
-- `merged_cull` returns frame times (`frames`) and the main thread's time in the player view
-  (`viewMs`, culling and draw submission). `{"mode": 3}` hides the merged room, which shows what it
-  costs; `{"mode": 2}` puts it back.
+- `shown_rooms` returns frame times (`frames`) and the main thread's time in the player view
+  (`mergedCull.viewMs`, culling and draw submission).
 - `profile {file, seconds}` samples the main thread now; `travel_profile {file}` for 1.5 s from
   the next crossing. The first second or two after a merge is the light-occlusion rays catching up
   (`lightOcclusion.raysTotal` in `portal_status`).
-- What the merged room costs: a profile with `merged_cull {"mode": 3}` and one without, compared
-  function by function (the sampler takes the same number of samples per second either way).
 - `sampler_report.py file [from_ms to_ms]` names the functions in SeamlessSkyrim's and the fork's
   frames from their build folders' PDBs, so the DLLs in the game must be those builds.
 - The camera moving changes the numbers a lot. Measure with nobody at the controls.
@@ -290,8 +286,6 @@ Frame rate:
   bridge `camera`), so pictures and numbers taken a few seconds apart look in different
   directions. `console setini "fAutoVanityModeDelay:Camera" 100000` and bridge
   `camera_view {firstPerson: true}` before comparing.
-- `merged_cull {"rooms": false}` turns the cull through an interior's portals off, for A/B
-  pictures and times from the same spot.
 - `move_to` across the door plane into the merged room teleports into its cell at the street's
   coordinates (the player falls in the void): load the game again.
 

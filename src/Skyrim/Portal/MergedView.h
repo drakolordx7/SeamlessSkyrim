@@ -110,7 +110,7 @@ namespace Portal::MergedView
 
 	// Render: how bright a room's own lights and ambient are drawn right now, merged behind a_door
 	// and seen from the street: as an eye used to the street sees it (its brightness against the
-	// street's, Portal::Snapshot), as from inside within a few steps of the doorway.
+	// street's, Pictures), as from inside within a few steps of the doorway.
 	[[nodiscard]] float RoomLightScale(RE::FormID a_door);
 	// How bright an eye used to the view sees a_door's room, against the room as drawn from inside:
 	// 1 or less (the room is never drawn brighter than from inside).

@@ -12,7 +12,7 @@
 #include "Skyrim/Doors/Settings.h"
 #include "Skyrim/Doors/Swing.h"
 #include "Skyrim/Engine/Fade.h"
-#include "Skyrim/Pictures/DoorwaySnapshot.h"
+#include "Skyrim/Pictures/Cache.h"
 #include "Skyrim/Plugin/Settings.h"
 #include "Skyrim/Portal/Crossing.h"
 #include "Skyrim/Portal/ImageSpaceBlend.h"
@@ -117,7 +117,7 @@ namespace Portal::MergedView
 			float                                lightingTimer = 0.0f;
 			std::optional<Render::SpaceLight>    lighting;
 			RE::FormID                           door = 0;         // the door in the player's space it is merged behind
-			float                                daylight = 0.0f;  // as sent (Render::Backend::SetMergedDaylight)
+			float                                daylight = 0.0f;  // as sent (Render::Backend::Interface::SetMergedDaylight)
 			// Actor 3D moved out of its cell's actor node while merged, with the node to put it back in.
 			std::vector<std::pair<RE::NiPointer<RE::NiAVObject>, RE::NiPointer<RE::NiNode>>> actors;
 			float                                seconds = 0.0f;  // since the merge began
@@ -473,12 +473,12 @@ namespace Portal::MergedView
 
 		int BesideWanted()
 		{
-			return std::max(0, std::min(Selection::ShownRooms(), ::Render::Backend::MergedRooms()) - 1);
+			return std::max(0, std::min(Selection::ShownRooms(), ::Render::Backend::Current().MergedRooms()) - 1);
 		}
 
 		int FreeSlot()
 		{
-			for (int slot = 1; slot < ::Render::Backend::MergedRooms(); ++slot) {
+			for (int slot = 1; slot < ::Render::Backend::Current().MergedRooms(); ++slot) {
 				if (!rooms[slot]) {
 					return slot;
 				}
@@ -603,7 +603,7 @@ namespace Portal::MergedView
 			const float     shift = mergedRoom.swing.Shut() ? clear : swung == linked && mergedRoom.swing.Amount() < kNearlyShut ? -clear : 0.0f;
 			const auto      center = mapping.sourceCenter + mapping.inward * shift;
 			const auto door = Render::UprightDoor(center, mapping.inward, mapping.halfWidth, mapping.halfHeight, cameraInside);
-			::Render::Backend::SetMergedDoor(a_slot, door);
+			::Render::Backend::Current().SetMergedDoor(a_slot, door);
 			{
 				MergedCull::Room cull;
 				cull.door = door;
@@ -625,7 +625,7 @@ namespace Portal::MergedView
 			// The street merged into the interior gets the sun's light and shadows, through Community
 			// Shaders' Interior Sun (the engine's sun shadow light, on as for an interior flagged for it).
 			if (primary) {
-				::Render::Backend::SetInteriorSun(street);
+				::Render::Backend::Current().SetInteriorSun(street);
 			}
 			// (Not when the remote cells' own update did the same this frame, still loading.)
 			if ((mergedRoom.seconds += a_delta) < kShowAtOnceSeconds && !a_space.FadeForced()) {
@@ -681,7 +681,7 @@ namespace Portal::MergedView
 						const float scale = *view * away / luminance;
 						daylight.radiance = { tint->red * scale, tint->green * scale, tint->blue * scale };
 					}
-					::Render::Backend::SetMergedDaylight(a_slot, daylight);
+					::Render::Backend::Current().SetMergedDaylight(a_slot, daylight);
 				}
 				auto lighting = mergedRoom.lighting;
 				if (lighting) {
@@ -698,7 +698,7 @@ namespace Portal::MergedView
 						lighting->sun.blue *= scale;
 					}
 				}
-				::Render::Backend::SetMergedLighting(a_slot, lighting);
+				::Render::Backend::Current().SetMergedLighting(a_slot, lighting);
 				if (primary) {
 					if (street && lighting) {
 						AimSunShadow(&lighting->towardSun);
@@ -710,10 +710,10 @@ namespace Portal::MergedView
 					// picture before the merge (and the hall once walked in) had the keep's own. One fog
 					// for all merged rooms (the shaders take one): the shown room's.
 					const auto fog = street ? ::Render::SpaceLighting::MergedFog() : ::Render::SpaceLighting::CellFog(a_portal.cell);
-					::Render::Backend::SetMergedFog(fog);
+					::Render::Backend::Current().SetMergedFog(fog);
 					// Up to the doorway it is the street's air.
 					const auto front = street ? std::nullopt : ::Render::SpaceLighting::MergedFog();
-					::Render::Backend::SetFrontFog(front);
+					::Render::Backend::Current().SetFrontFog(front);
 				}
 			}
 		}
@@ -733,16 +733,16 @@ namespace Portal::MergedView
 			mergedRoom.actors.clear();
 			if (a_slot == 0) {
 				StreetMerge::Hide();
-				::Render::Backend::SetInteriorSun(false);
-				::Render::Backend::SetMergedFog(std::nullopt);
-				::Render::Backend::SetFrontFog(std::nullopt);
+				::Render::Backend::Current().SetInteriorSun(false);
+				::Render::Backend::Current().SetMergedFog(std::nullopt);
+				::Render::Backend::Current().SetFrontFog(std::nullopt);
 				AimSunShadow(nullptr);
 			}
 			// Set again by the next update for the rooms still merged.
 			MergedCull::Set({});
-			::Render::Backend::SetMergedDoor(a_slot, std::nullopt);
-			::Render::Backend::SetMergedLighting(a_slot, std::nullopt);
-			::Render::Backend::SetMergedDaylight(a_slot, std::nullopt);
+			::Render::Backend::Current().SetMergedDoor(a_slot, std::nullopt);
+			::Render::Backend::Current().SetMergedLighting(a_slot, std::nullopt);
+			::Render::Backend::Current().SetMergedDaylight(a_slot, std::nullopt);
 			mergedRoom.door = 0;
 			mergedRoom.daylight = 0.0f;
 			mergedRoom.lightingTimer = 0.0f;
@@ -844,7 +844,7 @@ namespace Portal::MergedView
 
 	bool MergeSupported()
 	{
-		return mergeEnabled && ::Render::Backend::CanMerge();
+		return mergeEnabled && ::Render::Backend::Current().CanMerge();
 	}
 
 	bool Mergeable(const RE::TESObjectCELL* a_here, const RE::TESObjectCELL* a_behindDoor)
@@ -865,7 +865,7 @@ namespace Portal::MergedView
 	float StreetEyeScale(RE::FormID a_door)
 	{
 		const auto scene = ::Render::SceneMeter::Brightness();
-		const auto room = Portal::Snapshot::RoomBrightness(a_door);
+		const auto room = Pictures::Cache::RoomBrightness(a_door);
 		return scene && room ? std::min(1.0f, std::sqrt(*room / *scene)) : 1.0f;
 	}
 
@@ -1038,8 +1038,8 @@ namespace Portal::MergedView
 		if (!slot) {
 			return;
 		}
-		::Render::Backend::SetMergedDoor(slot, std::nullopt);
-		::Render::Backend::SetMergedLighting(slot, std::nullopt);
+		::Render::Backend::Current().SetMergedDoor(slot, std::nullopt);
+		::Render::Backend::Current().SetMergedLighting(slot, std::nullopt);
 		auto* cell = rooms[slot]->beside.cell;
 		rooms[0] = std::move(rooms[slot]);
 		rooms[slot].reset();
@@ -1076,8 +1076,8 @@ namespace Portal::MergedView
 
 	void MoveShownBeside(int a_slot, const Active& a_portal)
 	{
-		::Render::Backend::SetMergedDoor(0, std::nullopt);
-		::Render::Backend::SetMergedLighting(0, std::nullopt);
+		::Render::Backend::Current().SetMergedDoor(0, std::nullopt);
+		::Render::Backend::Current().SetMergedLighting(0, std::nullopt);
 		RemoteCell space;
 		std::swap(space, Manager::Space());
 		Selection::Kept().push_back(std::move(space));

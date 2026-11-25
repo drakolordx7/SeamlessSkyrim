@@ -13,6 +13,7 @@
 #include "Core/Doors/Swing.h"
 #include "Core/ImageSpace/Blend.h"
 #include "Core/Pictures/CacheRules.h"
+#include "Core/Pictures/Camera.h"
 #include "Core/Render/DoorwayPlanes.h"
 #include "Core/Selection/Ranking.h"
 
@@ -504,6 +505,29 @@ namespace
 		CHECK(Near(P::GeometricMean({ 1.0f, 4.0f }), 2.0f) && P::GeometricMean({}) == 0.0f);
 		CHECK(P::ShouldForget(P::kKeptUnused, false) && !P::ShouldForget(P::kKeptUnused, true) && !P::ShouldForget(P::kKeptUnused / 2, false));
 	}
+
+	void PictureCamera()
+	{
+		namespace C = Core::Pictures::Camera;
+		// A doorway 100 wide and 200 high in the plane y = 0, seen from y = -300.
+		const Core::Quad corners{ Core::Vec3{ 0, 0, 0 }, Core::Vec3{ 100, 0, 0 }, Core::Vec3{ 0, 0, 200 }, Core::Vec3{ 100, 0, 200 } };
+		const Core::Vec3 eye{ 50, -300, 100 };
+		const C::Frame   frame(corners, eye);
+		CHECK(Near(frame.inward, { 0, 1, 0 }) || Near(frame.inward, { 0, -1, 0 }));
+		// Its normal turned away from the eye: the room behind the door is the positive side.
+		CHECK(frame.inward.Dot(corners[0] - eye) > 0.0f);
+		CHECK(Near(frame.PlaceOf(frame.PointAt({ 0.25f, 0.5f, 30.0f }))[0], 0.25f) && Near(frame.PlaceOf(frame.PointAt({ 0.25f, 0.5f, 30.0f }))[2], 30.0f));
+		CHECK(Near(C::AspectOf(corners), 0.75f) && Near(C::AspectOf({ Core::Vec3{}, Core::Vec3{ 600, 0, 0 }, Core::Vec3{ 0, 0, 100 }, Core::Vec3{} }), C::kWidest));
+		const auto [width, height] = C::SizeFor(C::kDoorwayOnly, 192, 0.75f);
+		CHECK(width == 144 && height == 192 && C::WidthFor(192) == 144);
+		// The capture camera's image spans exactly its extent of the door's plane: the extent's corners
+		// land on the corners of clip space.
+		const auto& shape = C::kRoomCamera;
+		const auto  camera = C::For(frame, shape, C::PlaceOf(shape, 0.0f));
+		const auto  clip = C::Clip(camera, frame, shape.extent[0], shape.extent[2]);
+		const auto  opposite = C::Clip(camera, frame, shape.extent[1], shape.extent[3]);
+		CHECK(Near(std::abs(clip[0]), 1.0f) && Near(std::abs(clip[1]), 1.0f) && Near(clip[0], -opposite[0]) && Near(clip[1], -opposite[1]));
+	}
 }
 
 int main()
@@ -516,6 +540,7 @@ int main()
 	Run("crossing approach and timers", CrossingApproach);
 	Run("panel, leaf swing and doorway planes", PanelAndPlanes);
 	Run("blend weights and picture cache rules", Rules);
+	Run("picture camera geometry", PictureCamera);
 	std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
 	return failures ? 1 : 0;
 }

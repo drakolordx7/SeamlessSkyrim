@@ -63,7 +63,7 @@ namespace
 		RE::NiPoint3 at;
 		bool         interior = false;
 	};
-	// One per room merged at once (Render::Backend::MergedRooms), by the room's slot: each room's
+	// One per room merged at once (Render::Backend::Interface::MergedRooms), by the room's slot: each room's
 	// lights are measured in its own Havok world, placed by its own door. Slot 0 also serves the
 	// portal pass.
 	struct Space

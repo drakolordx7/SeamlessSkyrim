@@ -64,7 +64,7 @@ namespace Render::Frame
 			{
 				auto*      sky = RE::Sky::GetSingleton();
 				const auto mode = sky->mode;
-				if (Portal::StreetMerge::Merged() && ::Render::Backend::MasksPrecipitation()) {
+				if (Portal::StreetMerge::Merged() && ::Render::Backend::Current().MasksPrecipitation()) {
 					sky->mode = RE::Sky::Mode::kFull;
 				}
 				original(a_precip, a_delta);

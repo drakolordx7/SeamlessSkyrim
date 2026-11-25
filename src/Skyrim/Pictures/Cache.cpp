@@ -158,7 +158,7 @@ namespace Pictures::Cache
 				std::uint32_t header[4]{};
 				// No larger than the largest ever written, the capture camera's at the largest size: a
 				// damaged file's header asked for gigabytes of texels before its read could fail.
-				const auto [widest, highest] = Camera::SizeFor(Camera::kRoomCamera.extent, Camera::kMaxHeight, Camera::kWidest);  // the room's is the wider
+				const auto [widest, highest] = Camera::SizeFor(Camera::kRoomCamera.extent, kMaxHeight, Camera::kWidest);  // the room's is the wider
 				if (file.read(reinterpret_cast<char*>(header), sizeof(header)) && Core::Pictures::HeaderValid(header, widest, highest)) {
 					float          place[4]{};
 					Camera::Extent extent = Camera::kDoorwayOnly;

@@ -5,6 +5,7 @@
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Doors/Hold.h"
 #include "Skyrim/Doors/Pair.h"
+#include "Skyrim/Pictures/Cache.h"
 #include "Skyrim/Pictures/DoorwaySnapshot.h"
 #include "Skyrim/Portal/LightOcclusion.h"
 #include "Skyrim/Portal/LightScene.h"
@@ -28,7 +29,7 @@ namespace Bridge::PortalDiagnostics
 		json rooms = json::array();
 		for (const auto& room : MergedView::Rooms()) {
 			if (room.door) {
-				const auto brightness = Portal::Snapshot::RoomBrightness(room.door);
+				const auto brightness = Pictures::Cache::RoomBrightness(room.door);
 				rooms.push_back({ { "door", std::format("{:08X}", room.door) }, { "brightness", brightness ? json(*brightness) : json() },
 					{ "lightScale", 1.0f + (MergedView::StreetEyeScale(room.door) - 1.0f) * room.daylight }, { "daylight", room.daylight } });
 			}
@@ -234,7 +235,7 @@ namespace Bridge::PortalDiagnostics
 				 }
 				 return out;
 			 }() },
-			{ "doorwayPictures", Portal::Snapshot::Describe() },
+			{ "doorwayPictures", Pictures::Describe() },
 			{ "remoteStepping", RemoteCell::SteppingEnabled() },
 			{ "active", portal ? json{ { "sourceDoor", std::format("{:08X}", portal->sourceDoor) }, { "linkedDoor", std::format("{:08X}", portal->linkedDoor) }, { "mapping", [&] {
 										 try {
@@ -293,7 +294,7 @@ namespace Bridge::PortalDiagnostics
 					 }
 				 }
 				 return json{ { "setting", Selection::ShownRooms() }, { "pauseUnseen", MergedView::PauseUnseenRooms() }, { "beside", beside }, { "parked", parked },
-					 { "backendRooms", ::Render::Backend::MergedRooms() } };
+					 { "backendRooms", ::Render::Backend::Current().MergedRooms() } };
 			 }() },
 			{ "lightOcclusion", LightOcclusion::Describe() },
 			{ "mergedCull", MergedCull::Describe() },

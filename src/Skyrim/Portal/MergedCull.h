@@ -13,12 +13,12 @@ namespace Portal::MergedCull
 {
 	struct Room
 	{
-		Render::DoorRect                            door;        // as sent to Render::Backend::SetMergedDoor
+		Render::DoorRect                            door;        // as sent to Render::Backend::Interface::SetMergedDoor
 		std::vector<RE::TESObjectCELL*>             cells;       // merged; their 3D is culled
 		std::vector<RE::NiPointer<RE::NiAVObject>> keep;        // drawn as the engine has them (the room's door)
 		bool                                        doorShut = false;
 		// The street merged into an interior (its distant land and persistent references in roots),
-		// culled at most as far as SetStreetMode allows.
+		// never culled: it casts the sun's shadows into the room.
 		bool                                        street = false;
 		std::vector<RE::NiPointer<RE::NiAVObject>> roots;
 	};
@@ -28,7 +28,6 @@ namespace Portal::MergedCull
 		kOff,
 		kWhole,     // only all or nothing
 		kShapes,    // and shape by shape
-		kHideAll,   // diagnostics: the room hidden whatever is seen (what is to be won)
 	};
 
 	// kDataLoaded: the engine's cull of room bounds, opened for merged rooms (see RoomCullHook).
@@ -44,10 +43,6 @@ namespace Portal::MergedCull
 	void BeforeView();
 	void AfterView();
 
-	void                 SetMode(Mode a_mode);
-	// On by default: an interior's rooms culled through their portals (see Walk). Off for comparing.
-	void                 SetRoomCull(bool a_on);
-	// kOff (the default), kWhole or kShapes. Diagnostics: both change the sun's shadows, see Cull.
-	void                 SetStreetMode(Mode a_mode);
-	[[nodiscard]] json   Describe();
+	void               SetMode(Mode a_mode);
+	[[nodiscard]] json Describe();
 }

@@ -61,7 +61,7 @@ namespace Render::PortalPass
 
 	[[nodiscard]] std::array<RE::NiPoint3, 4> DoorwayQuad(const Portal::Active& a_portal, const RE::NiPoint3& a_viewer);
 
-	// A portal pass drawn with the doorway picture's own camera (Portal::Snapshot::CaptureCamera)
+	// A portal pass drawn with the doorway picture's own camera (Pictures::CaptureCamera)
 	// this frame: its image is in the targets not on screen, with these clip distances.
 	struct CaptureDrawn
 	{
@@ -86,7 +86,7 @@ namespace Render::PortalPass
 	// a_fullTarget: the whole target at its size, unjittered, as a doorway picture's capture is
 	// drawn (a diagnostic file wants that too); otherwise the picture for the doorway on screen.
 	// What it did, for portal_status (empty outside agent sessions).
-	json Draw(const Portal::Active& a_portal, const ScreenRect& a_doorway, const std::optional<Portal::Snapshot::CaptureCamera>& a_capture, bool a_fullTarget);
+	json Draw(const Portal::Active& a_portal, const ScreenRect& a_doorway, const std::optional<Pictures::CaptureCamera>& a_capture, bool a_fullTarget);
 
 	// The cells' actors whose 3D carries NiAVObject::kNotVisible get it cleared for a cull; the
 	// returned ones are to have it back afterwards, for the engine.

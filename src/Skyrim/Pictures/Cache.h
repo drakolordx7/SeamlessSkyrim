@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Pictures/CacheRules.h"
-#include "Skyrim/Pictures/Camera.h"
+#include "Skyrim/Pictures/PictureSize.h"
 
 #include <d3d11.h>
 
