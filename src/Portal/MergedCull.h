@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Render/Wire.h"
+
 // A room merged into the world (RemoteCell::Merge) is drawn by the engine's main pass, which culls
 // only against the camera's view; the doorway mask then throws away every pixel of it not seen
 // through the doorway. Looking at the house, the whole room behind its wall was set up and drawn
@@ -11,7 +13,7 @@ namespace Portal::MergedCull
 {
 	struct Room
 	{
-		float                                       door[12]{};  // as sent to Render::Backend::SetMergedDoor
+		Render::DoorRect                            door;        // as sent to Render::Backend::SetMergedDoor
 		std::vector<RE::TESObjectCELL*>             cells;       // merged; their 3D is culled
 		std::vector<RE::NiPointer<RE::NiAVObject>> keep;        // drawn as the engine has them (the room's door)
 		bool                                        doorShut = false;

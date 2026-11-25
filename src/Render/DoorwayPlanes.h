@@ -1,6 +1,8 @@
 #pragma once
 
-// The space seen through a doorway, as planes. Shared by the native mask (Render/NativeMask.cpp),
+#include "Render/Wire.h"
+
+// The space seen through a doorway, as planes. Shared by the native mask (Render/Native/NativeMask.cpp),
 // which cuts draws at these planes, and the merged room's cull (Portal/MergedCull.cpp), which
 // leaves out whole shapes beyond them: both must agree on what is seen, or a shape the mask would
 // draw gets culled.
@@ -11,28 +13,7 @@
 // X is convex: the door plane and the four planes through the camera and the doorway's edges.
 namespace Render::Doorway
 {
-	struct Door
-	{
-		RE::NiPoint3 center;
-		RE::NiPoint3 normal;  // into the merged space, horizontal
-		RE::NiPoint3 right;   // horizontal
-		float        halfWidth = 0.0f;
-		float        halfHeight = 0.0f;
-		bool         cameraMerged = false;
-
-		// The layout of Render::Backend::SetMergedDoor's array.
-		static Door From(const float* a_door)
-		{
-			Door d;
-			d.center = { a_door[0], a_door[1], a_door[2] };
-			d.normal = { a_door[3], a_door[4], a_door[5] };
-			d.right = { a_door[6], a_door[7], a_door[8] };
-			d.halfWidth = a_door[9];
-			d.halfHeight = a_door[10];
-			d.cameraMerged = a_door[11] > 0.5f;
-			return d;
-		}
-	};
+	using Door = DoorRect;
 
 	// Within this of the door plane a pixel stays with the camera's space (the two spaces' door
 	// frames stand in the same place and would z-fight). The Community Shaders fork uses the same.

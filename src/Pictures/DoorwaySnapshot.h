@@ -13,7 +13,7 @@
 // through it.
 namespace Portal::Snapshot
 {
-	// The main view as the doorway is drawn with (Render's MainView).
+	// The main view as the doorway is drawn with (Render::MainView).
 	struct View
 	{
 		float        viewProj[16];                    // camera-relative, row vectors, as drawn (jittered)
@@ -129,19 +129,9 @@ namespace Portal::Snapshot
 	// use, from memory. Each door is taken again when next seen open.
 	int DeleteAll();
 
-	// Brightness as an eye judges a scene: the geometric mean of the luminance, in the main scene's
-	// units (before tone mapping). Skyrim has no lasting eye adaptation (the tone map's exposure is
-	// the ratio of two adapted copies of the same average, 1 once settled), so a room seen from a
-	// sunlit street came out as bright as from inside it; these are what Manager::RoomLightScale
-	// compares instead.
-	//
-	// Render, after the world is drawn: measures a_scene (the main scene's view), read back a few
-	// frames later. a_width, a_height: its viewport in pixels.
-	void MeasureScene(void* a_scene, float a_width, float a_height);
-	// The player's view, as an eye takes a second or so to adapt to it; none before the first reading.
-	std::optional<float> SceneBrightness();
-	// The room behind a door as drawn with its own light (its picture, divided by the light scale it
-	// was taken with). Without one, the rooms' with pictures; none before any.
+	// How bright the room behind a door is drawn with its own light, in the units of
+	// Render::SceneMeter (Manager::RoomLightScale compares the two): its picture, divided by the
+	// light scale it was taken with. Without one, the rooms' with pictures; none before any.
 	std::optional<float> RoomBrightness(RE::FormID a_door);
 
 	json Describe();

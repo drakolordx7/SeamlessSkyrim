@@ -1,15 +1,14 @@
 #include "Render/Native/Native.h"
 
-#include "Portal/PortalManager.h"
+#include "Render/D3D.h"
 #include "Render/DoorwayPlanes.h"
+#include "Render/Native/Pass.h"
+#include "Render/SceneQuery.h"
 
 #include <bit>
 
-#include <d3d11.h>
 #include <d3d11shader.h>
-#include <d3dcompiler.h>
 
-#pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "dxguid.lib")
 
 // The doorway mask without changing the game's shaders.
@@ -23,8 +22,8 @@
 // clip distances are interpolated perspective-correctly.
 //
 // The rule is the fork's (X, see Render/DoorwayPlanes.h). A shape of the space the camera is not
-// in is kept inside X (one draw, five clip distances). A shape of the camera's own space is kept
-// outside X; that isn't convex, so it is drawn in up to five disjoint convex pieces (not P0; P0 and
+// in is kept inside X (one draw, up to six clip distances). A shape of the camera's own space is kept
+// outside X; that isn't convex, so it is drawn in up to six disjoint convex pieces (not P0; P0 and
 // not P1; P0, P1 and not P2; ...). Shapes whose bounds lie wholly on one side are drawn once,
 // unchanged or not at all. Through a city gate X has a sixth plane, where its far gate stands.
 //
@@ -35,23 +34,23 @@ namespace
 {
 	using Render::Native::LightingSwap;
 
-	// ---- state set from the portal code (main thread, as is rendering) ------------------------
-
+	namespace Pass = Render::Native::Pass;
+	using Render::ClipPlane;
 	using Render::Doorway::Door;
 	using Render::Doorway::Plane;
 	using Render::Doorway::Side;
 	using Render::Doorway::SideOf;
 
-	std::mutex                         stateLock;
-	std::optional<Door>                door;        // under stateLock
-	float                              gatePassage = 0.0f;  // under stateLock; Render::Backend::SetGatePassage
-	std::optional<std::array<float, 4>> portalClip;  // under stateLock
-	std::atomic<bool>                  portalPass = false;
-	bool                               ready = false;
+	// Set from the portal code (main thread, as is rendering).
+	std::mutex                stateLock;
+	std::optional<Door>       door;                // under stateLock
+	float                     gatePassage = 0.0f;  // under stateLock; Render::Backend::SetGatePassage
+	std::optional<ClipPlane>  portalClip;          // under stateLock
+	std::atomic<bool>         portalPass = false;
+	bool                      ready = false;
 
-	// ---- one draw's cut, worked out at the shader's per-draw setup -------------------------
-
-	// X's five planes, and a city gate's passage end.
+	// One draw's cut, worked out at the shader's per-draw setup: X's five planes, and a city gate's
+	// passage end.
 	constexpr int kPlanesPerPiece = 6;
 	constexpr int kMaxPieces = 6;
 
@@ -89,35 +88,6 @@ namespace
 		bool   valid = false;
 	} clipTransform;
 
-	bool Invert(const double a_m[16], double a_out[16])
-	{
-		double inv[16];
-		inv[0] = a_m[5] * a_m[10] * a_m[15] - a_m[5] * a_m[11] * a_m[14] - a_m[9] * a_m[6] * a_m[15] + a_m[9] * a_m[7] * a_m[14] + a_m[13] * a_m[6] * a_m[11] - a_m[13] * a_m[7] * a_m[10];
-		inv[4] = -a_m[4] * a_m[10] * a_m[15] + a_m[4] * a_m[11] * a_m[14] + a_m[8] * a_m[6] * a_m[15] - a_m[8] * a_m[7] * a_m[14] - a_m[12] * a_m[6] * a_m[11] + a_m[12] * a_m[7] * a_m[10];
-		inv[8] = a_m[4] * a_m[9] * a_m[15] - a_m[4] * a_m[11] * a_m[13] - a_m[8] * a_m[5] * a_m[15] + a_m[8] * a_m[7] * a_m[13] + a_m[12] * a_m[5] * a_m[11] - a_m[12] * a_m[7] * a_m[9];
-		inv[12] = -a_m[4] * a_m[9] * a_m[14] + a_m[4] * a_m[10] * a_m[13] + a_m[8] * a_m[5] * a_m[14] - a_m[8] * a_m[6] * a_m[13] - a_m[12] * a_m[5] * a_m[10] + a_m[12] * a_m[6] * a_m[9];
-		inv[1] = -a_m[1] * a_m[10] * a_m[15] + a_m[1] * a_m[11] * a_m[14] + a_m[9] * a_m[2] * a_m[15] - a_m[9] * a_m[3] * a_m[14] - a_m[13] * a_m[2] * a_m[11] + a_m[13] * a_m[3] * a_m[10];
-		inv[5] = a_m[0] * a_m[10] * a_m[15] - a_m[0] * a_m[11] * a_m[14] - a_m[8] * a_m[2] * a_m[15] + a_m[8] * a_m[3] * a_m[14] + a_m[12] * a_m[2] * a_m[11] - a_m[12] * a_m[3] * a_m[10];
-		inv[9] = -a_m[0] * a_m[9] * a_m[15] + a_m[0] * a_m[11] * a_m[13] + a_m[8] * a_m[1] * a_m[15] - a_m[8] * a_m[3] * a_m[13] - a_m[12] * a_m[1] * a_m[11] + a_m[12] * a_m[3] * a_m[9];
-		inv[13] = a_m[0] * a_m[9] * a_m[14] - a_m[0] * a_m[10] * a_m[13] - a_m[8] * a_m[1] * a_m[14] + a_m[8] * a_m[2] * a_m[13] + a_m[12] * a_m[1] * a_m[10] - a_m[12] * a_m[2] * a_m[9];
-		inv[2] = a_m[1] * a_m[6] * a_m[15] - a_m[1] * a_m[7] * a_m[14] - a_m[5] * a_m[2] * a_m[15] + a_m[5] * a_m[3] * a_m[14] + a_m[13] * a_m[2] * a_m[7] - a_m[13] * a_m[3] * a_m[6];
-		inv[6] = -a_m[0] * a_m[6] * a_m[15] + a_m[0] * a_m[7] * a_m[14] + a_m[4] * a_m[2] * a_m[15] - a_m[4] * a_m[3] * a_m[14] - a_m[12] * a_m[2] * a_m[7] + a_m[12] * a_m[3] * a_m[6];
-		inv[10] = a_m[0] * a_m[5] * a_m[15] - a_m[0] * a_m[7] * a_m[13] - a_m[4] * a_m[1] * a_m[15] + a_m[4] * a_m[3] * a_m[13] + a_m[12] * a_m[1] * a_m[7] - a_m[12] * a_m[3] * a_m[5];
-		inv[14] = -a_m[0] * a_m[5] * a_m[14] + a_m[0] * a_m[6] * a_m[13] + a_m[4] * a_m[1] * a_m[14] - a_m[4] * a_m[2] * a_m[13] - a_m[12] * a_m[1] * a_m[6] + a_m[12] * a_m[2] * a_m[5];
-		inv[3] = -a_m[1] * a_m[6] * a_m[11] + a_m[1] * a_m[7] * a_m[10] + a_m[5] * a_m[2] * a_m[11] - a_m[5] * a_m[3] * a_m[10] - a_m[9] * a_m[2] * a_m[7] + a_m[9] * a_m[3] * a_m[6];
-		inv[7] = a_m[0] * a_m[6] * a_m[11] - a_m[0] * a_m[7] * a_m[10] - a_m[4] * a_m[2] * a_m[11] + a_m[4] * a_m[3] * a_m[10] + a_m[8] * a_m[2] * a_m[7] - a_m[8] * a_m[3] * a_m[6];
-		inv[11] = -a_m[0] * a_m[5] * a_m[11] + a_m[0] * a_m[7] * a_m[9] + a_m[4] * a_m[1] * a_m[11] - a_m[4] * a_m[3] * a_m[9] - a_m[8] * a_m[1] * a_m[7] + a_m[8] * a_m[3] * a_m[5];
-		inv[15] = a_m[0] * a_m[5] * a_m[10] - a_m[0] * a_m[6] * a_m[9] - a_m[4] * a_m[1] * a_m[10] + a_m[4] * a_m[2] * a_m[9] + a_m[8] * a_m[1] * a_m[6] - a_m[8] * a_m[2] * a_m[5];
-		const double det = a_m[0] * inv[0] + a_m[1] * inv[4] + a_m[2] * inv[8] + a_m[3] * inv[12];
-		if (std::abs(det) < 1e-30) {
-			return false;
-		}
-		for (int i = 0; i < 16; ++i) {
-			a_out[i] = inv[i] / det;
-		}
-		return true;
-	}
-
 	// The renderer's current camera (main view, or the portal camera inside the portal pass):
 	// SubmitAccumulator loads it into the shadow state, and the vertex shaders project with it.
 	bool UpdateClipTransform()
@@ -136,7 +106,7 @@ namespace
 		for (int i = 0; i < 16; ++i) {
 			md[i] = m[i];
 		}
-		clipTransform.valid = Invert(md, clipTransform.inverse);
+		clipTransform.valid = Render::D3D::Invert(md, clipTransform.inverse);
 		return clipTransform.valid;
 	}
 
@@ -175,20 +145,9 @@ namespace
 		return { eye.x, eye.y, eye.z };
 	}
 
-	bool InWorldPass()
-	{
-		const auto& shadow = RE::BSGraphics::RendererShadowState::GetSingleton()->GetRuntimeData();
-		if (shadow.depthStencil != RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN) {
-			return false;  // shadow maps and other targets
-		}
-		auto* accumulator = RE::BSShaderAccumulator::GetCurrentAccumulator();
-		auto* world = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
-		return accumulator && world && accumulator->GetRuntimeData().activeShadowSceneNode == world;
-	}
-
 	void PlanPortalPass(const RE::BSRenderPass* a_pass)
 	{
-		std::optional<std::array<float, 4>> clip;
+		std::optional<ClipPlane> clip;
 		{
 			std::scoped_lock lock(stateLock);
 			clip = portalClip;
@@ -196,7 +155,7 @@ namespace
 		if (!clip || !UpdateClipTransform()) {
 			return;
 		}
-		const Plane plane{ { (*clip)[0], (*clip)[1], (*clip)[2] }, -static_cast<double>((*clip)[3]) };
+		const Plane plane{ { clip->normal.x, clip->normal.y, clip->normal.z }, -static_cast<double>(clip->offset) };
 		switch (SideOf(plane, a_pass->geometry->worldBound)) {
 		case Side::kInside:
 			return;
@@ -222,10 +181,10 @@ namespace
 			d = door;
 			passage = gatePassage;
 		}
-		if (!d || !InWorldPass() || Portal::Manager::IsPlayerShape(a_pass->geometry)) {
+		if (!d || !Pass::InMainWorldPass() || Render::Scene().IsPlayerShape(a_pass->geometry)) {
 			return;
 		}
-		const bool mergedSpace = Portal::Manager::IsMergedShape(a_pass->geometry);
+		const bool mergedSpace = Render::Scene().IsMergedShape(a_pass->geometry);
 		const bool cameraSpace = mergedSpace == d->cameraMerged;
 		Plane doorway[5];
 		if (!Render::Doorway::Planes(*d, Eye(), doorway)) {
@@ -313,11 +272,7 @@ namespace
 		if (!ready || !a_pass || !a_pass->geometry) {
 			return;
 		}
-		// The portal pass is told apart by its light scene rather than by Begin/EndPortalPass alone:
-		// a pass left unended (an exception in between) must not cut the world.
-		auto*      accumulator = RE::BSShaderAccumulator::GetCurrentAccumulator();
-		auto*      portalScene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[3];
-		const bool portalScenePass = accumulator && portalScene && accumulator->GetRuntimeData().activeShadowSceneNode == portalScene;
+		const bool portalScenePass = Pass::InPortalScene();
 		if (portalPass && portalScenePass) {
 			PlanPortalPass(a_pass);
 		} else if (!portalScenePass) {
@@ -330,7 +285,7 @@ namespace
 		job.active = false;
 	}
 
-	// ---- geometry shaders, one per vertex shader output signature ----------------------------
+	// Geometry shaders, one per vertex shader output signature.
 
 	struct Element
 	{
@@ -436,23 +391,6 @@ namespace
 			members, copies, position);
 	}
 
-	ID3D11DeviceContext* Context()
-	{
-		return reinterpret_cast<ID3D11DeviceContext*>(RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().context);
-	}
-
-	ID3D11Device* Device()
-	{
-		ID3D11Device* device = nullptr;
-		if (auto* context = Context()) {
-			context->GetDevice(&device);
-		}
-		if (device) {
-			device->Release();  // the engine holds it for the whole session
-		}
-		return device;
-	}
-
 	struct ShaderCache
 	{
 		std::unordered_map<const void*, ID3D11GeometryShader*>      byVertexShader;  // nullptr: no cut possible
@@ -468,22 +406,15 @@ namespace
 		if (!source) {
 			return nullptr;
 		}
-		const auto started = std::chrono::steady_clock::now();
-		ID3DBlob*  code = nullptr;
-		ID3DBlob*  errors = nullptr;
-		const auto result = ::D3DCompile(source->data(), source->size(), "SeamlessClipGS", nullptr, nullptr, "main", "gs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
+		const auto  started = std::chrono::steady_clock::now();
+		std::string errors;
+		auto*       code = Render::D3D::Compile(*source, "SeamlessClipGS", "main", "gs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, &errors);
 		shaders.compileMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-		if (FAILED(result) || !code) {
+		if (!code) {
 			if (shaders.failed++ < 10) {
-				logger::warn("native mask: geometry shader didn't compile: {}\n{}", errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?", *source);
-			}
-			if (errors) {
-				errors->Release();
+				logger::warn("native mask: geometry shader didn't compile: {}\n{}", errors, *source);
 			}
 			return nullptr;
-		}
-		if (errors) {
-			errors->Release();
 		}
 		// It must take exactly what the vertex shader gives, and give the pixel shader the same in
 		// the same places; the compiler's packing is assumed to repeat the original's.
@@ -506,7 +437,7 @@ namespace
 			if (shaders.failed++ < 10) {
 				logger::warn("native mask: geometry shader's signature doesn't match its vertex shader's (packing differs); those shapes aren't cut:\n{}", *source);
 			}
-		} else if (auto* device = Device(); !device || FAILED(device->CreateGeometryShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &shader))) {
+		} else if (auto* device = Render::D3D::Device(); !device || FAILED(device->CreateGeometryShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &shader))) {
 			shader = nullptr;
 			++shaders.failed;
 		} else {
@@ -543,8 +474,6 @@ namespace
 		return shader;
 	}
 
-	// ---- the draw calls ---------------------------------------------------------------------
-
 	ID3D11Buffer* planeBuffer = nullptr;
 
 	bool EnsurePlaneBuffer()
@@ -552,7 +481,7 @@ namespace
 		if (planeBuffer) {
 			return true;
 		}
-		auto* device = Device();
+		auto* device = Render::D3D::Device();
 		if (!device) {
 			return false;
 		}
@@ -728,8 +657,6 @@ namespace
 		Masked(a_context, [&] { original(a_context, a_count, a_instances, a_start, a_startInstance); });
 	}
 
-	// ---- the shaders' per-draw setup -----------------------------------------------------------
-
 	// BSShader vfuncs 6 (SetupGeometry) and 7 (RestoreGeometry) bracket each pass's draw in the
 	// batch renderer (SetupAndDrawPass, ID 107644): the cut is planned at the first and dropped at
 	// the second, and the draw calls between them get it.
@@ -800,14 +727,10 @@ namespace Render::Native
 		return ready;
 	}
 
-	void SetDoor(const float* a_door)
+	void SetDoor(const std::optional<DoorRect>& a_door)
 	{
 		std::scoped_lock lock(stateLock);
-		if (!a_door) {
-			door.reset();
-			return;
-		}
-		door = Door::From(a_door);
+		door = a_door;
 	}
 
 	void SetGatePassage(float a_depth)
@@ -822,14 +745,10 @@ namespace Render::Native
 		return door.has_value();
 	}
 
-	void SetPortalClip(const float* a_plane)
+	void SetPortalClip(const std::optional<ClipPlane>& a_plane)
 	{
 		std::scoped_lock lock(stateLock);
-		if (!a_plane) {
-			portalClip.reset();
-		} else {
-			portalClip = std::array<float, 4>{ a_plane[0], a_plane[1], a_plane[2], a_plane[3] };
-		}
+		portalClip = a_plane;
 	}
 
 	void SetPortalPass(bool a_active)

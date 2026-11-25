@@ -21,7 +21,10 @@
 #include "Portal/LightScene.h"
 #include "Portal/MergedCull.h"
 #include "Portal/NpcTravel.h"
-#include "Render/PortalRender.h"
+#include "Render/Frame.h"
+#include "Render/SceneMeter.h"
+#include "Render/SceneQuery.h"
+#include "Render/SpaceLighting.h"
 #include "Portal/Travel.h"
 #include "Spaces/RemoteCell.h"
 #include "Spaces/Tuning.h"
@@ -220,7 +223,7 @@ namespace
 		// Shader properties whose "casts shadows" was taken off while merged (FinishMarkPass).
 		std::vector<RE::NiPointer<RE::BSShaderProperty>> unshadowed;
 		float                                lightingTimer = 0.0f;
-		std::optional<std::array<float, 19>> lighting;
+		std::optional<Render::SpaceLight>    lighting;
 		RE::FormID                           door = 0;         // the door in the player's space it is merged behind
 		float                                daylight = 0.0f;  // as sent (Render::Backend::SetMergedDaylight)
 		// Actor 3D moved out of its cell's actor node while merged, with the node to put it back in.
@@ -1544,7 +1547,7 @@ namespace
 	// - portal pass with a mergeable space on the other side (inside, going out): crossing as the
 	//   player reaches the plane; the camera, still inside, is then in the merged room;
 	// - portal pass otherwise (interior to interior): a camera left on the far side of a portal
-	//   can't be drawn well (PortalRender's "camera behind" composite), so it is pulled in to reach
+	//   can't be drawn well (the doorway quad's "camera behind" composite, Pictures/Composite.cpp), so it is pulled in to reach
 	//   the doorway together with the player (Portal::CameraLimit).
 	// Returns the camera's distance limit for this frame.
 	// Feet at the doorway's own height: no lower than a step below the panel's bottom edge, no
@@ -1730,7 +1733,7 @@ namespace
 		if (auto* playerCamera = RE::PlayerCamera::GetSingleton(); !merged && playerCamera && playerCamera->IsInFirstPerson()) {
 			const auto* worldCamera = RE::Main::WorldRootCamera();
 			const float nearPlane = worldCamera ? worldCamera->GetRuntimeData2().viewFrustum.fNear : 15.0f;
-			// A city gate (outdoors to outdoors) keeps its picture in front of its panel (PortalRender's IsGate).
+			// A city gate (outdoors to outdoors) keeps its picture in front of its panel (Render::PortalPass::IsGate).
 			auto*       here = a_player->GetParentCell();
 			const bool  gate = here && !here->IsInteriorCell() && !a_portal.cell->IsInteriorCell();
 			const float pictureDepth = gate ? -(mapping.halfDepth + 2.0f) : mapping.halfDepth + 2.0f;
@@ -2102,9 +2105,27 @@ namespace
 
 namespace Portal::Manager
 {
+	namespace
+	{
+		// What the renderers ask about the shapes they draw (Render::SceneQuery).
+		class RenderedScene final : public ::Render::SceneQuery
+		{
+		public:
+			bool IsMergedShape(const RE::BSGeometry* a_shape) const override { return Portal::Manager::IsMergedShape(a_shape); }
+			bool IsPlayerShape(const RE::BSGeometry* a_shape) const override { return Portal::Manager::IsPlayerShape(a_shape); }
+			int  MergedRoomOf(const RE::BSGeometry* a_shape) const override { return Portal::Manager::MergedRoomOf(a_shape); }
+
+			RE::ShadowSceneNode* MergedRoomScene(int a_slot) const override { return Portal::Manager::MergedRoomScene(a_slot); }
+
+			const std::vector<RE::TESObjectCELL*>& RemoteCells() const override { return Portal::Manager::RemoteCells(); }
+		} sceneQuery;
+	}
+
 	void Install()
 	{
 		Portal::Doors::SetHost({ .prompt = Prompt, .hasPicture = Portal::Snapshot::HasPicture, .spaceShown = SpaceShown, .portalLink = PortalLink });
+		// Before the fork can ask, whether or not portals are on.
+		::Render::RegisterScene(sceneQuery);
 		const auto ini = Paths::PluginDirectory() / "SeamlessSkyrim.ini";
 		enabled = ::GetPrivateProfileIntW(L"Portals", L"bEnabled", 1, ini.c_str()) != 0;
 		mergeEnabled = ::GetPrivateProfileIntW(L"Portals", L"bMerge", 1, ini.c_str()) != 0;
@@ -2153,8 +2174,8 @@ namespace Portal::Manager
 		::Render::Backend::Install();
 		Portal::RemoteCell::InstallStepHook(stepRemote);
 		Portal::RemoteCell::InstallGridHook();
-		Portal::Render::Install();
-		Portal::Render::Prewarm();
+		Render::Frame::Install();
+		Render::Frame::Prewarm();
 		Portal::Snapshot::Prewarm();
 		Portal::Travel::Install();
 		Portal::CameraLimit::Install();
@@ -2707,7 +2728,7 @@ namespace Portal::Manager
 			LightOcclusion::SetWorld(0, remoteCell ? remoteCell->GetbhkWorld() : nullptr, toPhysics, roomDoor,
 				remoteCell && remoteCell->IsInteriorCell());
 			// Each room merged beside it in its own Havok world, from its own door.
-			for (int slot = 1; slot < ::Render::Backend::kMaxMergedRooms; ++slot) {
+			for (int slot = 1; slot < ::Render::kMaxRooms; ++slot) {
 				const auto beside = std::ranges::find(besideRooms, slot, &BesideRoom::slot);
 				auto*      space = beside != besideRooms.end() ? KeptSpace(beside->cell) : nullptr;
 				const auto mapping = space ? Doors::TryCompute(Active{ beside->sourceDoor, beside->linkedDoor, beside->cell, space->Generation() }) : std::nullopt;
@@ -2980,7 +3001,7 @@ namespace Portal::Manager
 		// as it is.
 		float StreetEyeScale(RE::FormID a_door)
 		{
-			const auto scene = Portal::Snapshot::SceneBrightness();
+			const auto scene = ::Render::SceneMeter::Brightness();
 			const auto room = Portal::Snapshot::RoomBrightness(a_door);
 			return scene && room ? std::min(1.0f, std::sqrt(*room / *scene)) : 1.0f;
 		}
@@ -3013,7 +3034,7 @@ namespace Portal::Manager
 		for (const auto& beside : besideRooms) {
 			describe(*beside.state);
 		}
-		const auto scene = Portal::Snapshot::SceneBrightness();
+		const auto scene = ::Render::SceneMeter::Brightness();
 		return { { "sceneBrightness", scene ? json(*scene) : json() }, { "rooms", rooms }, { "streetEye", streetEye } };
 	}
 
@@ -3123,7 +3144,7 @@ namespace Portal::Manager
 			}
 		}
 
-		void SendMergedLighting(int a_slot, const float* a_lighting)
+		void SendMergedLighting(int a_slot, const std::optional<Render::SpaceLight>& a_lighting)
 		{
 			::Render::Backend::SetMergedLighting(a_slot, a_lighting);
 		}
@@ -3190,12 +3211,12 @@ namespace Portal::Manager
 			shadow->GetShadowDirectionalLightRuntimeData().sunVector = along;
 		}
 
-		void SendMergedFog(const float* a_fog)
+		void SendMergedFog(const std::optional<Render::SpaceFog>& a_fog)
 		{
 			::Render::Backend::SetMergedFog(a_fog);
 		}
 
-		void SendMergedDoor(int a_slot, const float* a_door)
+		void SendMergedDoor(int a_slot, const std::optional<Render::DoorRect>& a_door)
 		{
 			::Render::Backend::SetMergedDoor(a_slot, a_door);
 		}
@@ -3207,7 +3228,7 @@ namespace Portal::Manager
 		// worldspace's side of the gatehouse lies between them: Solitude's walls its passage up. Masked
 		// up to the far gate, the copy of the street beyond shows. The nearest such gate, as there is
 		// one mask.
-		std::optional<float> StandInGatePassage(float (&a_door)[12])
+		std::optional<float> StandInGatePassage(Render::DoorRect& a_door)
 		{
 			const auto         eye = RE::PlayerCharacter::GetSingleton()->GetPosition();
 			RE::TESObjectREFR* gate = nullptr;
@@ -3232,8 +3253,7 @@ namespace Portal::Manager
 			}
 			const auto  center = Doors::Center(gate);
 			const auto  size = Doors::Size(gate);
-			const float values[12] = { center.x, center.y, center.z, inward.x, inward.y, 0.0f, inward.y, -inward.x, 0.0f, size.halfWidth, size.halfHeight, 0.0f };
-			std::ranges::copy(values, a_door);
+			a_door = Render::DoorRect::Upright(center, inward, size.halfWidth, size.halfHeight, false);
 			// A little past the far gate: the gatehouse's wall stands about its plane.
 			constexpr float kPastFarGate = 50.0f;
 			return depth + kPastFarGate;
@@ -3251,7 +3271,7 @@ namespace Portal::Manager
 		void UpdateGateMask(RE::TESObjectCELL* a_here)
 		{
 			std::optional<float> passage;
-			float                door[12];
+			Render::DoorRect     door;
 			const auto           portal = ActivePortal();
 			if (portal && ::Render::Backend::CanMaskGate() && !a_here->IsInteriorCell() && !portal->cell->IsInteriorCell()) {
 				if (const auto mapping = Doors::TryCompute(*portal)) {
@@ -3260,9 +3280,7 @@ namespace Portal::Manager
 					if (depth > ::Render::Doorway::kMargin) {
 						constexpr float kCellSize = 4096.0f;
 						passage = depth + kCellSize * Portal::RemoteCell::kNeighbourRadius;
-						const float values[12] = { mapping->sourceCenter.x, mapping->sourceCenter.y, mapping->sourceCenter.z, mapping->inward.x, mapping->inward.y, 0.0f,
-							mapping->inward.y, -mapping->inward.x, 0.0f, mapping->halfWidth, mapping->halfHeight, 0.0f };
-						std::ranges::copy(values, door);
+						door = Render::DoorRect::Upright(mapping->sourceCenter, mapping->inward, mapping->halfWidth, mapping->halfHeight, false);
 					}
 				}
 			}
@@ -3276,7 +3294,7 @@ namespace Portal::Manager
 				gateMasked = true;
 			} else if (std::exchange(gateMasked, false)) {
 				if (!remote.Merged()) {
-					SendMergedDoor(0, nullptr);
+					SendMergedDoor(0, std::nullopt);
 				}
 				::Render::Backend::SetGatePassage(0.0f);
 			}
@@ -3291,8 +3309,8 @@ namespace Portal::Manager
 		// go. These, each room's shapes and playerShapes are written in the manager's update and read
 		// by the renderer, both on the main thread, so without a lock: MergedRoomOf is asked several
 		// times for every draw.
-		std::array<const MergedRoom*, ::Render::Backend::kMaxMergedRooms>   roomsBySlot{};
-		std::array<RE::ShadowSceneNode*, ::Render::Backend::kMaxMergedRooms> scenesBySlot{};
+		std::array<const MergedRoom*, ::Render::kMaxRooms>   roomsBySlot{};
+		std::array<RE::ShadowSceneNode*, ::Render::kMaxRooms> scenesBySlot{};
 		// The street is merged into an interior (room 0): the water drawn is the street's
 		// (MergedRoomOf).
 		bool streetMerged = false;
@@ -3610,12 +3628,11 @@ namespace Portal::Manager
 			const float     clear = mapping.halfDepth + static_cast<float>(::Render::Doorway::kMargin) + 1.0f;
 			const float     shift = a_room.swing.Shut() ? clear : swung == linked && a_room.swing.Amount() < kNearlyShut ? -clear : 0.0f;
 			const auto      center = mapping.sourceCenter + mapping.inward * shift;
-			const float door[12] = { center.x, center.y, center.z, mapping.inward.x, mapping.inward.y, 0.0f, mapping.inward.y, -mapping.inward.x, 0.0f, mapping.halfWidth,
-				mapping.halfHeight, cameraInside ? 1.0f : 0.0f };
+			const auto door = Render::DoorRect::Upright(center, mapping.inward, mapping.halfWidth, mapping.halfHeight, cameraInside);
 			SendMergedDoor(a_slot, door);
 			{
 				MergedCull::Room cull;
-				std::ranges::copy(door, cull.door);
+				cull.door = door;
 				cull.cells = a_space.Cells();
 				// The merged space's door stands where the player's space's does: from outside it is
 				// the door seen, shut or swinging, through the doorway or not.
@@ -3644,7 +3661,7 @@ namespace Portal::Manager
 			// for a merged cell its per-actor pass reports them visible, yet nothing is drawn). Hung
 			// directly under the cell's 3D they are culled and drawn like everything else in the
 			// room; they go back where they were when the merge ends. The engine's "not visible"
-			// flag and drawn bits are overridden as well (see ActorCullHook in PortalRender).
+			// flag and drawn bits are overridden as well (see ActorCullHook in Render/Frame.cpp).
 			// The engine would hang them back into the actors' node every frame (ActorHangHook keeps
 			// it from doing so). Listed once each: listed every time they were hung, the list grew by
 			// the room's people every frame (28000 entries after a minute in Whiterun's market).
@@ -3654,7 +3671,7 @@ namespace Portal::Manager
 				cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
 					auto* actor = a_ref ? a_ref->As<RE::Actor>() : nullptr;
 					if (auto* object = actor ? actor->Get3D() : nullptr) {
-						Render::ShowActor(actor);
+						::Render::Frame::ShowActor(actor);
 						if (cellNode && object->parent && object->parent != cellNode && object->parent->parent == cellNode) {
 							if (std::ranges::find(a_room.actors, object, [](const auto& a_entry) { return a_entry.first.get(); }) == a_room.actors.end()) {
 								a_room.actors.emplace_back(RE::NiPointer<RE::NiAVObject>(object), RE::NiPointer<RE::NiNode>(object->parent));
@@ -3669,7 +3686,7 @@ namespace Portal::Manager
 			ReturnLeavers(a_room, a_space);
 			if ((a_room.lightingTimer -= a_delta) <= 0.0f) {
 				a_room.lightingTimer = 1.0f;  // the cell's lighting doesn't change, the world's state might be reset
-				a_room.lighting = mergedOwnLighting ? Render::MergedLighting(a_portal.cell, mapping.toLinked.Invert().rotate) : std::nullopt;
+				a_room.lighting = mergedOwnLighting ? ::Render::SpaceLighting::MergedLighting(a_portal.cell, mapping.toLinked.Invert().rotate) : std::nullopt;
 			}
 			{
 				// Seen from across the street, the room is drawn as an eye used to the street sees
@@ -3681,19 +3698,19 @@ namespace Portal::Manager
 				{
 					// What comes in is the street as seen through the doorway: as bright as the eye
 					// finds the view, tinted as the outdoors' light on a surface facing out of it.
-					std::array<float, 3> daylight{};
-					const auto           tint = away > 0.0f ? Render::OutdoorAmbient(mapping.inward * -1.0f) : std::nullopt;
-					const auto           view = Portal::Snapshot::SceneBrightness();
-					const float          luminance = tint ? 0.2126f * tint->red + 0.7152f * tint->green + 0.0722f * tint->blue : 0.0f;
+					Render::Daylight daylight{};
+					const auto       tint = away > 0.0f ? ::Render::SpaceLighting::OutdoorAmbient(mapping.inward * -1.0f) : std::nullopt;
+					const auto       view = ::Render::SceneMeter::Brightness();
+					const float      luminance = tint ? 0.2126f * tint->red + 0.7152f * tint->green + 0.0722f * tint->blue : 0.0f;
 					if (view && luminance > 0.0f) {
 						const float scale = *view * away / luminance;
-						daylight = { tint->red * scale, tint->green * scale, tint->blue * scale };
+						daylight.radiance = { tint->red * scale, tint->green * scale, tint->blue * scale };
 					}
-					::Render::Backend::SetMergedDaylight(a_slot, daylight.data());
+					::Render::Backend::SetMergedDaylight(a_slot, daylight);
 				}
 				auto lighting = a_room.lighting;
 				if (lighting) {
-					(*lighting)[18] = 1.0f + (StreetEyeScale(a_portal.sourceDoor) - 1.0f) * away;
+					lighting->scale = 1.0f + (StreetEyeScale(a_portal.sourceDoor) - 1.0f) * away;
 					// Outdoors the engine multiplies the sun by the image space's sunlight scale (1.7 on a
 					// clear day in Whiterun) before the shaders get it; the weather's colour alone left
 					// the street a dull grey with barely visible shadows, next to the bright street
@@ -3701,16 +3718,15 @@ namespace Portal::Manager
 					if (street) {
 						const auto* outdoors = OutdoorImageSpace();
 						const float scale = outdoors ? outdoors->hdr.sunlightScale : 1.0f;
-						for (int i = 0; i < 3; ++i) {
-							(*lighting)[i] *= scale;
-						}
+						lighting->sun.red *= scale;
+						lighting->sun.green *= scale;
+						lighting->sun.blue *= scale;
 					}
 				}
-				SendMergedLighting(a_slot, lighting ? lighting->data() : nullptr);
+				SendMergedLighting(a_slot, lighting);
 				if (primary) {
 					if (street && lighting) {
-						const RE::NiPoint3 towardSun{ (*lighting)[3], (*lighting)[4], (*lighting)[5] };
-						AimSunShadow(&towardSun);
+						AimSunShadow(&lighting->towardSun);
 					} else {
 						AimSunShadow(nullptr);
 					}
@@ -3718,11 +3734,11 @@ namespace Portal::Manager
 					// few thousand units deep stood in the street's haze, bluish, where the doorway's
 					// picture before the merge (and the hall once walked in) had the keep's own. One fog
 					// for all merged rooms (the shaders take one): the shown room's.
-					const auto fog = street ? Render::MergedFog() : Render::CellFog(a_portal.cell);
-					SendMergedFog(fog ? fog->data() : nullptr);
+					const auto fog = street ? ::Render::SpaceLighting::MergedFog() : ::Render::SpaceLighting::CellFog(a_portal.cell);
+					SendMergedFog(fog);
 					// Up to the doorway it is the street's air.
-					const auto front = street || !streetEye ? std::nullopt : Render::MergedFog();
-					::Render::Backend::SetFrontFog(front ? front->data() : nullptr);
+					const auto front = street || !streetEye ? std::nullopt : ::Render::SpaceLighting::MergedFog();
+					::Render::Backend::SetFrontFog(front);
 				}
 			}
 		}
@@ -3742,15 +3758,15 @@ namespace Portal::Manager
 			if (a_slot == 0) {
 				UnmergeLOD();
 				SendInteriorSun(false);
-				SendMergedFog(nullptr);
-				::Render::Backend::SetFrontFog(nullptr);
+				SendMergedFog(std::nullopt);
+				::Render::Backend::SetFrontFog(std::nullopt);
 				AimSunShadow(nullptr);
 			}
 			// Set again by the next update for the rooms still merged.
 			MergedCull::Set({});
-			SendMergedDoor(a_slot, nullptr);
-			SendMergedLighting(a_slot, nullptr);
-			::Render::Backend::SetMergedDaylight(a_slot, nullptr);
+			SendMergedDoor(a_slot, std::nullopt);
+			SendMergedLighting(a_slot, std::nullopt);
+			::Render::Backend::SetMergedDaylight(a_slot, std::nullopt);
 			a_room.door = 0;
 			a_room.daylight = 0.0f;
 			a_room.lightingTimer = 0.0f;
@@ -3859,8 +3875,8 @@ namespace Portal::Manager
 			if (it == besideRooms.end()) {
 				return;
 			}
-			SendMergedDoor(it->slot, nullptr);
-			SendMergedLighting(it->slot, nullptr);
+			SendMergedDoor(it->slot, std::nullopt);
+			SendMergedLighting(it->slot, std::nullopt);
 			auto* cell = it->cell;
 			auto  previous = std::exchange(primaryRoom, std::move(it->state));
 			besideRooms.erase(it);
@@ -3892,8 +3908,8 @@ namespace Portal::Manager
 			CloseDoor();
 			ClosePassage();
 			SetActive(std::nullopt);
-			SendMergedDoor(0, nullptr);
-			SendMergedLighting(0, nullptr);
+			SendMergedDoor(0, std::nullopt);
+			SendMergedLighting(0, std::nullopt);
 			Portal::RemoteCell space;
 			std::swap(space, remote);
 			warm.push_back(std::move(space));
@@ -4453,29 +4469,6 @@ namespace Portal::Manager
 	}
 }
 
-// Asked by the patched Community Shaders for every shape it draws while a space is merged in.
-// (A marker bit in the shape's flags was tried first: bit 30 is in use on many exterior statics.)
-// Diagnostics (dump_world): how often the patched Community Shaders asks, and how often the answer is yes.
-
-extern "C" __declspec(dllexport) bool SeamlessPortal_IsMergedShape(RE::BSGeometry* a_shape)
-{
-	return Portal::Manager::IsMergedShape(a_shape);
-}
-
-// The same, with which of the rooms merged at once (its slot, as the doors and lights were sent
-// with Render::Backend), -1 for none.
-extern "C" __declspec(dllexport) int SeamlessPortal_MergedRoomOf(RE::BSGeometry* a_shape)
-{
-	return Portal::Manager::MergedRoomOf(a_shape);
-}
-
-// The light scene a merged room's shapes are lit from: rooms merged at once stand in the same
-// place in their own coordinates, each has its own, and only one is registered with the engine.
-extern "C" __declspec(dllexport) RE::ShadowSceneNode* SeamlessPortal_MergedRoomScene(int a_slot)
-{
-	return Portal::Manager::MergedRoomScene(a_slot);
-}
-
 namespace
 {
 	std::vector<Portal::RemoteCell>::iterator LetGoKept(std::vector<Portal::RemoteCell>::iterator a_space, std::string_view a_why)
@@ -4485,11 +4478,4 @@ namespace
 		a_space->Release();
 		return warm.erase(a_space);
 	}
-}
-
-// Asked by the patched Community Shaders for every shape it draws while a space is merged in:
-// shapes left out of the doorway mask (the player's, so they aren't cut at the door plane).
-extern "C" __declspec(dllexport) bool SeamlessPortal_IsUnmaskedShape(RE::BSGeometry* a_shape)
-{
-	return Portal::Manager::IsPlayerShape(a_shape);
 }

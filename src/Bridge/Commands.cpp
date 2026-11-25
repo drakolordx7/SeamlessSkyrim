@@ -13,8 +13,9 @@
 #include "Portal/LightScene.h"
 #include "Portal/MergedCull.h"
 #include "Portal/PortalManager.h"
-#include "Render/PortalRender.h"
 #include "Portal/TravelTrace.h"
+#include "Render/Frame.h"
+#include "Render/SpaceLighting.h"
 #include "Spaces/RemoteCell.h"
 #include "Spaces/Tuning.h"
 #include "Portal/Travel.h"
@@ -462,7 +463,7 @@ namespace
 				result["sky"]["sunLight"] = Rgb(sun->light->GetLightRuntimeData().diffuse);
 				result["sky"]["sunFade"] = sun->light->GetLightRuntimeData().fade;
 			}
-			result["lighting"] = Portal::Render::OutdoorLightingProbe();
+			result["lighting"] = ::Render::SpaceLighting::OutdoorLightingProbe();
 			// How many of the distant land's, objects' and trees' shapes count as the merged street's.
 			json lodMarked = json::object();
 			const std::pair<const char*, RE::NiAVObject*> lodParts[] = { { "land", RE::BGSTerrainManager::GetLODLandRoot().get() },
@@ -954,17 +955,6 @@ namespace Bridge
 			{ "pictures_delete", { [](const json&) {
 				 return json{ { "deleted", Portal::Snapshot::DeleteAll() } };
 			 } } },
-			{ "portal_switches", { [](const json& a) {
-				 auto s = Portal::Render::GetDebugSwitches();
-				 s.skipPortalPass = a.value("skipPortalPass", s.skipPortalPass);
-				 s.skipComposite = a.value("skipComposite", s.skipComposite);
-				 s.skipMotion = a.value("skipMotion", s.skipMotion);
-				 s.skipCommunityShaders = a.value("skipCommunityShaders", s.skipCommunityShaders);
-				 Portal::Render::SetDebugSwitches(s);
-				 Portal::Render::SetTintDoorway(a.value("tint", Portal::Render::TintDoorway()));
-				 return json{ { "skipPortalPass", s.skipPortalPass }, { "skipComposite", s.skipComposite }, { "skipMotion", s.skipMotion },
-					 { "skipCommunityShaders", s.skipCommunityShaders }, { "tint", Portal::Render::TintDoorway() } };
-			 } } },
 			// Waits for the next Present; running it on the main thread would deadlock the frame.
 			{ "screenshot", { Screenshot, false } },
 			{ "renderdoc_capture", { RenderDocCapture } },
@@ -1338,8 +1328,7 @@ namespace Bridge
 				 return json{ { "rootCulled", root && root->GetAppCulled() }, { "rootFlags", root ? std::format("{:08X}", root->GetFlags().underlying()) : "" },
 							  { "firstFlags", first ? std::format("{:08X}", first->GetFlags().underlying()) : "" }, { "parts", parts }, { "firstPersonSame", first == root } };
 			 } } },
-			{ "portal_light_debug", { Portal::Render::SetLightDebug } },
-			{ "actor_cull", { [](const json&) { return Portal::Render::ActorCullStats(); } } },
+			{ "actor_cull", { [](const json&) { return ::Render::Frame::ActorCullStats(); } } },
 			// Diagnostics: what the HUD's activation prompt says right now (screenshots don't show
 			// the HUD), and what is under the crosshair.
 			{ "hud_prompt", { [](const json&) {
@@ -1533,7 +1522,7 @@ namespace Bridge
 			 } } },
 			{ "portal_status", { [](const json&) {
 				 auto status = Portal::Manager::Status();
-				 status["lastFrame"] = Portal::Render::LastFrame();
+				 status["lastFrame"] = ::Render::Frame::LastFrame();
 				 status["travel"] = Portal::Travel::Status();
 				 return status;
 			 } } },
@@ -1554,7 +1543,7 @@ namespace Bridge
 				 return json{ { "file", file } };
 			 } } },
 			// Waits for the next rendered frame, like screenshot.
-			{ "portal_render_file", { [](const json& a) { return Portal::Render::RenderToFile(a.at("path").get<std::string>()); }, false } },
+			{ "portal_render_file", { [](const json& a) { return ::Render::Frame::RenderToFile(a.at("path").get<std::string>()); }, false } },
 		};
 		return commands;
 	}
