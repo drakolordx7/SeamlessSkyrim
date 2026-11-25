@@ -9,6 +9,7 @@
 #include "Diag/Probe.h"
 #include "Doors/Hold.h"
 #include "Portal/LightScene.h"
+#include "Portal/MergedView.h"
 #include "Portal/PortalManager.h"
 #include "Render/Frame.h"
 #include "Render/SpaceLighting.h"
@@ -161,7 +162,7 @@ namespace
 				RE::BSVisit::TraverseScenegraphGeometries(object, [&](RE::BSGeometry* a_geometry) {
 					++shapes;
 					culledShapes += a_geometry->GetAppCulled() ? 1 : 0;
-					mergedShapes += Portal::Manager::IsMergedShape(a_geometry) ? 1 : 0;
+					mergedShapes += (Portal::MergedView::RoomOf(a_geometry) >= 0) ? 1 : 0;
 					if (auto* shader = a_geometry->GetGeometryRuntimeData().shaderProperty.get()) {
 						skins.push_back(std::format("{}: flags {:X} shader alpha {:.2f} material alpha {:.2f}", a_geometry->name.c_str(), a_geometry->GetFlags().underlying(),
 							shader->alpha, shader->QMaterialAlpha()));
@@ -263,7 +264,7 @@ namespace
 				if (node) {
 					RE::BSVisit::TraverseScenegraphGeometries(node, [&](RE::BSGeometry* a_shape) {
 						++total;
-						marked += Portal::Manager::IsMergedShape(a_shape) ? 1 : 0;
+						marked += (Portal::MergedView::RoomOf(a_shape) >= 0) ? 1 : 0;
 						auto* property = a_shape->GetGeometryRuntimeData().shaderProperty.get();
 						++properties[property ? property->GetRTTI() ? property->GetRTTI()->name : "?" : "none"];
 						return RE::BSVisit::BSVisitControl::kContinue;
@@ -573,7 +574,7 @@ namespace
 		}
 		Probe::DumpWorldState("bridge request");
 		logger::info("outdoors probe: {}", OutdoorsProbe({}).dump());
-		auto passes = Portal::Manager::RemoteRenderPasses(false);
+		auto passes = Portal::Manager::Space().RenderPasses(false);
 		passes.erase("tree");
 		logger::info("remote render passes: {}", passes.dump());
 		return { { "logged", true } };

@@ -2,14 +2,18 @@
 
 #include "Bridge/CommandSupport.h"
 #include "Bridge/FrameHooks.h"
+#include "Bridge/PortalDiagnostics.h"
 #include "Doors/DoorUse.h"
 #include "Doors/Settings.h"
 #include "Pictures/DoorwaySnapshot.h"
 #include "Portal/MergedCull.h"
+#include "Portal/MergedView.h"
 #include "Portal/PortalManager.h"
+#include "Portal/Selection.h"
 #include "Portal/Travel.h"
 #include "Portal/TravelTrace.h"
 #include "Render/Frame.h"
+#include "Spaces/RemoteCell.h"
 #include "Spaces/Tuning.h"
 
 using namespace Bridge::Support;
@@ -32,7 +36,6 @@ namespace Bridge
 			{ "pictures_delete", { [](const json&) {
 				 return json{ { "deleted", Portal::Snapshot::DeleteAll() } };
 			 } } },
-			{ "merge_test", { [](const json&) { return Portal::Manager::MergeTest(); } } },
 			{ "portal_merge", { [](const json& a) {
 				 if (a.contains("enabled")) {
 					 Portal::Manager::SetMergeEnabled(a.at("enabled").get<bool>());
@@ -46,19 +49,13 @@ namespace Bridge
 				 if (a.contains("stepExterior")) {
 					 Spaces::tuning.stepExterior = a.at("stepExterior").get<bool>();
 				 }
-				 if (a.contains("streetEye")) {
-					 Portal::Manager::SetStreetEye(a.at("streetEye").get<bool>());
-				 }
-				 if (a.contains("ownLighting")) {
-					 Portal::Manager::SetMergedOwnLighting(a.at("ownLighting").get<bool>());
-				 }
-				 return json{ { "enabled", Portal::Manager::MergeEnabled() }, { "adaptation", Portal::Manager::DescribeAdaptation() } };
+				 return json{ { "enabled", Portal::MergedView::MergeEnabled() }, { "adaptation", PortalDiagnostics::DescribeAdaptation() } };
 			 } } },
-			// Tests (run_suite's checks): see Portal::Manager::SceneCheck.
-			{ "scene_check", { [](const json& a) { return Portal::Manager::SceneCheck(a.value("radius", 3000.0f)); } } },
+			// Tests (run_suite's checks): see PortalDiagnostics::SceneCheck.
+			{ "scene_check", { [](const json& a) { return PortalDiagnostics::SceneCheck(a.value("radius", 3000.0f)); } } },
 			{ "merged_shapes", { [](const json& a) {
 				 const auto& p = a.at("near");
-				 return json{ { "shapes", Portal::Manager::MergedShapesReport({ p.at(0).get<float>(), p.at(1).get<float>(), p.at(2).get<float>() }, a.value("far", 3000.0f)) } };
+				 return json{ { "shapes", PortalDiagnostics::MergedShapesReport({ p.at(0).get<float>(), p.at(1).get<float>(), p.at(2).get<float>() }, a.value("far", 3000.0f)) } };
 			 } } },
 			// Tests: the turn and shift of the current door pair (as the in-game menu sets them).
 			{ "door_correction", { [](const json& a) {
@@ -100,21 +97,21 @@ namespace Bridge
 			// bPauseUnseenRooms.
 			{ "shown_rooms", { [](const json& a) {
 				 if (a.contains("count")) {
-					 Portal::Manager::SetShownRooms(a.at("count").get<int>());
+					 Portal::Selection::SetShownRooms(a.at("count").get<int>());
 				 }
 				 if (a.contains("pause")) {
-					 Portal::Manager::SetPauseUnseenRooms(a.at("pause").get<bool>());
+					 Portal::MergedView::SetPauseUnseenRooms(a.at("pause").get<bool>());
 				 }
-				 auto status = Portal::Manager::Status();
+				 auto status = PortalDiagnostics::Status();
 				 return json{ { "shownRooms", status["shownRooms"] }, { "warm", status["warm"] }, { "mergedCull", status["mergedCull"] }, { "frames", FrameHooks::FrameStats() } };
 			 } } },
-			{ "portal_passes", { [](const json& a) { return Portal::Manager::RemoteRenderPasses(a.value("drop", false)); } } },
+			{ "portal_passes", { [](const json& a) { return Portal::Manager::Space().RenderPasses(a.value("drop", false)); } } },
 			{ "portals_enable", { [](const json& a) {
 				 Portal::Manager::SetEnabled(a.value("enabled", true));
-				 return Portal::Manager::Status();
+				 return PortalDiagnostics::Status();
 			 } } },
 			{ "portal_status", { [](const json&) {
-				 auto status = Portal::Manager::Status();
+				 auto status = PortalDiagnostics::Status();
 				 status["lastFrame"] = ::Render::Frame::LastFrame();
 				 status["travel"] = Portal::Travel::Status();
 				 return status;

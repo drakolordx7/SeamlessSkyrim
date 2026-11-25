@@ -2,7 +2,7 @@
 
 #include "Doors/DoorUse.h"
 #include "Doors/Pair.h"
-#include "Portal/PortalManager.h"
+#include "Portal/MergedView.h"
 
 #include "Diag/Telemetry.h"
 #include "Engine/Fade.h"
@@ -160,7 +160,7 @@ namespace
 				done = elapsed * a_walk.speed / distance;
 			}
 			if (done >= 1.0f) {
-				Portal::Manager::RefreshMergedShapes();
+				Portal::MergedView::RefreshShapes();
 				if (actor && a_walk.driven) {
 					actor->SetPosition(a_walk.to, true);
 				}
@@ -169,7 +169,7 @@ namespace
 			}
 			if (!a_walk.crossed && done >= a_walk.crossAt) {
 				a_walk.crossed = true;
-				Portal::Manager::RefreshMergedShapes();
+				Portal::MergedView::RefreshShapes();
 			}
 			actor->SetPosition(a_walk.from + path * done, true);
 			actor->SetHeading(a_walk.heading);
@@ -216,7 +216,7 @@ namespace Portal::NpcTravel
 		lastFrame.clear();
 	}
 
-	void Update(const Manager::Active& a_portal, const std::vector<RE::TESObjectCELL*>& a_remoteCells)
+	void Update(const Active& a_portal, const std::vector<RE::TESObjectCELL*>& a_remoteCells)
 	{
 		const auto found = Doors::TryCompute(a_portal);
 		if (!found) {
@@ -301,7 +301,7 @@ namespace Portal::NpcTravel
 					}
 					KeepVisible(actor.get());
 					Diag::CaptureEventFrames(L"npc", 60);  // run_route(capture=true): every frame of the walk
-					Manager::RefreshMergedShapes();
+					MergedView::RefreshShapes();
 					++carried;
 					lastCarried = std::format("{} {} at ({:.0f},{:.0f},{:.0f})", actor->GetDisplayFullName(), wentIn ? "in" : "out", seen.position.x, seen.position.y, seen.position.z);
 					logger::info("portal: carried {} through the door", lastCarried);

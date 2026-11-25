@@ -5,7 +5,9 @@
 #include "Pictures/Camera.h"
 #include "Pictures/DoorwaySnapshot.h"
 #include "Plugin/Settings.h"
+#include "Portal/MergedView.h"
 #include "Portal/PortalManager.h"
+#include "Portal/Selection.h"
 #include "Render/Backend.h"
 
 #include "SKSEMenuFramework.h"
@@ -74,7 +76,7 @@ namespace
 
 	Pair CurrentPair()
 	{
-		if (const auto at = Portal::Manager::DoorPairAt(kNearDoorDistance)) {
+		if (const auto at = Portal::Selection::DoorPairAt(kNearDoorDistance)) {
 			return MakePair(at->sourceDoor, at->linkedDoor);
 		}
 		return {};
@@ -114,7 +116,7 @@ namespace
 
 		ImGui::NewLine();
 		
-		bool merge = Portal::Manager::MergeEnabled();
+		bool merge = Portal::MergedView::MergeEnabled();
 		if (ImGui::Checkbox("Draw rooms into the world (seen from outside)", &merge)) {
 			Portal::Manager::SetMergeEnabled(merge);
 			Save(Id::kMerge, merge);
@@ -122,9 +124,9 @@ namespace
 
 		ImGui::NewLine();
 
-		int shown = Portal::Manager::ShownRooms();
-		if (ImGui::SliderInt("Rooms active at once", &shown, 1, Portal::Manager::kMaxShownRooms)) {
-			Portal::Manager::SetShownRooms(shown);
+		int shown = Portal::Selection::ShownRooms();
+		if (ImGui::SliderInt("Rooms active at once", &shown, 1, Portal::Selection::kMaxShownRooms)) {
+			Portal::Selection::SetShownRooms(shown);
 		}
 		SaveWhenReleased(Id::kShownRooms, shown);
 		ImGui::TextWrapped("Outdoors, the rooms behind the nearest doors are loaded, so a doorway opens at once when you walk up, "
@@ -138,9 +140,9 @@ namespace
 
 		ImGui::NewLine();
 
-		bool pause = Portal::Manager::PauseUnseenRooms();
+		bool pause = Portal::MergedView::PauseUnseenRooms();
 		if (ImGui::Checkbox("Pause rooms nobody can see", &pause)) {
-			Portal::Manager::SetPauseUnseenRooms(pause);
+			Portal::MergedView::SetPauseUnseenRooms(pause);
 			Save(Id::kPauseUnseenRooms, pause);
 		}
 		ImGui::TextWrapped("A loaded room whose doorway is out of view isn't simulated or drawn until it comes into view; "
@@ -169,14 +171,14 @@ namespace
 
 		ImGui::NewLine();
 
-		float doorDistance = Portal::Manager::DoorOpenDistance();
+		float doorDistance = Portal::Selection::DoorOpenDistance();
 		const auto& reach = Plugin::Settings::Of(Id::kDoorOpenDistance);
 		if (ImGui::SliderFloat("Door reach (game units)", &doorDistance, static_cast<float>(reach.min), static_cast<float>(reach.max), "%.0f")) {
-			Portal::Manager::SetDoorOpenDistance(doorDistance);
+			Portal::Selection::SetDoorOpenDistance(doorDistance);
 		}
 		SaveWhenReleased(Id::kDoorOpenDistance, static_cast<int>(std::lround(doorDistance)));
 		ImGui::TextWrapped("The space behind a door starts loading %.0f units beyond this and is let go %.0f units beyond it.",
-			Portal::Manager::kLoadAhead, Portal::Manager::kLoadAhead + Portal::Manager::kReleaseBeyond);
+			Portal::Selection::kLoadAhead, Portal::Selection::kLoadAhead + Portal::Selection::kReleaseBeyond);
 
 		ImGui::NewLine();
 

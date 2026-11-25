@@ -1,33 +1,34 @@
 #pragma once
 
-#include "Plugin/Settings.h"
 #include "Portal/Active.h"
 
-struct IDXGISwapChain;
+namespace Portal
+{
+	class RemoteCell;
+}
 
-// Runs the door portals: picks the load door the player is approaching, keeps the cell behind it
-// alive (RemoteCell), shows it in the doorway (merged into the world, or drawn by PortalRender)
-// and carries the player through without a loading screen when they walk in (Travel).
+// Runs the door portals: picks the load door the player is approaching (Selection), keeps the
+// cell behind it alive (RemoteCell), shows it in the doorway (merged into the world, MergedView,
+// or drawn by the portal pass) and carries the player through without a loading screen when they
+// walk in (Crossing, Travel). The manager holds the portal shown and calls the modules in the one
+// order of a frame.
 namespace Portal::Manager
 {
-	using Active = Portal::Active;
-	using DoorPrompt = Portal::DoorPrompt;
-
-	// Takes its settings from Plugin::Settings (bEnabled, on by default) and hooks
-	// the events the manager reacts to. Call at kDataLoaded.
+	// Takes its settings from Plugin::Settings (bEnabled, on by default) and hooks the events the
+	// manager reacts to. Call at kDataLoaded.
 	void Install();
 
 	// Switching on only works when the hooks were installed at startup (HooksInstalled).
-	void SetEnabled(bool a_enabled);
+	void               SetEnabled(bool a_enabled);
 	[[nodiscard]] bool Enabled();
 	// Portals were on in the ini at startup, or this is an agent session.
 	[[nodiscard]] bool HooksInstalled();
 
 	// Main thread, every frame (PlayerCharacter::Update hook).
 	void Update(float a_delta);
-	// The image space blended across the doorway, for where the camera is now. Update does it too;
-	// a crossing calls it again once it has placed the camera in the new space.
-	void UpdateImageSpace();
+	// A seamless crossing has arrived and the camera is about to be placed: the frame's update again,
+	// for the space the player is in now.
+	void OnArrival();
 
 	// Release before anything that must not see a foreign attached cell (save, load).
 	// a_holdoff: seconds before a portal may attach again (e.g. while a save is being written).
@@ -39,131 +40,38 @@ namespace Portal::Manager
 	// behind a panel left standing in the doorway), and the old 3D was kept alive.
 	void ForgetDoors();
 
-	// After a seamless crossing has arrived: the space just left may be attached again at once
-	// (it is still loaded), so the door behind the player shows it instead of a hole.
-	void EndHoldoff(float a_seconds = 0.0f);
+	// [Portals] bMerge off while a room is merged: it is let go. (The setting is MergedView's.)
+	void SetMergeEnabled(bool a_enabled);
 
 	// Approaching the portal's doorway: how far the camera may trail behind the player this frame.
 	[[nodiscard]] std::optional<float> CameraLimit();
 
-	// For the renderer: the portal to draw this frame, if any (none while merged).
-	[[nodiscard]] std::optional<Active> ActivePortal();
-	// The portal's door stands (at least partly) open; shut, the portal isn't drawn on it.
-	[[nodiscard]] bool DoorwayOpen();
-	// Main thread: what using the door does, for its prompt (see DoorPrompt).
-	[[nodiscard]] DoorPrompt Prompt(RE::FormID a_door);
-	// Diagnostics: the image-space blend across the doorway is on (UpdateTone).
-	[[nodiscard]] bool ToneBlendOn();
-	// The portal whose other side is ready, drawn by the portal pass or merged.
-	[[nodiscard]] std::optional<Active> ReadyPortal();
+	// The space behind the portal's door, the one shown: for the portal modules, which each work on
+	// a part of it.
+	[[nodiscard]] RemoteCell& Space();
 	// The door pair in use, merged or not, loaded or not.
 	[[nodiscard]] std::optional<Active> CurrentPortal();
-	struct DoorPair
-	{
-		RE::FormID sourceDoor;  // in the player's space
-		RE::FormID linkedDoor;
-	};
-	// Main thread: the nearest door within a_radius that would be a portal, switched off in the
-	// menu or not. The menu finds a switched-off door with it, which never becomes CurrentPortal.
-	[[nodiscard]] std::optional<DoorPair> NearestDoorPair(float a_radius);
-	// Main thread: the pair of the doorway the player is at, for the menu: the portal's while its
-	// door is the nearest, else the nearest door within a_radius. The portal's alone, the menu showed
-	// a shop's other door (holding the portal from up to ReleaseRadius away) at a door switched off,
-	// which then couldn't be switched back on.
-	[[nodiscard]] std::optional<DoorPair> DoorPairAt(float a_radius);
+	// The portal whose other side is ready, drawn by the portal pass or merged.
+	[[nodiscard]] std::optional<Active> ReadyPortal();
+	// For the renderer: the portal to draw this frame, if any (none while merged).
+	[[nodiscard]] std::optional<Active> ActivePortal();
+	// The space behind a_door is drawn in its doorway (merged, the portal ready, or a room beside),
+	// not a stand-in's picture.
+	[[nodiscard]] bool SpaceShown(RE::FormID a_door);
 	// The remote cells are merged into the world scene right now.
 	[[nodiscard]] bool Merged();
-	// Main thread: the street is merged into the interior the player is in.
-	[[nodiscard]] bool StreetMerged();
-	// Render: how bright a room's own lights and ambient are drawn right now, merged behind a_door
-	// and seen from the street: as an eye used to the street sees it (its brightness against the
-	// street's, Portal::Snapshot), as from inside within a few steps of the doorway.
-	[[nodiscard]] float RoomLightScale(RE::FormID a_door);
-	// Diagnostics (portal_merge): the brightness of the view and of the rooms merged, and their scales.
-	[[nodiscard]] json DescribeAdaptation();
-	// Diagnostics: false draws rooms seen from the street as from inside, to compare.
-	void SetStreetEye(bool a_on);
-	// Render: the door whose room waits to be merged until the portal pass has drawn its doorway
-	// picture with the capture camera (Portal::Snapshot::CameraPictureWanted), or 0.
-	[[nodiscard]] RE::FormID PictureWanted();
-
-	// A doorway to fill with a stand-in picture (Portal::Snapshot) or one to photograph.
-	struct DoorwayFill
-	{
-		RE::FormID door;      // in the player's space
-		bool       outdoors;  // what is behind the door is outdoors
-		bool       gate;      // outdoors on both sides
-		float      alpha;     // 1 while the space behind isn't there; fading out once it is
-	};
-	// Main thread: the doors swung open before the space behind them is there (or fading out after).
-	[[nodiscard]] std::vector<DoorwayFill> StandIns();
-	// Main thread, render: the doorway shows the real space, fully open and settled.
-	[[nodiscard]] std::optional<DoorwayFill> SnapshotChance();
-
-	// For the in-game menu (main thread).
-	void                SetStepExterior(bool a_step);
-	[[nodiscard]] bool  StepExterior();
-	// The other side starts loading this much further out than the door opens (time to load it
-	// while walking up) and is let go kReleaseBeyond further out still (hysteresis, so standing at
-	// the boundary doesn't attach/detach every frame). Both follow the door distance: loading at a
-	// fixed 1200 units, a shop merely walked past was loaded and held while the door walked to
-	// waited.
-	inline constexpr float kLoadAhead = 300.0f;
-	inline constexpr float kReleaseBeyond = 400.0f;
-	// How close (game units) the player comes before the space behind a door loads (kLoadAhead
-	// further out) and the door can be walked through. [Portals] iDoorOpenDistance.
-	[[nodiscard]] float DoorOpenDistance();
-	void                SetDoorOpenDistance(float a_distance);
-	// Outdoors, how many rooms behind doors are active at once, the nearest door's included
-	// ([Portals] iShownRooms; 1 = that one only): the others are the rooms behind the nearest other
-	// doors, kept loaded so they open at once, and those whose door is open are drawn in it, merged
-	// beside the shown one, as many as the render backend can mask (Render::Backend::MergedRooms: 1
-	// on the game's own shaders, where the others stay loaded out of sight).
-	[[nodiscard]] int ShownRooms();
-	void              SetShownRooms(int a_count);
-	inline constexpr int kMaxShownRooms = Plugin::Settings::Of(Plugin::Settings::Id::kShownRooms).max;
-	// [Portals] bPauseUnseenRooms (on by default): a kept room nobody can see is paused (not
-	// simulated, its lights not updated, not drawn) until its doorway comes into view.
-	[[nodiscard]] bool PauseUnseenRooms();
-	void               SetPauseUnseenRooms(bool a_pause);
-	// Main thread: every cell merged into the world and drawn now, the shown room's and those beside
-	// it (not paused ones).
-	[[nodiscard]] std::vector<RE::TESObjectCELL*> MergedCells();
-	// Any thread: which merged room a shape is in, by its slot with the render backend (0 the shown
-	// room), or -1.
-	[[nodiscard]] int MergedRoomOf(const RE::BSGeometry* a_shape);
-	// Any thread: the light scene of the merged room in a_slot.
-	[[nodiscard]] RE::ShadowSceneNode* MergedRoomScene(int a_slot);
-	// Main thread, right before the player's view: the rooms merged beside the shown one get the
-	// light update the engine gives registered light scenes only (LightScene::PrepareUnshownForView).
-	void BeforePlayerView();
-	// Main thread: someone entered or left the merged space; its shapes are listed anew at once.
-	void RefreshMergedShapes();
-	[[nodiscard]] nlohmann::json RemoteRenderPasses(bool a_drop);
-	// Any thread: the cell is on screen behind a door right now (merged into the world, or drawn
-	// by the portal pass).
-	[[nodiscard]] bool IsShownRemoteCell(const RE::TESObjectCELL* a_cell);
-	// Any thread: the shape is part of the player (drawn on both sides of a merged doorway).
-	[[nodiscard]] bool IsPlayerShape(const RE::BSGeometry* a_shape);
-
-	// [Portals] bMerge (on by default): from outside, draw the interior merged into the world.
-	void SetMergeEnabled(bool a_enabled);
-	[[nodiscard]] bool MergeEnabled();
-	// Diagnostics: false lights the merged space like the world (no own directional / ambient).
-	void SetMergedOwnLighting(bool a_own);
-
+	// The door of the portal in use has swung shut (merged: the room's own door), so the portal can
+	// be let go without a doorway left open onto nothing.
+	[[nodiscard]] bool DoorShut();
 	// Main thread: every cell kept alive behind the portal (the door's cell first).
 	[[nodiscard]] const std::vector<RE::TESObjectCELL*>& RemoteCells();
+	// The last thing the manager did to the portal, for the status.
+	[[nodiscard]] const std::string& LastEvent();
 
-	json Status();
+	// Main thread: what using the door does, for its prompt (see DoorPrompt).
+	[[nodiscard]] DoorPrompt Prompt(RE::FormID a_door);
 
-	// Diagnostics: merge the current portal's cell now, see RemoteCell::Merge.
-	json MergeTest();
-	// Tests: still things (statics, trees, furniture...) within a_radius of the player in the player's
-	// own space, and of the door in the merged space, that hang nowhere or aren't drawn where they
-	// belong; the merged street's land and distant LOD the same. "ok": none found.
-	json SceneCheck(float a_radius);
-	// Diagnostics: merged shapes (or their skin bones) farther than a_far from a_near.
-	json MergedShapesReport(const RE::NiPoint3& a_near, float a_far);
-	[[nodiscard]] bool IsMergedShape(const RE::BSGeometry* a_shape);
+	// For the in-game menu (main thread): the street's physics run while indoors.
+	void               SetStepExterior(bool a_step);
+	[[nodiscard]] bool StepExterior();
 }

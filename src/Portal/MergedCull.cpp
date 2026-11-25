@@ -1,7 +1,7 @@
 #include "Portal/MergedCull.h"
 
 #include "Portal/NpcTravel.h"
-#include "Portal/PortalManager.h"
+#include "Portal/MergedView.h"
 #include "Render/DoorwayPlanes.h"
 
 namespace Portal::MergedCull
@@ -573,7 +573,7 @@ namespace Portal::MergedCull
 				keepObject(object);
 			}
 			auto* here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
-			const auto merged = Portal::Manager::MergedCells();
+			const auto merged = Portal::MergedView::MergedCells();
 			for (auto* cell : room->cells) {
 				// Only cells still merged: a room the player has just walked into is theirs now.
 				if (cell == here || std::ranges::find(merged, cell) == merged.end()) {

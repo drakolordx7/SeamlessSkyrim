@@ -9,7 +9,11 @@
 #include "Portal/LightScene.h"
 #include "Portal/MergedCull.h"
 #include "Portal/NpcTravel.h"
+#include "Portal/MergedView.h"
+#include "Portal/PortalDoor.h"
 #include "Portal/PortalManager.h"
+#include "Portal/StandIns.h"
+#include "Portal/StreetMerge.h"
 #include "Portal/Travel.h"
 #include "Render/Backend.h"
 #include "Render/D3D.h"
@@ -62,7 +66,7 @@ namespace Render::Frame
 		{
 			auto*      sky = RE::Sky::GetSingleton();
 			const auto mode = sky->mode;
-			if (Portal::Manager::StreetMerged() && ::Render::Backend::MasksPrecipitation()) {
+			if (Portal::StreetMerge::Merged() && ::Render::Backend::MasksPrecipitation()) {
 				sky->mode = RE::Sky::Mode::kFull;
 			}
 			original(a_precip, a_delta);
@@ -99,7 +103,7 @@ namespace Render::Frame
 		};
 		if (portal && (!has3D(portal->sourceDoor) || !has3D(portal->linkedDoor))) {
 			static int reported = 0;
-			if (Portal::Manager::DoorwayOpen() && reported++ < 50) {
+			if (!Portal::PortalDoor::Shut() && reported++ < 50) {
 				// Diagnostics: with the door already open this is a doorway blinking empty.
 				logger::warn("portal: not drawn this frame, a door has no 3D (source {}, linked {})", has3D(portal->sourceDoor), has3D(portal->linkedDoor));
 			}
@@ -107,7 +111,7 @@ namespace Render::Frame
 		}
 		// A door swung shut (walking away, Manager::Update) is a door: the portal's quad on its face
 		// would show the other side through it.
-		if (portal && !Portal::Manager::DoorwayOpen()) {
+		if (portal && Portal::PortalDoor::Shut()) {
 			portal.reset();
 		}
 		return portal;
@@ -128,12 +132,12 @@ namespace Render::Frame
 			}
 			// Rooms merged beside the shown one are lit from light scenes the engine doesn't update.
 			// First: a paused room woken for this view has its people shown below.
-			Portal::Manager::BeforePlayerView();
+			Portal::MergedView::BeforePlayerView();
 			// NPCs of a merged interior keep NiAVObject::kNotVisible on their 3D root like those of
 			// any remote interior (see PortalPass::Draw): the room looked empty from outside, and they
 			// faded in on walking in. Cleared for the whole player view (the world is culled before
 			// Main::RenderWorld is called), then put back.
-			const auto mergedCells = Portal::Manager::MergedCells();
+			const auto mergedCells = Portal::MergedView::MergedCells();
 			const auto hiddenActors = !mergedCells.empty() ? PortalPass::ShowActorsForCull(mergedCells) : std::vector<RE::NiAVObject*>{};
 			// Here, not in the manager's update: the camera has moved since, and this is the last
 			// moment before the engine culls the world.
@@ -165,7 +169,7 @@ namespace Render::Frame
 		{
 			original(a_culler, a_actor);
 			++calls;
-			if (!a_actor || !Portal::Manager::IsShownRemoteCell(a_actor->GetParentCell())) {
+			if (!a_actor || !Portal::MergedView::IsShownCell(a_actor->GetParentCell())) {
 				return;
 			}
 			++hits;
@@ -314,7 +318,7 @@ namespace Render::Frame
 					// Every other frame at most: a room takes several to measure its lights for
 					// (see Pictures::UpdateDoorwayPictures), and the doorway on screen stays still while one is drawn.
 					static bool capturedLastFrame = false;
-					if (const auto door = Portal::Manager::PictureWanted(); !capture && door == portal->sourceDoor && !capturedLastFrame) {
+					if (const auto door = Portal::StandIns::PictureWanted(); !capture && door == portal->sourceDoor && !capturedLastFrame) {
 						auto* camera = RE::Main::WorldRootCamera();
 						capture = Portal::Snapshot::CameraFor(door, Portal::Doors::Quad(Portal::Doors::Door(door), camera->world.translate, { .behindPanel = true }), camera->world.translate);
 					}

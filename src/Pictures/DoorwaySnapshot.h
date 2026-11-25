@@ -1,7 +1,7 @@
 #pragma once
 
 // Pictures of doorways, for a door that swings open before the space behind it has loaded
-// (Manager::StandIn). Whenever a doorway stands fully open on the real space, what is seen through
+// (StandIns). Whenever a doorway stands fully open on the real space, what is seen through
 // it is copied out of the frame, small, and kept per door (on disk, in SeamlessSkyrim_Doorways);
 // for a door to the outdoors one per part of the day. Shown blurred, so that what changed since
 // (people, light, the angle it is seen from) doesn't show, and faded out once the real space is
@@ -47,7 +47,7 @@ namespace Portal::Snapshot
 		// The portal pass drew this frame with the capture camera (TakeCaptureRequest), not the
 		// player's view.
 		bool captureCamera = false;
-		// How bright the room's own lights were drawn in it (Manager::RoomLightScale): turned down
+		// How bright the room's own lights were drawn in it (MergedView::RoomLightScale): turned down
 		// for a room merged into the street, not in the portal pass.
 		float lightScale = 1.0f;
 	};
@@ -71,7 +71,7 @@ namespace Portal::Snapshot
 	// the capture camera, which Capture asks for (TakeCaptureRequest) and waits a frame; merged into
 	// the world, with the player's view if that sees the doorway well enough, unless there is a
 	// capture camera's picture already. A room is merged as soon as it has loaded, so the manager
-	// holds the merge back for a door without one (Manager::PictureWanted).
+	// holds the merge back for a door without one (StandIns::PictureWanted).
 	// a_gate: a city gate's doorway, taken from further back (its far side is a street, not a room).
 	void Capture(const View& a_view, const Source& a_source, RE::FormID a_door, bool a_outdoors, bool a_gate, const Corners& a_corners);
 
@@ -130,7 +130,7 @@ namespace Portal::Snapshot
 	int DeleteAll();
 
 	// How bright the room behind a door is drawn with its own light, in the units of
-	// Render::SceneMeter (Manager::RoomLightScale compares the two): its picture, divided by the
+	// Render::SceneMeter (MergedView::RoomLightScale compares the two): its picture, divided by the
 	// light scale it was taken with. Without one, the rooms' with pictures; none before any.
 	std::optional<float> RoomBrightness(RE::FormID a_door);
 

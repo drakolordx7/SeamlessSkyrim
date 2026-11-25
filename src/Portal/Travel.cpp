@@ -5,6 +5,10 @@
 #include "Engine/LoadScreen.h"
 #include "Portal/CameraLimit.h"
 #include "Portal/NpcTravel.h"
+#include "Portal/Crossing.h"
+#include "Portal/Gates.h"
+#include "Portal/ImageSpaceBlend.h"
+#include "Portal/MergedView.h"
 #include "Portal/PortalManager.h"
 #include "Portal/ResetClothPhysics.h"
 #include "Portal/TransitionStalls.h"
@@ -191,7 +195,7 @@ namespace
 		// them through again. Past its collision instead, by about the player's radius.
 		auto* here = player->GetParentCell();
 		if (here && !here->IsInteriorCell() && portal.cell && !portal.cell->IsInteriorCell()) {
-			if (const auto reach = CollisionReach(RE::TESForm::LookupByID<RE::TESObjectREFR>(portal.linkedDoor), farCenter, inwardInside, queuedPos.z + 60.0f)) {
+			if (const auto reach = Portal::Gates::CollisionReach(RE::TESForm::LookupByID<RE::TESObjectREFR>(portal.linkedDoor), farCenter, inwardInside, queuedPos.z + 60.0f)) {
 				wanted = std::max(wanted, *reach + kPlayerRadius);
 			}
 		}
@@ -298,7 +302,7 @@ namespace
 				// The space just left is attached (and merged, with the doorway passable) before the
 				// camera is placed: otherwise the camera, behind the player in that doorway, collides
 				// with the building's shell and starts at the player's head for two frames.
-				Portal::Manager::EndHoldoff();
+				Portal::Crossing::EndHoldoff();
 				if (auto* cell = a_player->GetParentCell(); cell && !cell->IsInteriorCell()) {
 					if (leftExterior) {
 						// Through a city gate, from one worldspace into another: the engine takes the
@@ -308,9 +312,9 @@ namespace
 						// the cell buffer (the console's "pcb"), they load again in full: once the trip's
 						// loads are done (Update), and the view back isn't attached before.
 						purgeDeadline = Clock::now() + kPurgeWaitMax;
-						Portal::Manager::EndHoldoff(std::chrono::duration<float>(kPurgeWaitMax).count() + 1.0f);
+						Portal::Crossing::EndHoldoff(std::chrono::duration<float>(kPurgeWaitMax).count() + 1.0f);
 					} else {
-						Portal::Manager::Update(0.0f);
+						Portal::Manager::OnArrival();
 					}
 				}
 				// The player's 3D at the place of arrival before the camera is placed from its head: left
@@ -343,8 +347,8 @@ namespace
 				// The image space follows the camera; set before the camera had moved (by the
 				// Manager::Update above, from the door outside), a room walked out into was drawn for
 				// one frame with the outdoors' and flashed white.
-				Portal::Manager::UpdateImageSpace();
-				Note(std::format("image space blended: {}", Portal::Manager::ToneBlendOn()));
+				Portal::ImageSpaceBlend::Update(Portal::Manager::ReadyPortal());
+				Note(std::format("image space blended: {}", Portal::ImageSpaceBlend::On()));
 				// Taking the space over, the engine fades its references in (behind a loading screen,
 				// unseen): the room or street the player had been looking into faded out and in again.
 				Portal::NpcTravel::ShowAtOnce(a_player->GetParentCell(), 2.0f);
@@ -359,7 +363,7 @@ namespace
 				// (Through a city gate the view back waits for the purge, Update.)
 				if (!purgeDeadline) {
 					auto* cell = a_player->GetParentCell();
-					Portal::Manager::EndHoldoff(cell && cell->IsInteriorCell() && !Portal::Manager::MergeEnabled() ? 0.15f : 0.0f);
+					Portal::Crossing::EndHoldoff(cell && cell->IsInteriorCell() && !Portal::MergedView::MergeEnabled() ? 0.15f : 0.0f);
 				}
 				Portal::ResetClothPhysics();
 				arrivalFrame = true;
@@ -547,7 +551,7 @@ namespace Portal::Travel
 			const bool timedOut = Clock::now() >= *purgeDeadline;
 			purgeDeadline.reset();
 			RE::TES::GetSingleton()->PurgeBufferedCells();
-			Portal::Manager::EndHoldoff();
+			Portal::Crossing::EndHoldoff();
 			Note(std::format("cells of the worldspace left purged{}", timedOut ? " (loads still pending)" : ""));
 		}
 		TravelTrace::Update();

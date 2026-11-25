@@ -5,7 +5,9 @@
 #include "Engine/Fog.h"
 #include "Pictures/DoorwaySnapshot.h"
 #include "Portal/LightOcclusion.h"
+#include "Portal/MergedView.h"
 #include "Portal/PortalManager.h"
+#include "Portal/StandIns.h"
 #include "Render/D3D.h"
 #include "Render/MainView.h"
 #include "Render/PortalPass.h"
@@ -59,8 +61,8 @@ namespace Pictures
 		const auto view = SnapshotView();
 		// Before any stand-in picture is drawn into it: the eye adapts to the real view.
 		Render::SceneMeter::Measure(RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN].SRV, view.width, view.height);
-		const auto chance = Portal::Manager::SnapshotChance();
-		const auto standIns = Portal::Manager::StandIns();
+		const auto chance = Portal::StandIns::SnapshotChance();
+		const auto standIns = Portal::StandIns::Fills();
 		const auto& captureDrawn = Render::PortalPass::CaptureDrawnThisFrame();
 		if (!chance && standIns.empty() && !captureDrawn) {
 			return;
@@ -109,7 +111,7 @@ namespace Pictures
 					source.depth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].depthSRV;
 					auto* here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
 					if (!chance->outdoors && here && !here->IsInteriorCell()) {
-						source.lightScale = Portal::Manager::RoomLightScale(chance->door);
+						source.lightScale = Portal::MergedView::RoomLightScale(chance->door);
 					}
 				} else {
 					source = { Render::PortalPass::ShownTargets().color.SRV, Render::PortalPass::ShownTargets().depth.depthSRV, Render::PortalPass::NearClip(), Render::PortalPass::FarClip(), false };
@@ -146,7 +148,7 @@ namespace Pictures
 					adaptation.kind = Kind::kOutdoorsFromRoom;
 				} else if (!standIn.outdoors && !hereIndoors) {
 					adaptation.kind = Kind::kRoomFromOutdoors;
-					adaptation.lightScale = Portal::Manager::RoomLightScale(standIn.door);
+					adaptation.lightScale = Portal::MergedView::RoomLightScale(standIn.door);
 				}
 				Portal::Snapshot::Draw(view, standIn.door, standIn.outdoors, standIn.gate, corners, standIn.alpha, standIn.outdoors ? plainOutside : kPlainInside, adaptation);
 			});

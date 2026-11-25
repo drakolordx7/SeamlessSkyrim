@@ -56,7 +56,7 @@ namespace Plugin::Settings
 	inline constexpr std::array<Entry, static_cast<std::size_t>(Id::kCount)> kEntries{ {
 		{ Id::kEnabled, L"Portals", L"bEnabled", Type::kBool, 1 },
 		{ Id::kForceDoors, L"Portals", L"iForceDoors", Type::kInt, 0, 0, 2 },
-		// Game units: the reach of a door; its space loads Manager::kLoadAhead further out.
+		// Game units: the reach of a door; its space loads Selection::kLoadAhead further out.
 		{ Id::kDoorOpenDistance, L"Portals", L"iDoorOpenDistance", Type::kInt, 450, 150, 1000 },
 		// A doorway picture's height in texels (a multiple of 4 is used).
 		{ Id::kDoorwayPictureHeight, L"Portals", L"iDoorwayPictureHeight", Type::kInt, 128, 32, 512 },

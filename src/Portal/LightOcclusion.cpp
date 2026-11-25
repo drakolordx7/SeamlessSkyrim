@@ -1,6 +1,6 @@
 #include "Portal/LightOcclusion.h"
 
-#include "Portal/PortalManager.h"
+#include "Portal/MergedView.h"
 
 namespace
 {
@@ -238,7 +238,7 @@ namespace Portal::LightOcclusion
 		if (a_geometry != lastShape || frame != lastFrame) {
 			lastShape = a_geometry;
 			lastFrame = frame;
-			const int slot = a_geometry ? Portal::Manager::MergedRoomOf(a_geometry) : -1;
+			const int slot = a_geometry ? Portal::MergedView::RoomOf(a_geometry) : -1;
 			lastSpace = &spaces[slot > 0 && slot < static_cast<int>(spaces.size()) ? slot : 0];
 			lastLights = nullptr;
 			if (lastSpace->world && a_geometry) {
