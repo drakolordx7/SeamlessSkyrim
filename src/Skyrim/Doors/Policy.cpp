@@ -1,5 +1,7 @@
 #include "Skyrim/Doors/Policy.h"
 
+#include "Core/Doors/Policy.h"
+
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Doors/Host.h"
 #include "Skyrim/Doors/Settings.h"
@@ -21,40 +23,42 @@ namespace Portal::Doors
 		return host;
 	}
 
+	namespace
+	{
+		Core::Doors::PairFacts FactsOf(RE::TESObjectREFR* a_door, const Side& a_linked)
+		{
+			const Side self(a_door);
+			return {
+				.force = DoorUse::GetForce(),
+				.doorOutdoors = self.outdoors,
+				.linkedOutdoors = a_linked.outdoors,
+				.alwaysOpen = AlwaysOpen(CorrectionDoor(self, a_linked)),
+				.doorUsed = DoorUse::Used(self.id),
+				.linkedUsed = DoorUse::Used(a_linked.id),
+			};
+		}
+	}
+
 	bool StreetShownLive(RE::TESObjectREFR* a_door, bool a_linkedOutdoors)
 	{
-		return !Outdoors(a_door) && a_linkedOutdoors;
+		return Core::Doors::StreetShownLive(Outdoors(a_door), a_linkedOutdoors);
 	}
 
 	bool OpenFromAfar(RE::TESObjectREFR* a_door, const Side& a_linked)
 	{
-		using DoorUse::Force;
-		switch (DoorUse::GetForce()) {
-		case Force::kAllOpen:
-			return true;
-		case Force::kAllShut:
-			return false;
-		case Force::kNone:
-			break;
-		}
-		const Side self(a_door);
-		const auto key = CorrectionDoor(self, a_linked);
-		return (self.outdoors && a_linked.outdoors) ||
-		       (!StreetShownLive(a_door, a_linked.outdoors) && AlwaysOpen(key) && host.hasPicture(self.id, a_linked.outdoors));
+		return Core::Doors::OpenFromAfar(FactsOf(a_door, a_linked), [&] { return host.hasPicture(a_door->GetFormID(), a_linked.outdoors); });
 	}
 
 	bool StandsOpen(RE::TESObjectREFR* a_door, const Side& a_linked)
 	{
-		if (OpenFromAfar(a_door, a_linked)) {
-			return true;
-		}
-		const auto key = CorrectionDoor(Side(a_door), a_linked);
-		return DoorUse::GetForce() == DoorUse::Force::kNone && AlwaysOpen(key) && host.spaceShown(a_door->GetFormID());
+		return Core::Doors::StandsOpen(
+			FactsOf(a_door, a_linked), [&] { return host.hasPicture(a_door->GetFormID(), a_linked.outdoors); }, [&] { return host.spaceShown(a_door->GetFormID()); });
 	}
 
 	bool Wanted(RE::TESObjectREFR* a_door, const Side& a_linked)
 	{
-		return StandsOpen(a_door, a_linked) || DoorUse::Used(a_door->GetFormID()) || DoorUse::Used(a_linked.id);
+		return Core::Doors::Wanted(
+			FactsOf(a_door, a_linked), [&] { return host.hasPicture(a_door->GetFormID(), a_linked.outdoors); }, [&] { return host.spaceShown(a_door->GetFormID()); });
 	}
 
 	RE::TESObjectREFR* UsedPairOf(RE::TESObjectREFR* a_door)

@@ -1,6 +1,9 @@
 #include "Skyrim/Doors/Geometry.h"
 
+#include "Core/Doors/Panel.h"
+#include "Core/Doors/Swing.h"
 #include "Skyrim/Doors/Settings.h"
+#include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Portal/Pristine.h"
 
 namespace Portal::Doors
@@ -98,7 +101,7 @@ namespace Portal::Doors
 			}
 			const auto vertex = [&](std::uint16_t a_index) {
 				const auto* p = reinterpret_cast<const float*>(mesh->rawVertexData + static_cast<std::size_t>(a_index) * stride);
-				return a_toRoot * RE::NiPoint3{ p[0], p[1], p[2] };
+				return ToCore(a_toRoot * RE::NiPoint3{ p[0], p[1], p[2] });
 			};
 			for (std::uint32_t t = 0; t < counts.triangleCount; ++t) {
 				const auto* index = mesh->rawIndexData + static_cast<std::size_t>(t) * 3;
@@ -109,44 +112,24 @@ namespace Portal::Doors
 			return true;
 		}
 
-		struct Box
-		{
-			RE::NiPoint3 min{ FLT_MAX, FLT_MAX, FLT_MAX };
-			RE::NiPoint3 max{ -FLT_MAX, -FLT_MAX, -FLT_MAX };
-
-			void Add(const RE::NiPoint3& a_point)
-			{
-				min = { std::min(min.x, a_point.x), std::min(min.y, a_point.y), std::min(min.z, a_point.z) };
-				max = { std::max(max.x, a_point.x), std::max(max.y, a_point.y), std::max(max.z, a_point.z) };
-			}
-			[[nodiscard]] bool Empty() const { return min.x > max.x; }
-		};
+		using Box = Core::Doors::Box;
 
 		struct Leaf
 		{
 			RE::NiPointer<RE::NiAVObject> node;
 			Box                           box;    // its shapes, in the door's space (Geometry::upright)
-			RE::NiPoint3                  pivot;  // its origin there: what its animation turns it around
+			Core::Vec3                    pivot;  // its origin there: what its animation turns it around
 			// Modelled from the front only: a load door's back faces the other cell and was never
 			// seen until a doorway showed it swung open (Markarth's Dwemer doors, empty but for their
 			// carvings' rims).
 			bool oneSided = false;
 		};
 
-		// How far open (0 shut .. 1 open) a leaf stands through one of its door's own animations,
-		// sampled evenly over its length.
-		constexpr std::size_t kMotionSamples = 64;
-		struct Motion
-		{
-			float              seconds = 0.0f;
-			std::vector<float> amount;
-		};
-
 		struct Geometry
 		{
 			RE::NiPointer<RE::NiAVObject> root;  // the 3D measured; a reloaded door is measured anew
 			// The door's "Open" and "Close" animations, as a door opened by the game plays them.
-			Motion opening, shutting;
+			Core::Doors::SwingCurves curves;
 			Box                           panel;  // the leaves; along the thin axis, their faces
 			bool                          thinX = false;
 			bool                          measured = false;  // false: the base object's bounds
@@ -171,20 +154,7 @@ namespace Portal::Doors
 			const auto* closed = ClosedLocal(a_door, a_root);
 			const auto& local = closed ? closed->rotate : a_root->local.rotate;
 			const auto  placed = a_root->parent ? a_root->parent->world.rotate * local : local;
-			const auto  up = placed.Transpose() * RE::NiPoint3{ 0.0f, 0.0f, 1.0f };
-			const float along[3] = { up.x, up.y, up.z };
-			int         axis = 2;
-			for (int i = 0; i < 2; ++i) {
-				if (std::abs(along[i]) > std::abs(along[axis])) {
-					axis = i;
-				}
-			}
-			const float   sign = along[axis] >= 0.0f ? 1.0f : -1.0f;
-			RE::NiMatrix3 upright({ 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f });
-			upright.entry[0][(axis + 1) % 3] = sign;  // the sign twice: still a turn, not a mirror
-			upright.entry[1][(axis + 2) % 3] = 1.0f;
-			upright.entry[2][axis] = sign;
-			return upright;
+			return ToNi(Core::Doors::UprightRotation(ToCore(placed.Transpose() * RE::NiPoint3{ 0.0f, 0.0f, 1.0f })));
 		}
 
 		RE::NiTransform Turned(const RE::NiMatrix3& a_rotate, const RE::NiTransform& a_transform)
@@ -203,25 +173,12 @@ namespace Portal::Doors
 		};
 		static_assert(sizeof(QuatTransform) == 0x20);
 
-		// For a door whose mesh has no animation: the game never moves it, so there is nothing to
-		// copy. Eased both ways over the length of a common door's.
-		Motion StillDoorMotion(bool a_opening)
-		{
-			Motion motion{ 1.0f, std::vector<float>(kMotionSamples) };
-			for (std::size_t i = 0; i < kMotionSamples; ++i) {
-				const float t = static_cast<float>(i) / static_cast<float>(kMotionSamples - 1);
-				const float eased = 0.5f - 0.5f * std::cos(std::numbers::pi_v<float> * t);
-				motion.amount[i] = a_opening ? eased : 1.0f - eased;
-			}
-			return motion;
-		}
-
 		// The door's own "Open" and "Close" animations (its NiControllerManager's sequences), as the
 		// first of a_leaves that "Open" moves: how far it has turned from shut, as a share of how far
 		// "Open" turns it. A leaf that slides instead of turning, by how far it has moved. A leaf
 		// "Open" leaves where it is (a latch, a frame piece the controller also targets) has no
 		// share to give: every amount divided by its zero movement.
-		std::optional<std::pair<Motion, Motion>> OwnMotion(RE::NiAVObject* a_root, const std::vector<RE::NiAVObject*>& a_leaves)
+		std::optional<Core::Doors::SwingCurves> OwnMotion(RE::NiAVObject* a_root, const std::vector<RE::NiAVObject*>& a_leaves)
 		{
 			RE::NiControllerManager* manager = nullptr;
 			for (auto* controller = a_root->GetControllers(); controller && !manager; controller = controller->next.get()) {
@@ -268,25 +225,14 @@ namespace Portal::Doors
 					continue;
 				}
 				const auto sample = [&](RE::NiControllerSequence* a_sequence, RE::NiInterpolator* a_interpolator) {
-					Motion motion{ (a_sequence->endKeyTime - a_sequence->beginKeyTime) / a_sequence->frequency, std::vector<float>(kMotionSamples) };
-					for (std::size_t i = 0; i < kMotionSamples; ++i) {
-						const float t = static_cast<float>(i) / static_cast<float>(kMotionSamples - 1);
-						const auto  value = at(a_interpolator, a_sequence->beginKeyTime + t * (a_sequence->endKeyTime - a_sequence->beginKeyTime));
-						motion.amount[i] = (slides ? moved(value) : turned(value)) / full;
-					}
-					return motion;
+					return Core::Doors::SampleCurve((a_sequence->endKeyTime - a_sequence->beginKeyTime) / a_sequence->frequency, [&](float a_t) {
+						const auto value = at(a_interpolator, a_sequence->beginKeyTime + a_t * (a_sequence->endKeyTime - a_sequence->beginKeyTime));
+						return (slides ? moved(value) : turned(value)) / full;
+					});
 				};
-				return std::pair{ sample(open, openInterpolator), sample(close, closeInterpolator) };
+				return Core::Doors::SwingCurves{ sample(open, openInterpolator), sample(close, closeInterpolator) };
 			}
 			return std::nullopt;
-		}
-
-		float AmountAt(const Motion& a_motion, float a_t)
-		{
-			const float at = std::clamp(a_t, 0.0f, 1.0f) * static_cast<float>(a_motion.amount.size() - 1);
-			const auto  i = std::min(static_cast<std::size_t>(at), a_motion.amount.size() - 2);
-			const float f = at - static_cast<float>(i);
-			return a_motion.amount[i] + (a_motion.amount[i + 1] - a_motion.amount[i]) * f;
 		}
 
 		Geometry Measure(RE::TESObjectREFR* a_door, RE::NiAVObject* a_root)
@@ -310,28 +256,22 @@ namespace Portal::Doors
 				geometry.leaves.push_back({ RE::NiPointer<RE::NiAVObject>(a_root), {}, {} });
 			}
 			for (auto* node : animated) {
-				geometry.leaves.push_back({ RE::NiPointer<RE::NiAVObject>(node), {}, toDoor(node).translate });
+				geometry.leaves.push_back({ RE::NiPointer<RE::NiAVObject>(node), {}, ToCore(toDoor(node).translate) });
 			}
 			if (const auto own = OwnMotion(a_root, animated)) {
-				std::tie(geometry.opening, geometry.shutting) = *own;
+				geometry.curves = *own;
 			} else {
-				geometry.opening = StillDoorMotion(true);
-				geometry.shutting = StillDoorMotion(false);
+				geometry.curves = { Core::Doors::StillCurve(true), Core::Doors::StillCurve(false) };
 			}
-			logger::info("portal: door {:08X}: opens over {:.2f} s, shuts over {:.2f} s{}", id, geometry.opening.seconds, geometry.shutting.seconds,
+			logger::info("portal: door {:08X}: opens over {:.2f} s, shuts over {:.2f} s{}", id, geometry.curves.opening.seconds, geometry.curves.shutting.seconds,
 				animated.empty() ? " (not animated)" : "");
 
-			struct Triangle
-			{
-				RE::NiPoint3 a, b, c;
-				int          leaf;
-			};
-			std::vector<Triangle> panelTriangles;
+			std::vector<Core::Doors::Triangle> panelTriangles;
 			bool                  complete = true;
 			RE::BSVisit::TraverseScenegraphGeometries(a_root, [&](RE::BSGeometry* a_shape) {
 				const int  leaf = leafOf(a_shape);
 				Box        box;
-				complete &= ForEachTriangle(a_shape, toDoor(a_shape), [&](const RE::NiPoint3& a, const RE::NiPoint3& b, const RE::NiPoint3& c) {
+				complete &= ForEachTriangle(a_shape, toDoor(a_shape), [&](const Core::Vec3& a, const Core::Vec3& b, const Core::Vec3& c) {
 					box.Add(a);
 					box.Add(b);
 					box.Add(c);
@@ -360,9 +300,9 @@ namespace Portal::Doors
 			if (!complete || geometry.panel.Empty()) {
 				const auto& bound = a_door->GetBaseObject()->boundData;
 				geometry.panel = {};
-				geometry.panel.Add(geometry.upright * RE::NiPoint3{ static_cast<float>(bound.boundMin.x), static_cast<float>(bound.boundMin.y), static_cast<float>(bound.boundMin.z) });
-				geometry.panel.Add(geometry.upright * RE::NiPoint3{ static_cast<float>(bound.boundMax.x), static_cast<float>(bound.boundMax.y), static_cast<float>(bound.boundMax.z) });
-				geometry.thinX = (geometry.panel.max.x - geometry.panel.min.x) < (geometry.panel.max.y - geometry.panel.min.y);
+				geometry.panel.Add(ToCore(geometry.upright * RE::NiPoint3{ static_cast<float>(bound.boundMin.x), static_cast<float>(bound.boundMin.y), static_cast<float>(bound.boundMin.z) }));
+				geometry.panel.Add(ToCore(geometry.upright * RE::NiPoint3{ static_cast<float>(bound.boundMax.x), static_cast<float>(bound.boundMax.y), static_cast<float>(bound.boundMax.z) }));
+				geometry.thinX = geometry.panel.ThinAlongX();
 				for (auto& leaf : geometry.leaves) {
 					leaf.box = geometry.panel;
 				}
@@ -371,45 +311,13 @@ namespace Portal::Doors
 				return geometry;
 			}
 			geometry.measured = true;
-			geometry.thinX = (geometry.panel.max.x - geometry.panel.min.x) < (geometry.panel.max.y - geometry.panel.min.y);
+			geometry.thinX = geometry.panel.ThinAlongX();
 
-			// The faces: surface facing along the thin axis, by where it is on that axis (1 unit
-			// steps); the outermost steps holding a good share of the most are the panel's faces.
-			std::map<int, float> facing;
-			for (const auto& t : panelTriangles) {
-				const auto  normal = (t.b - t.a).Cross(t.c - t.a);  // length: twice the area
-				const float along = 0.5f * std::abs(geometry.thinX ? normal.x : normal.y);
-				const float at = (geometry.thinX ? t.a.x + t.b.x + t.c.x : t.a.y + t.b.y + t.c.y) / 3.0f;
-				facing[static_cast<int>(std::floor(at))] += along;
-			}
-			float most = 0.0f;
-			for (const auto& [at, area] : facing) {
-				most = std::max(most, area);
-			}
-			int front = INT_MAX, back = INT_MIN;
-			for (const auto& [at, area] : facing) {
-				if (area >= 0.25f * most) {
-					front = std::min(front, at);
-					back = std::max(back, at);
-				}
-			}
-			// A leaf whose surface faces one way along the thin axis only (a tenth the other way at
-			// most: a carving's rim, a handle's back).
-			std::vector<std::array<float, 2>> sides(geometry.leaves.size());
-			for (const auto& t : panelTriangles) {
-				const auto  normal = (t.b - t.a).Cross(t.c - t.a);
-				const float along = geometry.thinX ? normal.x : normal.y;
-				sides[t.leaf][along >= 0.0f ? 0 : 1] += std::abs(along);
-			}
+			const auto faces = Core::Doors::FindFaces(panelTriangles, geometry.thinX, geometry.leaves.size());
 			for (std::size_t i = 0; i < geometry.leaves.size(); ++i) {
-				geometry.leaves[i].oneSided = std::min(sides[i][0], sides[i][1]) < 0.1f * std::max(sides[i][0], sides[i][1]);
+				geometry.leaves[i].oneSided = faces.oneSided[i];
 			}
-			if (front <= back) {
-				auto& low = geometry.thinX ? geometry.panel.min.x : geometry.panel.min.y;
-				auto& high = geometry.thinX ? geometry.panel.max.x : geometry.panel.max.y;
-				low = std::max(low, static_cast<float>(front));
-				high = std::min(high, static_cast<float>(back + 1));
-			}
+			Core::Doors::ClampToFaces(geometry.panel, geometry.thinX, faces);
 			logger::info("portal: door {:08X}: panel ({:.1f},{:.1f},{:.1f})..({:.1f},{:.1f},{:.1f}), {} leaf/leaves ({} without a back), {} fixed shape(s)", id,
 				geometry.panel.min.x, geometry.panel.min.y, geometry.panel.min.z, geometry.panel.max.x, geometry.panel.max.y, geometry.panel.max.z,
 				geometry.leaves.size(), std::ranges::count_if(geometry.leaves, [](const Leaf& a_leaf) { return a_leaf.oneSided; }), geometry.fixed.size());
@@ -478,13 +386,10 @@ namespace Portal::Doors
 		// A box in the door's space, placed like the door (see Corners for the bit order).
 		std::array<RE::NiPoint3, 8> CornersOf(RE::TESObjectREFR* a_door, const Box& a_box)
 		{
-			const auto                  world = DoorFrame(a_door);
-			std::array<RE::NiPoint3, 8> corners;
-			for (int i = 0; i < 8; ++i) {
-				const RE::NiPoint3 local{ i & 1 ? a_box.max.x : a_box.min.x, i & 2 ? a_box.max.y : a_box.min.y, i & 4 ? a_box.max.z : a_box.min.z };
-				corners[i] = world * local;
-			}
-			return corners;
+			const auto                  corners = Core::Doors::BoxCorners(a_box, ToCore(DoorFrame(a_door)));
+			std::array<RE::NiPoint3, 8> result;
+			std::ranges::transform(corners, result.begin(), [](const Core::Vec3& a_corner) { return ToNi(a_corner); });
+			return result;
 		}
 	}
 
@@ -547,23 +452,8 @@ namespace Portal::Doors
 		for (std::size_t i = 0; i < geometry.leaves.size() && i < swung.size(); ++i) {
 			const auto& leaf = geometry.leaves[i];
 			auto*       node = swung[i].node.get();
-			// The hinge is the leaf's end its animation turns it around (its origin), or for a door
-			// not animated, the low end.
-			const float low = wideX ? leaf.box.min.x : leaf.box.min.y;
-			const float high = wideX ? leaf.box.max.x : leaf.box.max.y;
-			const float pivot = wideX ? leaf.pivot.x : leaf.pivot.y;
-			const bool  hingeHigh = node != door3D && std::abs(pivot - high) < std::abs(pivot - low);
-			const float        hingeEnd = hingeHigh ? high : low;
-			const float        span = (high - low) * (hingeHigh ? -1.0f : 1.0f);
-			const float        thinMiddle = wideX ? 0.5f * (leaf.box.min.y + leaf.box.max.y) : 0.5f * (leaf.box.min.x + leaf.box.max.x);
-			const RE::NiPoint3 hinge = wideX ? RE::NiPoint3{ hingeEnd, thinMiddle, 0.0f } : RE::NiPoint3{ thinMiddle, hingeEnd, 0.0f };
-			const RE::NiPoint3 free = wideX ? RE::NiPoint3{ span, 0.0f, 0.0f } : RE::NiPoint3{ 0.0f, span, 0.0f };
-			const float        sign = (-free.y * room.x + free.x * room.y) >= 0.0f ? 1.0f : -1.0f;  // the free end turns towards the room
-			const float        angle = sign * a_amount * RE::deg_to_rad(degrees);
-			const float        c = std::cos(angle), s = std::sin(angle);
-			RE::NiTransform    turn;  // in the door's space
-			turn.rotate = RE::NiMatrix3({ c, -s, 0.0f }, { s, c, 0.0f }, { 0.0f, 0.0f, 1.0f });
-			turn.translate = hinge - turn.rotate * hinge;
+			const RE::NiTransform turn = ToNi(Core::Doors::LeafTurn(
+				{ leaf.box, wideX ? leaf.pivot.x : leaf.pivot.y, node == door3D }, geometry.thinX, ToCore(room), a_amount, degrees));  // in the door's space
 			if (node == door3D) {
 				node->local = swung[i].closedLocal * upright.Invert() * turn * upright;
 			} else {
@@ -580,16 +470,20 @@ namespace Portal::Doors
 	{
 		std::scoped_lock lock(geometryLock);
 		const auto&      geometry = GeometryOf(a_door);
-		// a_t is how far open the swing has got, so shutting runs it from 1 down to 0: "Close" is
-		// played from its end backwards in a_t, forwards in time.
-		return a_opening ? AmountAt(geometry.opening, a_t) : AmountAt(geometry.shutting, 1.0f - a_t);
+		return geometry.curves.Amount(a_t, a_opening);
+	}
+
+	Core::Doors::SwingCurves SwingCurvesOf(RE::TESObjectREFR* a_door)
+	{
+		std::scoped_lock lock(geometryLock);
+		return GeometryOf(a_door).curves;
 	}
 
 	float SwingSeconds(RE::TESObjectREFR* a_door, bool a_opening)
 	{
 		std::scoped_lock lock(geometryLock);
 		const auto&      geometry = GeometryOf(a_door);
-		return (a_opening ? geometry.opening : geometry.shutting).seconds;
+		return geometry.curves.Seconds(a_opening);
 	}
 
 	void RestoreLeaves(RE::FormID a_door)
@@ -682,26 +576,15 @@ namespace Portal::Doors
 			box = geometry.panel;
 			if (a_options.wholeMesh) {
 				// Across and up only: the faces stay the panel's.
+				std::vector<Box> fixed;
 				for (const auto& [shape, extent] : geometry.fixed) {
-					(thinX ? box.min.y : box.min.x) = std::min(thinX ? box.min.y : box.min.x, thinX ? extent.min.y : extent.min.x);
-					(thinX ? box.max.y : box.max.x) = std::max(thinX ? box.max.y : box.max.x, thinX ? extent.max.y : extent.max.x);
-					box.min.z = std::min(box.min.z, extent.min.z);
-					box.max.z = std::max(box.max.z, extent.max.z);
+					fixed.push_back(extent);
 				}
+				box = Core::Doors::WholeMesh(box, thinX, fixed);
 			}
 		}
-		const auto c = CornersOf(a_door, box);
-		const int  thinBit = thinX ? 1 : 2;
-		const int  wideBit = thinX ? 2 : 1;
-		RE::NiPoint3 outward = c[thinBit] - c[0];
-		outward.Unitize();
-		const bool maxSide = (a_viewer - (c[0] + c[7]) * 0.5f).Dot(outward) > 0.0f;
-		// The panel's max face is the viewer's when maxSide; the quad goes 2 units off the chosen face,
-		// away from the panel.
-		const bool maxFace = maxSide != a_options.behindPanel;
-		const int  face = maxFace ? thinBit : 0;
-		const auto shift = outward * (maxFace ? 2.0f : -2.0f);
-		return { c[face] + shift, c[face | wideBit] + shift, c[face | 4] + shift, c[face | wideBit | 4] + shift };
+		const auto c = Core::Doors::BoxCorners(box, ToCore(DoorFrame(a_door)));
+		return ToNi(Core::Doors::QuadOnFace(c, thinX, ToCore(a_viewer), a_options.behindPanel));
 	}
 
 	std::array<RE::NiPoint3, 4> ShownQuad(RE::TESObjectREFR* a_door, const RE::NiPoint3& a_viewer, QuadOptions a_options)
@@ -731,9 +614,7 @@ namespace Portal::Doors
 		}
 		// In its cell's own coordinates: a street merged into an interior is drawn scaled
 		// (PlacementOf), and its door with it.
-		const float scale = Placement(a_door).scale;
-		const float x = box.max.x - box.min.x, y = box.max.y - box.min.y;
-		return { 0.5f * scale * (thinX ? y : x), 0.5f * scale * (thinX ? x : y), 0.5f * scale * (box.max.z - box.min.z) };
+		return Core::Doors::SizeOf(box, thinX, Placement(a_door).scale);
 	}
 
 	std::vector<RE::NiPointer<RE::BSGeometry>> BehindPanel(RE::TESObjectREFR* a_door)
@@ -750,15 +631,9 @@ namespace Portal::Doors
 		if (!geometry.measured) {
 			return {};
 		}
-		const auto  along = [&](const RE::NiPoint3& a_point) { return geometry.thinX ? a_point.x : a_point.y; };
-		const float low = along(geometry.panel.min), high = along(geometry.panel.max);
-		const bool  frontHigh = along(front) > 0.5f * (low + high);
 		std::vector<RE::NiPointer<RE::BSGeometry>> behind;
 		for (const auto& [shape, box] : geometry.fixed) {
-			// Reaching out behind the panel and nowhere in front of its face (the dragon door's box
-			// starts inside the panel's thickness); a frame reaches out on both sides.
-			const bool isBehind = frontHigh ? along(box.max) <= high + 1.0f && along(box.min) < low : along(box.min) >= low - 1.0f && along(box.max) > high;
-			if (isBehind) {
+			if (Core::Doors::IsBehindPanel(box, geometry.panel, geometry.thinX, ToCore(front))) {
 				behind.push_back(shape);
 			}
 		}

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Core/Doors/Swing.h"
+
 // One door's swing, held by whoever draws that door open: the portal's door, a merged room's, a
 // doorway stand-in's. It runs along the door's own animation curves (SwingAmount) and, when its
 // owner lets go (the space was released, the door is handed to another owner), leaves the door
@@ -18,8 +20,8 @@ namespace Portal::Doors
 	{
 	public:
 		// 0..1, how far the door has swung open.
-		[[nodiscard]] float Amount() const { return amount; }
-		[[nodiscard]] bool  Shut() const { return amount <= 0.0f; }
+		[[nodiscard]] float Amount() const { return state.Amount(); }
+		[[nodiscard]] bool  Shut() const { return state.Shut(); }
 
 		// Starts from where the door was let go of, if it was just now, else shut. The progress and
 		// its direction go together: the progress means a different opening on the opening curve than
@@ -32,9 +34,9 @@ namespace Portal::Doors
 		// was, the door jumped. True when it started out shut.
 		bool Step(RE::TESObjectREFR* a_timed, bool a_wanted, float a_delta);
 		// Open at once: a door that stands open is never seen opening.
-		void SnapOpen() { amount = 1.0f; }
+		void SnapOpen() { state.SnapOpen(); }
 		// Shut and forgotten, once the door is no longer held (Close, or let go of).
-		void Reset() { *this = {}; }
+		void Reset() { state.Reset(); }
 
 		// a_door's leaves turned to where the swing stands: towards a_room, a horizontal world
 		// direction, by the pair's settings.
@@ -51,7 +53,6 @@ namespace Portal::Doors
 		static void ForgetAll();
 
 	private:
-		float amount = 0.0f;
-		bool  opening = false;  // the direction of the progress
+		Core::Doors::SwingState state;
 	};
 }

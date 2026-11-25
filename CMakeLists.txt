@@ -25,7 +25,35 @@ set(SKYRIM_PLUGINS_DIR
 	"E:/SteamLibrary/steamapps/common/Skyrim Special Edition/Data/SKSE/Plugins"
 	CACHE PATH "Where the post-build step copies the DLL and PDB. Empty disables the copy.")
 
-file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp src/*.h)
+# The game-independent part: no CommonLib, no PCH, no Windows or D3D. Its include root is src/, so
+# Core headers read "Core/Math/Vec3.h"; cmake/CheckCore.cmake fails the build for a Core file that
+# includes an engine, platform or Skyrim header, and without CommonLib's include path an RE/ or
+# SKSE/ include doesn't compile anyway.
+file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS src/Core/*.cpp src/Core/*.h)
+add_library(SeamlessCore STATIC ${CORE_SOURCES})
+target_include_directories(SeamlessCore PUBLIC src)
+target_compile_features(SeamlessCore PUBLIC cxx_std_23)
+add_custom_target(
+	SeamlessCoreCheck
+	COMMAND ${CMAKE_COMMAND} -DCORE_DIR=${CMAKE_SOURCE_DIR}/src/Core -P ${CMAKE_SOURCE_DIR}/cmake/CheckCore.cmake
+	COMMENT "Checking that Core includes nothing but the standard library and Core"
+	VERBATIM
+)
+add_dependencies(SeamlessCore SeamlessCoreCheck)
+if(MSVC)
+	target_compile_options(SeamlessCore PRIVATE /W4 /permissive- /utf-8 /Zi "/d1trimfile:${CMAKE_SOURCE_DIR}/")
+endif()
+
+# Unit tests of Core; run build/<config>/SeamlessCoreTests.exe. Not part of the plugin DLL.
+add_executable(SeamlessCoreTests tests/Core/CoreTests.cpp)
+target_link_libraries(SeamlessCoreTests PRIVATE SeamlessCore)
+if(MSVC)
+	target_compile_options(SeamlessCoreTests PRIVATE /W4 /permissive- /utf-8)
+endif()
+enable_testing()
+add_test(NAME SeamlessCoreTests COMMAND SeamlessCoreTests)
+
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/Skyrim/*.cpp src/Skyrim/*.h src/PCH.h)
 
 # Plain add_library instead of CommonLib's add_commonlibsse_plugin(): its generated declaration
 # can't express "uses post-1.6.629 structs", so SKSE disabled the plugin on 1.7.104. The
@@ -34,6 +62,7 @@ add_library(${PROJECT_NAME} SHARED ${SOURCES})
 find_package(nlohmann_json CONFIG REQUIRED)
 target_link_libraries(
 	${PROJECT_NAME} PRIVATE
+	SeamlessCore
 	CommonLibSSE::CommonLibSSE
 	nlohmann_json::nlohmann_json
 	ws2_32

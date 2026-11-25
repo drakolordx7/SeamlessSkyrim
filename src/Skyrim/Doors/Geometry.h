@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Core/Doors/Panel.h"
+#include "Core/Doors/Swing.h"
+
 // Where a door's panel is and how its leaves swing, measured from its mesh. Shared by the door
 // pair (Pair), the renderer (portal camera, quad), the held-open state (Hold) and the swing.
 namespace Portal::Doors
@@ -13,12 +16,7 @@ namespace Portal::Doors
 	// a unit vector, its length is the panel's thickness.
 	RE::NiPoint3                PanelNormal(RE::TESObjectREFR* a_door);
 
-	struct PanelSize
-	{
-		float halfWidth = 0;
-		float halfDepth = 0;  // half the panel's thickness
-		float halfHeight = 0;
-	};
+	using PanelSize = Core::Doors::PanelSize;
 	[[nodiscard]] PanelSize Size(RE::TESObjectREFR* a_door);
 
 	// The doorway as a flat quad just off the door panel (as measured closed): in front of it on
@@ -49,6 +47,8 @@ namespace Portal::Doors
 	// progress a_t (0 shut .. 1 open; shutting runs it down), opening or shutting, and how long each
 	// takes: a door the portal swings moves as the game moves it. The game plays its "Open" and
 	// "Close", not one backwards.
+	// The door's own opening and shutting curves, for a swing to step along.
+	[[nodiscard]] Core::Doors::SwingCurves SwingCurvesOf(RE::TESObjectREFR* a_door);
 	[[nodiscard]] float SwingAmount(RE::TESObjectREFR* a_door, float a_t, bool a_opening);
 	[[nodiscard]] float SwingSeconds(RE::TESObjectREFR* a_door, bool a_opening);
 	// Main thread: the door's leaves swung open around their hinges, a_amount from 0 (closed) to 1

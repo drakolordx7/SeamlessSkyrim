@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Core/Doors/Policy.h"
+
 // Which doors stand open because someone used them. A seamless door doesn't open as the player
 // comes near: the player opens it by using it (no loading screen), an NPC by reaching for it on
 // its way through, and it swings shut again a few seconds later, once nobody stands in it. The
@@ -9,12 +11,7 @@ namespace Portal::DoorUse
 {
 	// [Portals] iForceDoors: every door open (locked ones too), or every door shut until used
 	// (the per-door "always open" and the gates included).
-	enum class Force
-	{
-		kNone = 0,
-		kAllOpen = 1,
-		kAllShut = 2,
-	};
+	using Force = Core::Doors::Force;
 	[[nodiscard]] Force GetForce();
 	void                SetForce(Force a_force);
 
