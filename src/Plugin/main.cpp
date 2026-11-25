@@ -5,7 +5,7 @@
 #include "Plugin/Frame.h"
 #include "Portal/Travel.h"
 #include "UI/Menu.h"
-#include "Probe.h"
+#include "Diag/Probe.h"
 
 // Runs on SE 1.5.97 and on AE from 1.6.629. We read engine structs directly (cells, TES, process
 // lists), so declare the post-1.6.629 layout honestly: AE's SKSE then refuses to load us on the

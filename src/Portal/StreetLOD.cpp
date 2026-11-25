@@ -1,6 +1,6 @@
 #include "Portal/StreetLOD.h"
 
-#include "Hooks.h"
+#include "Engine/Hooks.h"
 
 namespace
 {

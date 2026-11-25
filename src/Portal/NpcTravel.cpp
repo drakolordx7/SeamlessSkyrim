@@ -1,11 +1,11 @@
 #include "Portal/NpcTravel.h"
 
-#include "Portal/DoorPair.h"
-#include "Portal/DoorUse.h"
+#include "Doors/DoorPair.h"
+#include "Doors/DoorUse.h"
 #include "Portal/PortalManager.h"
 
 #include "Diag/Telemetry.h"
-#include "Hooks.h"
+#include "Engine/Hooks.h"
 
 namespace
 {

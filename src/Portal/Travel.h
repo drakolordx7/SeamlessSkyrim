@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Portal/Active.h"
-#include "Portal/DoorPair.h"
+#include "Doors/DoorPair.h"
 
 // Walking through a load door without a loading screen.
 //

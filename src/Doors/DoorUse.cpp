@@ -1,6 +1,6 @@
-#include "Portal/DoorUse.h"
+#include "Doors/DoorUse.h"
 
-#include "Portal/DoorPair.h"
+#include "Doors/DoorPair.h"
 
 namespace
 {

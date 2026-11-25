@@ -1,18 +1,18 @@
-#include "Portal/PortalRender.h"
+#include "Render/PortalRender.h"
 #include "Portal/Travel.h"
 
 #include "Diag/Telemetry.h"
-#include "Hooks.h"
+#include "Engine/Hooks.h"
 
 #include "Portal/CameraLimit.h"
-#include "Portal/DoorPair.h"
-#include "Portal/DoorwaySnapshot.h"
+#include "Doors/DoorPair.h"
+#include "Pictures/DoorwaySnapshot.h"
 #include "Portal/LightOcclusion.h"
 #include "Portal/LightScene.h"
 #include "Portal/MergedCull.h"
 #include "Portal/NpcTravel.h"
 #include "Portal/PortalManager.h"
-#include "Portal/RemoteCell.h"
+#include "Spaces/RemoteCell.h"
 #include "Render/Backend.h"
 
 #include <d3d11.h>

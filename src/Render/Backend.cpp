@@ -1,8 +1,8 @@
 #include "Render/Backend.h"
 
-#include "Paths.h"
+#include "Engine/Paths.h"
 #include "Render/Enb.h"
-#include "Render/Native.h"
+#include "Render/Native/Native.h"
 
 namespace
 {

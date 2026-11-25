@@ -1,4 +1,4 @@
-#include "Probe.h"
+#include "Diag/Probe.h"
 
 namespace
 {

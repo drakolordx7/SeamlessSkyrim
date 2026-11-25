@@ -1,6 +1,6 @@
-#include "Portal/DoorwaySnapshot.h"
+#include "Pictures/DoorwaySnapshot.h"
 
-#include "Paths.h"
+#include "Engine/Paths.h"
 
 #include <DirectXPackedVector.h>
 #include <d3d11.h>

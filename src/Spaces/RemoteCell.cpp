@@ -1,11 +1,11 @@
-#include "Portal/RemoteCell.h"
+#include "Spaces/RemoteCell.h"
 
 #include "Diag/Telemetry.h"
-#include "Hooks.h"
-#include "Portal/DoorPair.h"
+#include "Engine/Hooks.h"
+#include "Doors/DoorPair.h"
 #include "Portal/LightScene.h"
 #include "Portal/Pristine.h"
-#include "Probe.h"
+#include "Diag/Probe.h"
 
 namespace
 {

@@ -1,15 +1,15 @@
 #include "Portal/Travel.h"
-#include "Portal/RemoteCell.h"
+#include "Spaces/RemoteCell.h"
 
 #include "Diag/Telemetry.h"
 #include "Render/FlashGuard.h"
-#include "Hooks.h"
-#include "Paths.h"
+#include "Engine/Hooks.h"
+#include "Engine/Paths.h"
 #include "Portal/CameraLimit.h"
 #include "Portal/LightScene.h"
 #include "Portal/NpcTravel.h"
 #include "Portal/PortalManager.h"
-#include "Probe.h"
+#include "Diag/Probe.h"
 
 namespace
 {

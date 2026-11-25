@@ -1,6 +1,6 @@
-#include "Portal/DoorPair.h"
+#include "Doors/DoorPair.h"
 
-#include "Paths.h"
+#include "Engine/Paths.h"
 #include "Portal/Pristine.h"
 #include "Portal/PortalManager.h"
 

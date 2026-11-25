@@ -1,6 +1,6 @@
-#include "Render/Native.h"
+#include "Render/Native/Native.h"
 
-#include "Hooks.h"
+#include "Engine/Hooks.h"
 #include "Portal/LightOcclusion.h"
 #include "Portal/PortalManager.h"
 

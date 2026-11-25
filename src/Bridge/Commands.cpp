@@ -6,16 +6,16 @@
 #include "Bridge/Perf.h"
 #include "Bridge/ReverseEngineering.h"
 #include "Bridge/Sampler.h"
-#include "Portal/DoorPair.h"
-#include "Portal/DoorUse.h"
-#include "Portal/DoorwaySnapshot.h"
+#include "Doors/DoorPair.h"
+#include "Doors/DoorUse.h"
+#include "Pictures/DoorwaySnapshot.h"
 #include "Portal/LightScene.h"
 #include "Portal/MergedCull.h"
 #include "Portal/PortalManager.h"
-#include "Portal/PortalRender.h"
-#include "Portal/RemoteCell.h"
+#include "Render/PortalRender.h"
+#include "Spaces/RemoteCell.h"
 #include "Portal/Travel.h"
-#include "Probe.h"
+#include "Diag/Probe.h"
 
 // Defined next to SeamlessPortal_IsMergedShape (PortalManager.cpp).
 

@@ -1,13 +1,12 @@
 #include "UI/Menu.h"
 
-#include "Portal/DoorPair.h"
-#include "Portal/DoorUse.h"
-#include "Portal/DoorwaySnapshot.h"
+#include "Doors/DoorPair.h"
+#include "Doors/DoorUse.h"
+#include "Pictures/DoorwaySnapshot.h"
 #include "Portal/PortalManager.h"
-#include "Portal/PortalRender.h"
 #include "Render/Backend.h"
 
-#include "Paths.h"
+#include "Engine/Paths.h"
 #include "SKSEMenuFramework.h"
 
 namespace

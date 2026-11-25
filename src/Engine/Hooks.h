@@ -2,6 +2,9 @@
 
 #include <Windows.h>
 
+#include <cstddef>
+#include <string_view>
+
 namespace Hooks
 {
 	// An offset that moves between builds: inside an engine function, or into a struct the plugin

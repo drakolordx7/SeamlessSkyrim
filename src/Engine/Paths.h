@@ -2,6 +2,10 @@
 
 #include <Windows.h>
 
+#include <filesystem>
+#include <string>
+#include <string_view>
+
 namespace Paths
 {
 	// The folder this DLL was loaded from (Data/SKSE/Plugins), where its ini files are installed.
