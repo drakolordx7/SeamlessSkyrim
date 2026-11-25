@@ -58,7 +58,8 @@ Most spells are missile projectiles and come with this.
 1. **Visible motion:** replace the stilling with a sync that places a moving object's 3D in the
    merged space. This also fixes clutter kicked by a room's own people.
 2. **Threshold collision:** copy each side's fixed collision within about 150 units of the doorway
-   into the other world (`MergeCollision` does this for a whole room), so objects have a floor on
+   into the other world (`RemoteCell::MergeCollision` did this for a whole room, removed with
+   walk-into-rooms, in git history), so objects have a floor on
    both sides.
 3. **Transfer:** active bodies near a doorway are moved to the other world and cell when their
    centre crosses the plane, with velocities mapped.

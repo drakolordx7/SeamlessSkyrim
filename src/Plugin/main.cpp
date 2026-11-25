@@ -44,12 +44,8 @@ namespace
 		case SKSE::MessagingInterface::kSaveGame:
 			// The save is written over the next frames; re-attaching right away (seen 0.1 s later)
 			// would put the cell back while it's being serialized.
-			// Except in a room walked into: let go, it would leave the player standing in the walls
-			// of its house, and fall (see Manager::NoteRoomForSave).
-			if (!Portal::Manager::NoteRoomForSave()) {
-				Portal::Manager::ReleaseAll("saving", 3.0f);
-				Portal::Travel::CloseArrivalDoor();
-			}
+			Portal::Manager::ReleaseAll("saving", 3.0f);
+			Portal::Travel::CloseArrivalDoor();
 			break;
 		case SKSE::MessagingInterface::kPreLoadGame:
 			Portal::Manager::ReleaseAll("loading a save", 3.0f);
@@ -58,7 +54,6 @@ namespace
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
 			Probe::DumpWorldState("game loaded");
-			Portal::Manager::EnterRoomAfterLoad();
 			break;
 		case SKSE::MessagingInterface::kNewGame:
 			Probe::DumpWorldState("game loaded");
@@ -76,12 +71,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 	// the end of the log, which was where a test's findings were.
 	spdlog::default_logger()->flush_on(spdlog::level::trace);
 	SKSE::AllocTrampoline(2048);
-	if (auto* serialization = SKSE::GetSerializationInterface()) {
-		serialization->SetUniqueID('SMLS');
-		serialization->SetSaveCallback(Portal::Manager::SaveRoom);
-		serialization->SetLoadCallback(Portal::Manager::LoadRoom);
-		serialization->SetRevertCallback([](SKSE::SerializationInterface*) { Portal::Manager::ForgetRoom(); });
-	}
 	logger::info("{} {} loaded", SKSE::GetPluginName(), SKSE::GetPluginVersion().string());
 
 	// Before anything can call the telemetry sink or the frame callbacks.

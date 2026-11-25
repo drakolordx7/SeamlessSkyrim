@@ -561,7 +561,6 @@ namespace Portal
 		StepWorld(nullptr);
 		auto* root = scene.get();
 		auto* here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
-		UnmergeCollision();
 		if (std::exchange(merged, false)) {
 			const Diag::Scope scope("release: unmerge cells");
 			// Back under the portal root, unmoved, so the normal release below applies.

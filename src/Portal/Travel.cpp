@@ -18,7 +18,6 @@ namespace
 	using Portal::TravelTrace::Note;
 
 	std::optional<Portal::Travel::CrossingRequest> pending;
-	std::optional<RE::NiPoint3>                    exactArrival;  // see Begin
 	constexpr float                                kArrivalStep = 12.0f;
 	constexpr float                                kPlayerRadius = 20.0f;
 	std::optional<float>                           arrivalYaw;  // heading to set once the teleport has run
@@ -179,43 +178,31 @@ namespace
 		inwardInside.Unitize();
 		// A little further in than the exact mapping, so the camera, right at the player, starts
 		// inside the room rather than in the doorway's plane.
-		queuedPos = mapping.toLinked * player->GetPosition() + (a_request.exact ? RE::NiPoint3{} : inwardInside * kArrivalStep);
-		if (!a_request.exact) {
-			// Carried through before reaching the door (in first person as soon as the camera reaches
-			// the doorway's picture, PortalManager's Approach), the mapped position is still short
-			// of the far door: inside the far building's wall. A little past its plane instead.
-			constexpr float kPastFarDoor = 2.0f;
-			const auto      farCenter = mapping.toLinked * mapping.sourceCenter;
-			float           wanted = kPastFarDoor;
-			// A city gate is thick, its collision reaching well past the plane: come out there, the
-			// engine pushed the player out of it to whichever side was nearer, and put on the gate's
-			// far side (in front of Whiterun's gate, walking out of the city) the next step carried
-			// them through again. Past its collision instead, by about the player's radius.
-			auto* here = player->GetParentCell();
-			if (here && !here->IsInteriorCell() && portal.cell && !portal.cell->IsInteriorCell()) {
-				if (const auto reach = CollisionReach(RE::TESForm::LookupByID<RE::TESObjectREFR>(portal.linkedDoor), farCenter, inwardInside, queuedPos.z + 60.0f)) {
-					wanted = std::max(wanted, *reach + kPlayerRadius);
-				}
+		queuedPos = mapping.toLinked * player->GetPosition() + inwardInside * kArrivalStep;
+		// Carried through before reaching the door (in first person as soon as the camera reaches
+		// the doorway's picture, PortalManager's Approach), the mapped position is still short
+		// of the far door: inside the far building's wall. A little past its plane instead.
+		constexpr float kPastFarDoor = 2.0f;
+		const auto      farCenter = mapping.toLinked * mapping.sourceCenter;
+		float           wanted = kPastFarDoor;
+		// A city gate is thick, its collision reaching well past the plane: come out there, the
+		// engine pushed the player out of it to whichever side was nearer, and put on the gate's
+		// far side (in front of Whiterun's gate, walking out of the city) the next step carried
+		// them through again. Past its collision instead, by about the player's radius.
+		auto* here = player->GetParentCell();
+		if (here && !here->IsInteriorCell() && portal.cell && !portal.cell->IsInteriorCell()) {
+			if (const auto reach = CollisionReach(RE::TESForm::LookupByID<RE::TESObjectREFR>(portal.linkedDoor), farCenter, inwardInside, queuedPos.z + 60.0f)) {
+				wanted = std::max(wanted, *reach + kPlayerRadius);
 			}
-			const float past = (queuedPos.x - farCenter.x) * inwardInside.x + (queuedPos.y - farCenter.y) * inwardInside.y;
-			if (past < wanted) {
-				queuedPos += inwardInside * (wanted - past);
-			}
+		}
+		const float past = (queuedPos.x - farCenter.x) * inwardInside.x + (queuedPos.y - farCenter.y) * inwardInside.y;
+		if (past < wanted) {
+			queuedPos += inwardInside * (wanted - past);
 		}
 		// Height: walking into a merged doorway, the player is on the exterior's ground behind the
 		// door (inside the building's shell), which needn't be level with the room's floor; arriving
 		// 160 units up put them on Alvor's upper floor. Near the door the floor is the marker's.
-		exactArrival.reset();
-		if (!a_request.exact) {
-			queuedPos.z = std::clamp(queuedPos.z, marker.z - 16.0f, marker.z + 48.0f);
-		} else if (portal.cell && !portal.cell->IsInteriorCell()) {
-			// Walking out of a room into its merged copy: the place is inside the house's shell,
-			// solid until the room is merged and the passage opened after the teleport. Sent there,
-			// the engine looked for a free place for 1.2 s and put the player on the ground under
-			// the house. They go to the door's marker, and are moved once the room is there.
-			exactArrival = queuedPos + RE::NiPoint3{ 0.0f, 0.0f, 4.0f };
-			queuedPos = marker;
-		}
+		queuedPos.z = std::clamp(queuedPos.z, marker.z - 16.0f, marker.z + 48.0f);
 		auto* from = RE::PlayerCharacter::GetSingleton()->GetParentCell();
 		leftExterior = from && !from->IsInteriorCell();
 		arrival = Arrival{ mapping.toLinked * mapping.sourceCenter, inwardInside, Clock::now(), portal.linkedDoor, a_request.limitCamera, a_request.cameraFloor,
@@ -324,22 +311,6 @@ namespace
 						Portal::Manager::EndHoldoff(std::chrono::duration<float>(kPurgeWaitMax).count() + 1.0f);
 					} else {
 						Portal::Manager::Update(0.0f);
-						if (exactArrival) {
-							a_player->SetPosition(*exactArrival, true);
-							// The camera (below) is placed from the player's head; left where the
-							// marker put it until the frame's scene update, the frame of walking out
-							// into a room was drawn from the door outside: a frame of bright street.
-							a_player->Update3DPosition(true);
-							for (const bool firstPerson : { false, true }) {
-								if (auto* root = a_player->Get3D(firstPerson)) {
-									RE::NiUpdateData update;
-									root->Update(update);
-								}
-							}
-							Note(std::format("moved into the merged room at ({:.0f},{:.0f},{:.0f})", exactArrival->x, exactArrival->y, exactArrival->z));
-							exactArrival.reset();
-							Portal::Manager::Update(0.0f);  // in the room now: its house's passage opened
-						}
 					}
 				}
 				// The player's 3D at the place of arrival before the camera is placed from its head: left
@@ -406,7 +377,6 @@ namespace
 		SetArrivalDoorOpen(false);
 		arrival.reset();
 		pending.reset();
-		exactArrival.reset();
 	}
 
 	// Every trip of the game's own shows its loading screen; a seamless one never does (Engine::SkipLoadScreen).
@@ -556,14 +526,6 @@ namespace Portal::Travel
 	{
 		std::scoped_lock guard(lock);
 		return arrival ? arrival->door : 0;
-	}
-
-	void ThroughDoorTo(RE::TESObjectREFR* a_door, const RE::NiPoint3& a_position, float a_yaw)
-	{
-		auto& queued = QueueTeleport(a_door);
-		queued.location = a_position;
-		queued.angle = { 0.0f, 0.0f, a_yaw };
-		logger::info("travel: after loading, through door {:08X} to ({:.0f},{:.0f},{:.0f})", a_door->GetFormID(), a_position.x, a_position.y, a_position.z);
 	}
 
 	void ThroughDoor(RE::TESObjectREFR* a_door)

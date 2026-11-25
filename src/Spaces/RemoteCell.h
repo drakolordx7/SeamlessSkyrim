@@ -11,7 +11,7 @@
 //
 // One class, in files by reason to change: Attach.cpp (lifecycle, readiness, persistent
 // references, release), Havok.cpp (stepping), Placement.cpp (merging into the world's scene,
-// bounds), Collision.cpp (merged collision, stand-in bodies, a gate's passage), EngineHooks.cpp
+// bounds), Collision.cpp (a gate's passage), EngineHooks.cpp
 // (hooks on the engine's attach and unload), Describe.cpp (diagnostics).
 namespace Portal
 {
@@ -87,18 +87,6 @@ namespace Portal
 		// While merged, now and then: see MovedBounds::Unfix.
 		void UnfixNewBounds(const RE::TESObjectCELL* a_cell);
 
-		// Merged, for walking into the room without leaving the world: copies of its fixed collision
-		// (walls, floors, furniture) put into a_world where its 3D is drawn (a_toSource). The originals
-		// stay in the room's own world, under its NPCs. a_skip: a reference left out (its door, open).
-		// Replaces any copies made before.
-		// a_doorCenter, a_inward: the room's door and the direction into the room, in the room's
-		// coordinates; what lies wholly behind that door (the box behind it) is left out.
-		void MergeCollision(const RE::NiTransform& a_toSource, RE::bhkWorld* a_world, RE::FormID a_skip, const RE::NiPoint3& a_doorCenter, const RE::NiPoint3& a_inward);
-		[[nodiscard]] bool CollisionMerged() const { return !mergedBodies.empty(); }
-		// The copies that stand across the room's doorway (its wall with the doorway in it, which
-		// also holds the box behind the door) taken out of the world while the player passes
-		// through: walked out of the room, the box's inner wall stopped them just outside the door.
-		void SetDoorwayPiecesPresent(bool a_present);
 		// A city gate: the cells of both worldspaces share one Havok world, and the other one's
 		// buildings stand in the player's way at the gate (Tamriel's gatehouse has a raised floor
 		// where Whiterun's passage is). Bodies of the attached cells near the doorway, on the
@@ -106,12 +94,6 @@ namespace Portal
 		// RestorePassage (Release does it too).
 		void ClearPassage(const RE::NiPoint3& a_center, const RE::NiPoint3& a_inward, float a_halfWidth, float a_halfHeight);
 		void RestorePassage();
-		// Per frame while the room's collision is copied: the player and the room's people are in
-		// different Havok worlds and walked through each other. Each gets a stand-in in the other's
-		// world (a copy of one of its body's bones, kept where that bone is, mapped), which the other
-		// side's character controllers bump into. a_world: the player's.
-		void UpdateStandIns(const RE::NiTransform& a_toSource, RE::bhkWorld* a_world);
-		void ClearStandIns();
 
 		// Once at startup: step the remote cell's Havok world inside the engine's step job.
 		// a_enabled false: the hook is installed but never steps a second world.
@@ -138,11 +120,6 @@ namespace Portal
 		// Collision objects switched to "visual only" while merged (see Merge), with their flags.
 		using Stilled = std::vector<std::pair<RE::NiPointer<RE::NiAVObject>, std::uint32_t>>;
 
-		struct StandIn
-		{
-			RE::NiPointer<RE::bhkRigidBody> copy;
-			RE::NiPointer<RE::bhkRigidBody> original;  // the bone body it follows
-		};
 		// FormIDs of the worldspace's persistent references with 3D standing in each of a_cells.
 		using PersistentByCell = std::unordered_map<const RE::TESObjectCELL*, std::vector<RE::FormID>>;
 
@@ -152,7 +129,6 @@ namespace Portal
 		static RE::NiAVObject*          Cell3D(const RE::TESObjectCELL* a_cell);
 		static std::vector<RE::Actor*>  ActorsIn(const RE::TESObjectCELL* a_cell);
 		static bool                     Attachable(const RE::TESObjectCELL* a_cell);
-		static StandIn                  MakeStandIn(RE::bhkRigidBody* a_original, RE::bhkWorld* a_world, const RE::NiTransform& a_map);
 
 		// Attach.cpp
 		void AttachOne(RE::TESObjectCELL* a_cell);
@@ -191,9 +167,6 @@ namespace Portal
 		// Placement.cpp
 		void MoveBounds(const RE::NiTransform& a_toSource);
 		void RestoreBounds();
-
-		// Collision.cpp
-		void UnmergeCollision();
 
 		std::vector<RE::TESObjectCELL*>            cells;  // [0] = the door's cell
 		RE::NiPointer<RE::ShadowSceneNode>         scene;  // the root the cells hang under; see LightScene
@@ -234,12 +207,6 @@ namespace Portal
 		// with the LOD root (Manager's MergeLOD).
 		std::vector<RE::TESObjectCELL*> movedCells;
 		Placement                       placed;
-		std::vector<RE::NiPointer<RE::bhkRigidBody>> mergedBodies;  // see MergeCollision
-		std::vector<RE::NiPointer<RE::bhkRigidBody>> doorwayPieces;  // of mergedBodies, see SetDoorwayPiecesPresent
-		RE::bhkWorld*                                mergedWorld = nullptr;
-		bool                                         doorwayPiecesPresent = true;
-		std::unordered_map<RE::FormID, StandIn>      actorStandIns;  // the room's people, in the player's world
-		StandIn                                      playerStandIn;  // the player, in the room's world
 		// Bodies ClearPassage took out of the world, and that world.
 		std::vector<RE::NiPointer<RE::bhkWorldObject>> passageCleared;
 		RE::bhkWorld*                                  passageWorld = nullptr;

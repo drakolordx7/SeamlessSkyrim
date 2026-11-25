@@ -37,7 +37,7 @@ height.
 | 1 | Portal pass: the other space drawn by our own reduced render, put into the doorway | In use where nothing can be merged | A reduced render, never quite the real look |
 | 2 | Crossing without a loading screen | In use | (kept in every design) |
 | 3 | Render-merge: the room drawn by the game's own main pass, masked at the door | In use, looking in | On its own only one way |
-| 4 | Walk into rooms: the game kept outdoors inside the room | Built, off | Visible switches, too many, NPCs can't interact |
+| 4 | Walk into rooms: the game kept outdoors inside the room | Removed (in git history before this change) | Visible switches, too many, NPCs can't interact |
 | 5 | Sectors: interiors moved into the worldspace by a generator | Dropped, code removed | Houses don't fit their shells; "where is the player" faked everywhere |
 | 6 | Open cities by merge | Dropped, code removed | The edge between the two worlds can't be fixed automatically |
 | 7 | Open Cities (the existing mod) as a base | Not taken | A dependency; loses mods' navmesh edits |
@@ -96,7 +96,7 @@ On its own it only works one way: the outdoors' terrain, LOD, sky and water are 
 and can't be moved into the interior. What made the other way possible is 9: the interior's
 scene takes the street in, and the outdoors' global systems turn out to survive indoors.
 
-## 4. Walk into rooms (`[Portals] bWalkIntoRooms`, built, off)
+## 4. Walk into rooms (`[Portals] bWalkIntoRooms`, removed: in git history before this change)
 
 The game keeps the player outdoors while they walk into the merged room:
 - the room's collision is copied into the outdoor physics world;
@@ -104,7 +104,7 @@ The game keeps the player outdoors while they walk into the merged room:
 - the game switches into the interior only once the doorway has been out of view for 3 s, and
   back out when the player heads for the door.
 
-Why it is off (also noted in `PortalManager.cpp`):
+Why it was removed:
 - **Every switch showed:** a long frame, the light stepping, the player's own head for a frame.
 - **Far too many switches:** 58 in seven minutes of play, once a second on the stairs of the Hall
   of the Dead.

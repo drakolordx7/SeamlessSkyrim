@@ -40,50 +40,12 @@
 
 namespace
 {
-	// Walking into a merged room (from outdoors) without the game switching into it at the door: the
-	// room's collision is copied into the world (RemoteCell::MergeCollision), and the game switches
-	// into the room only where the doorway can't be seen (see Approach). Seen from inside, the
-	// doorway shows the game's own outdoors (its shadows, distant land and sky), not a picture drawn
-	// by this plugin. [Portals] bWalkIntoRooms, off by default: every switch in the middle of a room
-	// showed (a long frame, the light stepping, the player's own head for a frame), it happened far
-	// more often than walking through doors does (58 times in seven minutes of play), and the room's
-	// people, in another cell than the player, can't see, greet or fight them meanwhile.
-	bool            walkIntoRooms = false;
-	constexpr float kMinRoomDepth = 120.0f;        // the switch into the room never happens closer to the door
-	constexpr float kRoomSwitchOutDepth = 180.0f;  // walking towards the door, outdoors from here on whatever the view
-	// ... and from this near on with the doorway in view. Not from anywhere it could be seen: every
-	// switch is a visible step (a long frame, the light changing), and switched out from across the
-	// room (the doorway seen 300-550 units away), the player was switched straight back in by the
-	// rules below (upstairs, far from the door, the doorway turned away from): 58 switches in seven
-	// minutes of play, the Hall of the Dead's stairs once a second.
-	constexpr float kRoomSwitchOutViewDepth = 350.0f;
-	constexpr float kApproachSeconds = 0.25f;  // walking towards the door this long counts as heading out
-	float           approachingFor = 0.0f;
-	constexpr float kUpstairsHeight = 60.0f;       // feet this far above the doorway's floor: in the room itself (see Approach)
-	// Doorway "in view": its corners within the screen widened by this much (a fraction of it).
-	// Switching out needs it seen with the smaller margin, switching in unseen with the larger one,
-	// so turning at the edge doesn't switch back and forth.
+	// A doorway counts as in view (DoorwayInView) with its corners within the screen widened by this
+	// much (a fraction of it).
 	constexpr float kSeenMargin = 0.15f;
-	constexpr float kUnseenMargin = 0.35f;
-	constexpr float kUnseenSeconds = 3.0f;    // the doorway unseen this long before the switch into the room
-	float           doorwayUnseenFor = 0.0f;
-	bool            playerInRoom = false;  // last frame: walking in a room walked into (see Approach)
-
-	// A save made while walking in such a room (Manager::NoteRoomForSave): the outdoor door and where
-	// the player is, in the room's own space.
-	struct RoomSave
-	{
-		RE::FormID   door = 0;
-		RE::NiPoint3 position;
-		float        yaw = 0.0f;
-	};
-	std::optional<RoomSave> roomToSave;  // for the save being written
-	std::optional<RoomSave> roomLoaded;  // from the save just loaded
-	constexpr std::uint32_t kRoomRecord = 'ROOM';
-	constexpr std::uint32_t kRoomRecordVersion = 1;
 
 	// Whether the doorway (its opening, at the door's plane) is on screen or close to it. Walls in
-	// between aren't considered: seen through one, the switch outdoors happens a bit early.
+	// between aren't considered.
 	bool DoorwayInView(const Portal::Doors::Mapping& a_mapping, float a_margin)
 	{
 		auto* camera = RE::Main::WorldRootCamera();
@@ -136,8 +98,6 @@ namespace
 	// How long after a space behind a door is attached its references skip the engine's fade-in
 	// (merged, SkipFadeIn takes over): long enough for those loaded last.
 	constexpr float kShowAtOnceSeconds = 3.0f;
-	// Walking "into" the door: horizontal distance to the door's centre while facing it.
-	constexpr float kCrossDistance = 90.0f;
 	constexpr float kRetryCooldown = 5.0f;
 
 	bool                                   enabled = false;
@@ -244,8 +204,7 @@ namespace
 		// keep's, and through the keep's the street's facade around it showed, where the keep's own
 		// door frame stands. The street seen from inside is drawn larger by their ratio, around its
 		// door, so that the two doorways are one. Far off it looks the same (as much larger as it is
-		// further away); close to the doorway it shrinks back on walking out. Only the street: a room
-		// seen from outside is walked into on its collision, which can't be scaled.
+		// further away); close to the doorway it shrinks back on walking out. Only the street.
 		if (!a_portal.cell->IsInteriorCell() && source->GetBaseObject() == linked->GetBaseObject()) {
 			const float ratio = Portal::Doors::Size(source).halfHeight / Portal::Doors::Size(linked).halfHeight;
 			if (std::abs(ratio - 1.0f) > 0.01f) {
@@ -1553,7 +1512,6 @@ namespace
 
 	std::optional<float> Approach(RE::PlayerCharacter* a_player, const Portal::Manager::Active& a_portal, float a_delta)
 	{
-		playerInRoom = false;  // set again below while it holds
 		// In portal mode the camera must still be in front of the portal quad (2 units in front of
 		// the panel) when the crossing is carried out.
 		constexpr float kCrossLead = 4.0f;
@@ -1586,66 +1544,6 @@ namespace
 		const auto  offset = a_player->GetPosition() - mapping.sourceCenter;
 		const float depth = DepthOf(a_player->GetPosition());
 		const float side = std::abs(offset.x * mapping.inward.y - offset.y * mapping.inward.x);
-		// Rooms walked into from outdoors (walkIntoRooms): the player is outdoors, on the room's
-		// copied collision, while the doorway can be seen; the game switches into the room only
-		// where it can't (nothing on screen changes then), and back outdoors as soon as it can
-		// again, or the player comes near the door. Seen from inside, the doorway then always shows
-		// the game's own outdoors.
-		auto*      here = a_player->GetParentCell();
-		const bool switching = walkIntoRooms && crossCooldown <= 0.0f;
-		if (merged && remote.CollisionMerged()) {
-			const bool passing = depth > -90.0f && depth < 40.0f && side < mapping.halfWidth + 30.0f;
-			remote.SetDoorwayPiecesPresent(!passing);
-		}
-		// Up the room's stairs the house around it is in the way: the parts of its collision above
-		// the ground floor (its upper floors, the roof's beams) are bodies the passage through it
-		// (OpenPassage) doesn't reach. Upstairs the player is in the room itself.
-		const bool upstairs = a_player->GetPositionZ() > mapping.sourceCenter.z - mapping.halfHeight + kUpstairsHeight;
-		{
-			static RE::FormID lastDoor = 0;
-			static float      lastDepth = 0.0f;
-			const bool        nearer = lastDoor == a_portal.sourceDoor && depth > lastDepth + 0.05f;
-			lastDoor = a_portal.sourceDoor;
-			lastDepth = depth;
-			approachingFor = nearer ? approachingFor + a_delta : 0.0f;
-			const bool heading = approachingFor >= kApproachSeconds;
-			// Not while sitting, lying or in a conversation: the switch would carry the player out of it.
-			const bool busy = a_player->AsActorState()->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal || RE::MenuTopicManager::GetSingleton()->speaker;
-			if (switching && !merged && !busy && here && here->IsInteriorCell() && !a_portal.cell->IsInteriorCell() && Mergeable(a_portal.cell, here) && depth < 0.0f &&
-				!openSwing.Shut() && !upstairs) {
-				const bool inView = DoorwayInView(mapping, kSeenMargin);
-				if ((inView && heading && -depth <= kRoomSwitchOutViewDepth) || (-depth <= kRoomSwitchOutDepth && heading)) {
-					crossCooldown = 1.0f;
-					logger::info("portal: switching outdoors {:.1f} short of the door, side {:.1f}{}", -depth, side, inView ? " (doorway in view)" : "");
-					Portal::Travel::Request({ .portal = a_portal, .exact = true });
-					return std::nullopt;
-				}
-			}
-		}
-		playerInRoom = merged && remote.CollisionMerged() && depth > 0.0f;
-		if (playerInRoom) {
-			HoldPassageHeight(a_player, false);
-			// The house around the room is solid (its collision fills its shell): off while the
-			// player is in the room, also when they arrived in it from inside (above).
-			if (passage.empty() || (passageCheck -= a_delta) <= 0.0f) {
-				passageCheck = 1.0f / 6.0f;
-				OpenPassage(a_player, mapping, mapping.halfHeight);
-			}
-			// Into the room where the doorway can't be seen, a little way in; and always before the
-			// portal would be let go (far from its door), which takes the copied collision with it.
-			const float doorDistance = a_player->GetPosition().GetDistance(mapping.sourceCenter);
-			const bool  tooFar = doorDistance > ReleaseRadius() - 150.0f;
-			// Unseen for a while, not just while turning: looking round a room with two doors (or
-			// glancing away from one) switched in and out every second or two, each time a stutter.
-			doorwayUnseenFor = DoorwayInView(mapping, kUnseenMargin) ? 0.0f : doorwayUnseenFor + a_delta;
-			if (switching && ((depth >= kMinRoomDepth && (tooFar || doorwayUnseenFor >= kUnseenSeconds)) || upstairs)) {
-				crossCooldown = 1.0f;
-				attachHoldoff = 3.0f;
-				logger::info("portal: switching into the room at depth {:.1f}, side {:.1f}{}", depth, side, tooFar ? " (far from the door)" : upstairs ? " (upstairs)" : "");
-				Portal::Travel::Request({ .portal = a_portal, .exact = true });
-			}
-			return std::nullopt;
-		}
 		// Behind the door plane counts too: someone who got past it while a crossing wasn't
 		// possible yet (the cooldown) is standing in the void behind the doorway and must still be
 		// carried through.
@@ -1689,12 +1587,8 @@ namespace
 		} else if (!passage.empty() && depth < -45.0f) {
 			ClosePassage();
 		}
-		// With the room's collision copied in, its floor carries the player through the doorway.
-		if (!passage.empty() && !remote.CollisionMerged()) {
+		if (!passage.empty()) {
 			HoldPassageHeight(a_player, true);
-		}
-		if (merged && remote.CollisionMerged()) {
-			return std::nullopt;  // not carried through at the door (see above)
 		}
 		const bool  inDoorway = side <= mapping.halfWidth + 20.0f;
 		// Merged: behind the door plane the player walks on the exterior's ground inside the
@@ -1747,72 +1641,9 @@ namespace
 		return pullIn ? std::optional(std::max(0.0f, -depth - lead)) : std::nullopt;
 	}
 
-	// The merged room's collision copied into a_world, placed like the room (RemoteCell::MergeCollision).
-	void MergeRoomCollision(const Portal::Manager::Active& a_portal, RE::bhkWorld* a_world)
-	{
-		const auto   mapping = Portal::Doors::Compute(a_portal);
-		RE::NiPoint3 inward = mapping.toLinked.rotate * RE::NiPoint3{ mapping.inward.x, mapping.inward.y, 0.0f };
-		inward.z = 0.0f;
-		inward.Unitize();
-		remote.MergeCollision(mapping.toLinked.Invert(), a_world, a_portal.linkedDoor, mapping.toLinked * mapping.sourceCenter, inward);
-	}
-
-	// ---- using things in a room walked into ----------------------------------------------------
-	// In a room walked into from outdoors the player is still outdoors (RemoteCell::MergeCollision);
-	// its people and things are in the room's own Havok world, which the crosshair doesn't look
-	// into: nothing could be talked to, opened or taken. The pick is repeated in the room's world
-	// along the same line, mapped into the room. Using what it finds switches into the room first
-	// (Travel, exact: nothing on screen changes), and the use follows on arrival.
-	RE::ObjectRefHandle                   pendingUse;
-	std::chrono::steady_clock::time_point pendingUseAt;
-
-	// How far beyond the camera's distance from the player the room's things can be reached
-	// (the engine's activation reach is about this).
+	// How far beyond the camera's distance from the player a door is reached (the engine's
+	// activation reach is about this).
 	constexpr float kUseReach = 180.0f;
-
-	void PickInRoom(RE::CrosshairPickData* a_pick, const RE::NiPoint3& a_origin, const RE::NiPoint3& a_direction)
-	{
-		const auto portal = Portal::Manager::ReadyPortal();
-		auto*      roomWorld = remote.Cell() ? remote.Cell()->GetbhkWorld() : nullptr;
-		if (!portal || !remote.Merged() || !remote.CollisionMerged() || !roomWorld) {
-			return;
-		}
-		const auto found = Portal::Doors::TryCompute(*portal);
-		if (!found) {
-			return;
-		}
-		const auto&        mapping = *found;
-		auto*              player = RE::PlayerCharacter::GetSingleton();
-		const float        reach = kUseReach + a_origin.GetDistance(player->GetPosition() + RE::NiPoint3{ 0.0f, 0.0f, 120.0f });
-		RE::NiPoint3       direction = mapping.toLinked.rotate * a_direction;
-		direction.Unitize();
-		const RE::NiPoint3 from = mapping.toLinked * a_origin;
-		const RE::NiPoint3 to = from + direction * reach;
-		const float        scale = RE::bhkWorld::GetWorldScale();
-		RE::bhkPickData    pick;
-		pick.rayInput.from = RE::hkVector4(from.x * scale, from.y * scale, from.z * scale, 0.0f);
-		pick.rayInput.to = RE::hkVector4(to.x * scale, to.y * scale, to.z * scale, 0.0f);
-		pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kItemPick);
-		if (!roomWorld->PickObject(pick) || !pick.rayOutput.HasHit()) {
-			return;
-		}
-		auto* ref = RE::TESHavokUtilities::FindCollidableRef(*pick.rayOutput.rootCollidable);
-		if (!ref || ref == player || ref->GetFormID() == portal->linkedDoor) {
-			return;
-		}
-		const float distance = reach * pick.rayOutput.hitFraction;
-		// What the world's own pick found, unless it is further away.
-		auto* const raw = reinterpret_cast<std::uint8_t*>(a_pick);
-		auto&       target = *reinterpret_cast<RE::ObjectRefHandle*>(raw + 0x04);
-		auto&       targetActor = *reinterpret_cast<RE::ObjectRefHandle*>(raw + 0x08);
-		auto&       point = *reinterpret_cast<RE::NiPoint3*>(raw + 0x10);
-		if (target.get() && point.GetDistance(a_origin) < distance) {
-			return;
-		}
-		target = ref->GetHandle();
-		targetActor = ref->As<RE::Actor>() ? ref->GetHandle() : RE::ObjectRefHandle();
-		point = mapping.toLinked.Invert() * (from + direction * distance);
-	}
 
 	// An open doorway has no collision for the crosshair to find its door by (Doors::Open): a door
 	// opened by a use is found by its doorway, which the crosshair passes through, to be shut.
@@ -1874,33 +1705,8 @@ namespace
 		{
 			func(a_pick, a_world, a_origin, a_direction);
 			if (a_pick && a_origin && a_direction) {
-				PickInRoom(a_pick, *a_origin, *a_direction);
 				PickOpenDoorway(a_pick, *a_origin, *a_direction);
 			}
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
-	// PlayerCharacter::ActivatePickRef (ID 40548) using the picked reference (ID 19796 at +0x10D).
-	struct UseHook
-	{
-		static bool Thunk(RE::TESObjectREFR* a_ref, RE::TESObjectREFR* a_activator, std::uint8_t a_arg2, RE::TESBoundObject* a_object, std::int32_t a_count, bool a_defaultOnly)
-		{
-			const auto portal = Portal::Manager::ReadyPortal();
-			const bool inRoom = a_ref && portal && remote.Merged() && remote.CollisionMerged() &&
-			                    std::ranges::find(remote.Cells(), a_ref->GetParentCell()) != remote.Cells().end();
-			if (inRoom && a_activator == RE::PlayerCharacter::GetSingleton()) {
-				if (crossCooldown <= 0.0f) {
-					crossCooldown = 1.0f;
-					attachHoldoff = 3.0f;
-					pendingUse = a_ref->GetHandle();
-					pendingUseAt = std::chrono::steady_clock::now();
-					logger::info("portal: {:08X} used in the room walked into: switching into the room first", a_ref->GetFormID());
-					Portal::Travel::Request({ .portal = *portal, .exact = true });
-				}
-				return true;
-			}
-			return func(a_ref, a_activator, a_arg2, a_object, a_count, a_defaultOnly);
 		}
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};
@@ -1925,23 +1731,6 @@ namespace
 		}
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};
-
-	// Per frame: the use waiting for the switch into its room.
-	void FinishPendingUse()
-	{
-		auto ref = pendingUse.get();
-		if (!ref) {
-			pendingUse.reset();
-			return;
-		}
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		if (player->GetParentCell() == ref->GetParentCell()) {
-			pendingUse.reset();
-			ref->ActivateRef(player, 0, nullptr, 1, false);
-		} else if (std::chrono::steady_clock::now() - pendingUseAt > std::chrono::seconds(3)) {
-			pendingUse.reset();
-		}
-	}
 
 	// Using a seamless door opens it, or shuts it again if it was opened by a use; never the
 	// engine's trip through it with a loading screen (walking through the open doorway is the
@@ -2126,7 +1915,6 @@ namespace Portal::Manager
 		SetDoorOpenDistance(static_cast<float>(Int(Id::kDoorOpenDistance)));
 		Portal::DoorUse::SetForce(static_cast<Portal::DoorUse::Force>(Int(Id::kForceDoors)));
 		Portal::Snapshot::SetPictureHeight(Int(Id::kDoorwayPictureHeight));
-		walkIntoRooms = Bool(Id::kWalkIntoRooms);
 		mergeOutdoors = Bool(Id::kMergeOutdoors);
 		MergedCull::SetMode(static_cast<MergedCull::Mode>(Int(Id::kMergedCull)));
 		SetShownRooms(Int(Id::kShownRooms));
@@ -2170,10 +1958,6 @@ namespace Portal::Manager
 			REL::Relocation<std::uintptr_t> pickSite{ REL::RelocationID(39534, 40620), Hooks::Offset(0x214, 0x1D5, 0x1E7) };
 			if (Hooks::CallsTo(pickSite.address(), REL::RelocationID(25591, 26127), "portal: crosshair pick")) {
 				CrosshairPickHook::func = SKSE::GetTrampoline().write_call<5>(pickSite.address(), CrosshairPickHook::Thunk);
-			}
-			REL::Relocation<std::uintptr_t> useSite{ REL::RelocationID(39471, 40548), REL::Relocate(0x135, 0x10D) };
-			if (Hooks::CallsTo(useSite.address(), REL::RelocationID(19369, 19796), "portal: use of the picked reference")) {
-				UseHook::func = SKSE::GetTrampoline().write_call<5>(useSite.address(), UseHook::Thunk);
 			}
 			REL::Relocation<std::uintptr_t> hangSite{ REL::RelocationID(36970, 37995), REL::Relocate(0x298, 0x279) };
 			if (Hooks::CallsTo(hangSite.address(), REL::RelocationID(18683, 19165), "portal: actor hung into its cell")) {
@@ -2480,9 +2264,6 @@ namespace Portal::Manager
 		approachLimit.reset();
 		Portal::Doors::HidePrompt();
 		Portal::Doors::Swing::Expire(a_delta);
-		if (pendingUse) {
-			FinishPendingUse();
-		}
 		static float forgetTimer = 0.0f;
 		if ((forgetTimer -= a_delta) <= 0.0f) {
 			forgetTimer = 5.0f;
@@ -2548,11 +2329,6 @@ namespace Portal::Manager
 			const char* end = reach > ReleaseRadius() ? "player walked away" : better ? "a closer door" : locked ? "door locked" :
 			                  off                         ? "portal switched off for this door" :
 			                                                nullptr;
-			// Walking in a room walked into, the player stands on its copied collision: it isn't let
-			// go under them. Approach switches into the room before the portal's reach ends.
-			if (playerInRoom && remote.CollisionMerged()) {
-				end = nullptr;
-			}
 			// A door a stand-in will hold open is let go open, to be taken over where it is: swung shut
 			// first, it swung open again right after.
 			const bool keepOpen = door && linkedDoor && !off && !locked && Portal::Doors::Wanted(door, linkedDoor);
@@ -2648,9 +2424,6 @@ namespace Portal::Manager
 					const auto toSource = placement.toSource;
 					const Diag::Scope scope("merge");
 					const auto        result = remote.Merge(placement);
-					if (walkIntoRooms && !MergedOutdoors()) {
-						MergeRoomCollision(*portal, here->GetbhkWorld());
-					}
 					if (MergedOutdoors()) {
 						MergeLOD(toSource, Lookup(portal->sourceDoor));
 					}
@@ -2670,9 +2443,6 @@ namespace Portal::Manager
 			if (remote.Merged()) {
 				PublishRooms();
 				UpdateMerged(*primaryRoom, remote, *portal, 0, doorWanted, a_delta, culls);
-				if (const auto mapping = Doors::TryCompute(*portal); mapping && remote.CollisionMerged()) {
-					remote.UpdateStandIns(mapping->toLinked.Invert(), here->GetbhkWorld());
-				}
 			}
 			approachLimit = Approach(player, *portal, a_delta);
 		}
@@ -2761,12 +2531,7 @@ namespace Portal::Manager
 			const float side = std::abs(offset.x * mapping->inward.y - offset.y * mapping->inward.x);
 			const float above = std::abs(offset.z) - mapping->halfHeight;
 			const auto  fade = [](float a_beyond) { return 1.0f - std::clamp(a_beyond / 100.0f, 0.0f, 1.0f); };
-			// Walking in a merged room, the camera past the doorway's plane is in the room however far
-			// to the side or upstairs: there the outdoor image space came back, and the room
-			// brightened as soon as one walked along its wall. Only then: the plane runs on along the
-			// street, and from anywhere beyond it the whole street took the room's image space.
-			const float inRoom = playerInRoom ? std::clamp(depth / 50.0f, 0.0f, 1.0f) : 0.0f;
-			const float inDoorway = std::max(fade(side - mapping->halfWidth) * fade(above), inRoom);
+			const float inDoorway = fade(side - mapping->halfWidth) * fade(above);
 			// The source door's "inward" points away from the player's space: into the interior
 			// from outside, out of it from inside.
 			UpdateTone(here, portal->cell, here->IsInteriorCell() ? -depth : depth, inDoorway);
@@ -2774,75 +2539,6 @@ namespace Portal::Manager
 		}
 		if (!toned) {
 			ClearTone();
-		}
-	}
-
-	bool NoteRoomForSave()
-	{
-		const auto portal = ReadyPortal();
-		if (!portal || !playerInRoom || !remote.CollisionMerged()) {
-			roomToSave.reset();
-			return false;
-		}
-		auto*      player = RE::PlayerCharacter::GetSingleton();
-		const auto mapping = Doors::TryCompute(*portal);
-		if (!mapping) {
-			roomToSave.reset();
-			return false;
-		}
-		roomToSave = RoomSave{ portal->sourceDoor, mapping->toLinked * player->GetPosition() + RE::NiPoint3{ 0.0f, 0.0f, 4.0f }, player->GetAngleZ() + mapping->yawDelta };
-		// Kept as they are, the room and the passage through its house stay under the player while
-		// the save is written. The spaces kept out of sight behind other doors must not go into it.
-		ReleaseWarm("saving");
-		attachHoldoff = std::max(attachHoldoff, 3.0f);
-		logger::info("portal: saving in the room behind {:08X}: noted at ({:.0f},{:.0f},{:.0f}) in it", roomToSave->door, roomToSave->position.x, roomToSave->position.y,
-			roomToSave->position.z);
-		return true;
-	}
-
-	void SaveRoom(SKSE::SerializationInterface* a_interface)
-	{
-		if (!roomToSave) {
-			return;
-		}
-		const auto room = *std::exchange(roomToSave, std::nullopt);
-		if (a_interface->OpenRecord(kRoomRecord, kRoomRecordVersion)) {
-			a_interface->WriteRecordData(room.door);
-			a_interface->WriteRecordData(room.position.x);
-			a_interface->WriteRecordData(room.position.y);
-			a_interface->WriteRecordData(room.position.z);
-			a_interface->WriteRecordData(room.yaw);
-		}
-	}
-
-	void LoadRoom(SKSE::SerializationInterface* a_interface)
-	{
-		roomLoaded.reset();
-		std::uint32_t type = 0, version = 0, length = 0;
-		while (a_interface->GetNextRecordInfo(type, version, length)) {
-			if (type != kRoomRecord || version != kRoomRecordVersion) {
-				continue;
-			}
-			RoomSave   room;
-			RE::FormID saved = 0;
-			if (a_interface->ReadRecordData(saved) && a_interface->ReadRecordData(room.position.x) && a_interface->ReadRecordData(room.position.y) &&
-				a_interface->ReadRecordData(room.position.z) && a_interface->ReadRecordData(room.yaw) && a_interface->ResolveFormID(saved, room.door)) {
-				roomLoaded = room;
-			}
-		}
-	}
-
-	void ForgetRoom()
-	{
-		roomLoaded.reset();
-	}
-
-	void EnterRoomAfterLoad()
-	{
-		const auto room = std::exchange(roomLoaded, std::nullopt);
-		auto*      door = room ? RE::TESForm::LookupByID<RE::TESObjectREFR>(room->door) : nullptr;
-		if (door) {
-			Travel::ThroughDoorTo(door, room->position, room->yaw);
 		}
 	}
 
@@ -2926,10 +2622,6 @@ namespace Portal::Manager
 	std::optional<DoorPair> DoorPairAt(float a_radius)
 	{
 		const auto portal = GetActive();
-		// In the room walked into, the door is the portal's whatever else is nearer through its walls.
-		if (portal && playerInRoom) {
-			return DoorPair{ portal->sourceDoor, portal->linkedDoor };
-		}
 		const auto nearby = NearestDoorPair(a_radius);
 		if (!portal) {
 			return nearby;
@@ -3503,9 +3195,6 @@ namespace Portal::Manager
 			// first door put it, it stood off the doorway by however much it misfits its house.
 			if (const auto placement = PlacementOf(a_portal, mapping); !a_space.Placed().SamePlace(placement)) {
 				a_space.Remap(placement);
-				if (primary && a_space.CollisionMerged()) {
-					MergeRoomCollision(a_portal, RE::PlayerCharacter::GetSingleton()->GetParentCell()->GetbhkWorld());
-				}
 			}
 			// Both door panels out of the way: the doorway is open in the picture. Of the two doors
 			// standing in the same place, the one in the space the door opens into (outwards by
@@ -3581,11 +3270,7 @@ namespace Portal::Manager
 				const auto  player = RE::PlayerCharacter::GetSingleton()->GetPosition();
 				const float cameraDepth = depthOf(camera), playerDepth = depthOf(player);
 				if (cameraDepth > 0.0f) {
-					if (playerDepth >= 0.0f && a_space.CollisionMerged()) {
-						// Walking in the room on its copied collision: the camera, kept out of the
-						// room's walls by the same collision, is in it.
-						cameraInside = true;
-					} else if (playerDepth >= 0.0f) {
+					if (playerDepth >= 0.0f) {
 						cameraInside = sideOf(player) <= mapping.halfWidth + 40.0f && playerDepth <= 320.0f && FeetAtDoorway(player.z, mapping);
 					} else {
 						// Where the line from the camera to the player passes the door plane: in the
@@ -3869,7 +3554,7 @@ namespace Portal::Manager
 		bool DemoteShown(RE::TESObjectCELL* a_here, const Active& a_portal)
 		{
 			if (BesideWanted() <= 0 || !remote.Merged() || MergedOutdoors() || a_here->IsInteriorCell() || !a_portal.cell || !a_portal.cell->IsInteriorCell() ||
-				remote.CollisionMerged() || playerInRoom || !remote.FullyLoaded()) {
+				!remote.FullyLoaded()) {
 				return false;
 			}
 			if (!FreeSlot()) {

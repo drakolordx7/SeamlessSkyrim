@@ -19,7 +19,6 @@ namespace Plugin::Settings
 		kDoorwayPictureHeight,
 		kShownRooms,
 		kPauseUnseenRooms,
-		kWalkIntoRooms,
 		kMerge,
 		kMergeOutdoors,
 		kMergedCull,
@@ -63,7 +62,6 @@ namespace Plugin::Settings
 		{ Id::kDoorwayPictureHeight, L"Portals", L"iDoorwayPictureHeight", Type::kInt, 128, 32, 512 },
 		{ Id::kShownRooms, L"Portals", L"iShownRooms", Type::kInt, 2, 1, 4 },
 		{ Id::kPauseUnseenRooms, L"Portals", L"bPauseUnseenRooms", Type::kBool, 1 },
-		{ Id::kWalkIntoRooms, L"Portals", L"bWalkIntoRooms", Type::kBool, 0 },
 		{ Id::kMerge, L"Portals", L"bMerge", Type::kBool, 1 },
 		{ Id::kMergeOutdoors, L"Portals", L"bMergeOutdoors", Type::kBool, 1 },
 		// 0 off, 1 a merged room left out whole when it can't be seen, 2 also shape by shape.

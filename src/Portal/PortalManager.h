@@ -39,17 +39,6 @@ namespace Portal::Manager
 	// behind a panel left standing in the doorway), and the old 3D was kept alive.
 	void ForgetDoors();
 
-	// Saving while walking in a room walked into from outdoors: the player is outdoors, inside the
-	// walls of the room's house, on the room's copied collision. Before the save (kSaveGame): where
-	// they are in the room is noted, for the SKSE co-save. After loading that save (kPostLoadGame)
-	// they are carried into the room itself, to that place. Returns false when the player isn't in
-	// such a room (the portal is let go as usual then).
-	bool NoteRoomForSave();
-	void SaveRoom(SKSE::SerializationInterface* a_interface);
-	void LoadRoom(SKSE::SerializationInterface* a_interface);
-	void ForgetRoom();
-	void EnterRoomAfterLoad();
-
 	// After a seamless crossing has arrived: the space just left may be attached again at once
 	// (it is still loaded), so the door behind the player shows it instead of a hole.
 	void EndHoldoff(float a_seconds = 0.0f);
@@ -77,10 +66,10 @@ namespace Portal::Manager
 	// Main thread: the nearest door within a_radius that would be a portal, switched off in the
 	// menu or not. The menu finds a switched-off door with it, which never becomes CurrentPortal.
 	[[nodiscard]] std::optional<DoorPair> NearestDoorPair(float a_radius);
-	// Main thread: the pair of the doorway the player is at, for the menu. The portal's while in
-	// the room walked into, or while its door is the nearest; else the nearest door within
-	// a_radius. The portal's alone, the menu showed a shop's other door (holding the portal from up
-	// to ReleaseRadius away) at a door switched off, which then couldn't be switched back on.
+	// Main thread: the pair of the doorway the player is at, for the menu: the portal's while its
+	// door is the nearest, else the nearest door within a_radius. The portal's alone, the menu showed
+	// a shop's other door (holding the portal from up to ReleaseRadius away) at a door switched off,
+	// which then couldn't be switched back on.
 	[[nodiscard]] std::optional<DoorPair> DoorPairAt(float a_radius);
 	// The remote cells are merged into the world scene right now.
 	[[nodiscard]] bool Merged();

@@ -22,18 +22,11 @@ namespace Portal::Travel
 		bool limitCamera = false;
 		// The closest the let-out may hold the camera.
 		float cameraFloor = 0.0f;
-		// The player is already standing in the other space as drawn (a merged room walked into on
-		// its copied collision): they come out exactly where that is, not a step past the far door.
-		bool exact = false;
 	};
 
 	// Main thread: the player stepped through the portal's doorway. Carried out at the end of this
 	// frame, after it has been drawn.
 	void Request(const CrossingRequest& a_request);
-
-	// Right after loading a save: the player is taken through a_door (a load door, without opening it)
-	// to a_position (in the space it leads to) facing a_yaw, with the game's usual loading screen.
-	void ThroughDoorTo(RE::TESObjectREFR* a_door, const RE::NiPoint3& a_position, float a_yaw);
 
 	// Main thread: the player is taken through a_door to its marker the engine's way, with its
 	// loading screen (the space behind isn't there to walk into).

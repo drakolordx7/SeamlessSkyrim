@@ -6,6 +6,7 @@
   `SeamlessSkyrim.ini` is no longer written. A key in the user file wins over the shipped one.
 - The old `iWarmPortals` key is no longer read (`iShownRooms` replaced it); `bWorldDoors` and
   `iMergedCullStreet` are gone.
+- The experimental `bWalkIntoRooms` option (walk into a room while staying outdoors) is removed.
 
 ## 0.6.0
 
