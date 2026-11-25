@@ -3,6 +3,8 @@
 #include "Skyrim/Bridge/CommandSupport.h"
 #include "Skyrim/Bridge/AgentMode.h"
 #include "Skyrim/Bridge/FrameHooks.h"
+#include "Skyrim/Doors/DoorUse.h"
+#include "Skyrim/Portal/EngineHooks.h"
 
 using namespace Bridge::Support;
 
@@ -78,8 +80,13 @@ namespace
 	{
 		auto* player = RequirePlayer();
 		auto* ref = RequireRef(a_args);
+		// A door the portals own is used the way the activate key does it (DoorActivateHook), so that
+		// DoorUse registers it; ActivateRef didn't reach that hook for every door.
+		if (ref->GetBaseObject() && ref->GetBaseObject()->Is(RE::FormType::Door) && Portal::EngineHooks::UseDoor(ref)) {
+			return { { "activated", true }, { "ref", Hex(ref->GetFormID()) }, { "portalUse", true }, { "doorUse", Portal::DoorUse::Used(ref->GetFormID()) } };
+		}
 		const bool activated = ref->ActivateRef(player, 0, nullptr, 1, false);
-		return { { "activated", activated }, { "ref", Hex(ref->GetFormID()) } };
+		return { { "activated", activated }, { "ref", Hex(ref->GetFormID()) }, { "portalUse", false } };
 	}
 
 	json MoveTo(const json& a_args)

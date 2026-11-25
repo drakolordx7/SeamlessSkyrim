@@ -52,6 +52,7 @@ namespace Core::Graph
 		retryCooldown(a_graph.SpaceCount(), 0.0f),
 		forced(a_graph.DoorwayCount(), false),
 		open(a_graph.DoorCount(), false),
+		blocked(a_graph.DoorCount(), false),
 		candidateOf(a_graph.SpaceCount(), -1)
 	{}
 
@@ -87,6 +88,42 @@ namespace Core::Graph
 		forced[a_doorway] = true;
 	}
 
+	void TierScheduler::Reset()
+	{
+		std::ranges::fill(tiers, Tier::Cold);
+		std::ranges::fill(retryCooldown, 0.0f);
+		attachTimer = 0.0f;
+		memoryMb = 0.0f;
+	}
+
+	void TierScheduler::Rebind(const SpaceGraph& a_old, const SpaceGraph& a_new)
+	{
+		std::vector<Tier>  newTiers(a_new.SpaceCount(), Tier::Cold);
+		std::vector<float> newCooldown(a_new.SpaceCount(), 0.0f);
+		for (SpaceIx space = 0; space < a_old.SpaceCount(); ++space) {
+			if (const auto next = a_new.FindSpace(a_old.GetSpace(space).id); next != kNoSpace) {
+				newTiers[next] = tiers[space];
+				newCooldown[next] = retryCooldown[space];
+			}
+		}
+		std::vector<bool> newForced(a_new.DoorwayCount(), false);
+		for (DoorwayIx way = 0; way < a_old.DoorwayCount(); ++way) {
+			if (!forced[way]) {
+				continue;
+			}
+			if (const auto door = a_new.FindDoor(a_old.GetDoor(a_old.GetDoorway(way).a).id); door != kNoDoor) {
+				newForced[a_new.GetDoor(door).doorway] = true;
+			}
+		}
+		graph = &a_new;
+		tiers = std::move(newTiers);
+		retryCooldown = std::move(newCooldown);
+		forced = std::move(newForced);
+		open.assign(a_new.DoorCount(), false);
+		blocked.assign(a_new.DoorCount(), false);
+		candidateOf.assign(a_new.SpaceCount(), -1);
+	}
+
 	std::vector<TierChange> TierScheduler::Tick(const Inputs& a_in)
 	{
 		std::vector<TierChange> changes;
@@ -96,6 +133,9 @@ namespace Core::Graph
 		}
 		for (const auto door : a_in.openDoors) {
 			open[door] = true;
+		}
+		for (const auto door : a_in.blockedDoors) {
+			blocked[door] = true;
 		}
 
 		// Which way the player faces (their movement when no facing is given) and how fast they move.
@@ -126,6 +166,10 @@ namespace Core::Graph
 				if (doorIx == kNoDoor) {
 					continue;
 				}
+				const auto otherEnd = way.DoorIn(other);
+				if (blocked[doorIx] || (otherEnd != kNoDoor && blocked[otherEnd])) {
+					continue;
+				}
 				const auto  toDoor = graph->GetDoor(doorIx).pos - a_in.position;
 				const float distance = toDoor.Length();
 				const bool  gate = way.kind == DoorKind::Gate;
@@ -136,7 +180,6 @@ namespace Core::Graph
 				const float closing = distance > 1.0f ? std::max(0.0f, walk.Dot(toDoor) / distance) : 0.0f;
 				const float predicted = std::max(0.0f, reach - closing * config.leadSeconds * (gate ? Selection::kReachWeight : 1.0f));
 				const float rank = Selection::Rank(predicted, heading, toDoor);
-				const auto  otherEnd = way.DoorIn(other);
 				const bool  isOpen = open[doorIx] || (otherEnd != kNoDoor && open[otherEnd]);
 
 				auto& slot = candidateOf[other];
@@ -309,6 +352,9 @@ namespace Core::Graph
 		}
 		for (const auto door : a_in.openDoors) {
 			open[door] = false;
+		}
+		for (const auto door : a_in.blockedDoors) {
+			blocked[door] = false;
 		}
 		return changes;
 	}

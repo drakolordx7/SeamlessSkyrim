@@ -37,9 +37,6 @@ namespace Portal::MergedView
 		// Seen from indoors, the street merged into the interior (docs/APPROACHES.md, 9).
 		// [Portals] bMergeOutdoors.
 		bool mergeOutdoors = true;
-		// [Portals] bPauseUnseenRooms: a kept room (loaded out of sight) is paused: not stepped, lights
-		// not updated, not drawn, its people not on screen. Facing away, each kept room cost about 1 ms a frame.
-		bool pauseUnseen = true;
 		// The shapes of a merged space, listed anew now and then (NPCs change clothes, things get
 		// dropped), a few roots per frame: done whole in one frame it was ~3 ms twice a second with
 		// a street merged in, felt as judder. Each root's bounds the engine fixed since the merge are
@@ -597,7 +594,6 @@ namespace Portal::MergedView
 		::Render::RegisterScene(sceneQuery);
 		mergeEnabled = Plugin::Settings::Bool(Plugin::Settings::Id::kMerge);
 		mergeOutdoors = Plugin::Settings::Bool(Plugin::Settings::Id::kMergeOutdoors);
-		pauseUnseen = Plugin::Settings::Bool(Plugin::Settings::Id::kPauseUnseenRooms);
 	}
 
 	void SetMergeEnabled(bool a_enabled)
@@ -635,21 +631,6 @@ namespace Portal::MergedView
 		const auto scene = ::Render::SceneMeter::Brightness();
 		const auto room = Pictures::Cache::RoomBrightness(a_door);
 		return scene && room ? std::min(1.0f, std::sqrt(*room / *scene)) : 1.0f;
-	}
-
-	bool PauseUnseenRooms()
-	{
-		return pauseUnseen;
-	}
-
-	void SetPauseUnseenRooms(bool a_pause)
-	{
-		pauseUnseen = a_pause;
-	}
-
-	bool KeptRoomPaused()
-	{
-		return pauseUnseen;
 	}
 
 	Spaces::RemoteCell::Placement PlacementOf(const Active& a_portal, const Portal::Doors::Mapping& a_mapping)

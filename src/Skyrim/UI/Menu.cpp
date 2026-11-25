@@ -8,6 +8,7 @@
 #include "Skyrim/Plugin/Settings.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
+#include "Skyrim/Portal/Schedule.h"
 #include "Skyrim/Portal/Selection.h"
 #include "Skyrim/Render/Native/Native.h"
 
@@ -113,25 +114,38 @@ namespace
 
 		ImGui::NewLine();
 
-		int shown = Portal::Selection::ShownRooms();
-		if (ImGui::SliderInt("Rooms active at once", &shown, 1, Portal::Selection::kMaxShownRooms)) {
-			Portal::Selection::SetShownRooms(shown);
-		}
-		SaveWhenReleased(Id::kShownRooms, shown);
-		ImGui::TextWrapped("Outdoors, the rooms behind the nearest doors are loaded, so a doorway opens at once when you walk up. "
-						   "Counts the room you're at; 1 = only that one. One room at a time is drawn into the world: the others "
-						   "stay loaded out of sight, and their open doors show a picture. Each costs memory, a short frame "
-						   "when it loads, and its people are simulated.");
+		{
+			const auto& loadedRange = Plugin::Settings::Of(Id::kLoadedRooms);
+			int         loaded = Portal::Schedule::LoadedRooms();
+			if (ImGui::SliderInt("Rooms kept loaded", &loaded, loadedRange.min, loadedRange.max)) {
+				Portal::Schedule::SetLoadedRooms(loaded);
+			}
+			SaveWhenReleased(Id::kLoadedRooms, loaded);
+			ImGui::TextWrapped("Besides the room at the door you stand at, the rooms behind the nearest other doors are kept loaded "
+							   "out of sight, so a doorway opens at once when you walk up. Nothing in them runs until their door is open "
+							   "and you are close. Each costs memory and a short frame when it loads.");
 
-		ImGui::NewLine();
+			ImGui::NewLine();
 
-		bool pause = Portal::MergedView::PauseUnseenRooms();
-		if (ImGui::Checkbox("Pause rooms kept out of sight", &pause)) {
-			Portal::MergedView::SetPauseUnseenRooms(pause);
-			Plugin::Settings::SaveUser(Id::kPauseUnseenRooms, pause);
+			const auto& memoryRange = Plugin::Settings::Of(Id::kMemoryBudgetMb);
+			int         memory = Portal::Schedule::MemoryBudgetMb();
+			if (ImGui::SliderInt("Memory for rooms (MB)", &memory, memoryRange.min, memoryRange.max)) {
+				Portal::Schedule::SetMemoryBudgetMb(memory);
+			}
+			SaveWhenReleased(Id::kMemoryBudgetMb, memory);
+			ImGui::TextWrapped("What the rooms kept loaded and their pictures may take together; the least likely room gives way first.");
+
+			ImGui::NewLine();
+
+			const auto& rateRange = Plugin::Settings::Of(Id::kTargetFrameRate);
+			int         rate = Portal::Schedule::TargetFrameRate();
+			if (ImGui::SliderInt("Frame rate to keep", &rate, rateRange.min, rateRange.max)) {
+				Portal::Schedule::SetTargetFrameRate(rate);
+			}
+			SaveWhenReleased(Id::kTargetFrameRate, rate);
+			ImGui::TextWrapped("A room is made live only while the game has frame time to spare at this rate. Below it, doors keep to "
+							   "pictures and the game's own loading.");
 		}
-		ImGui::TextWrapped("A room only kept loaded for later isn't simulated or drawn; the room at the door you're at "
-						   "always runs.");
 
 		ImGui::NewLine();
 

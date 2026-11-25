@@ -5,6 +5,7 @@
 #include "Skyrim/Diag/Telemetry.h"
 #include "Skyrim/Doors/Hold.h"
 #include "Skyrim/Engine/Paths.h"
+#include "Skyrim/Graph/DoorScan.h"
 #include "Skyrim/Pictures/DoorwaySnapshot.h"
 #include "Skyrim/Plugin/Frame.h"
 #include "Skyrim/Plugin/Settings.h"
@@ -13,6 +14,7 @@
 #include "Skyrim/Portal/MergedCull.h"
 #include "Skyrim/Portal/NpcTravel.h"
 #include "Skyrim/Portal/PortalManager.h"
+#include "Skyrim/Portal/Schedule.h"
 #include "Skyrim/Portal/StreetLOD.h"
 #include "Skyrim/Portal/Travel.h"
 #include "Skyrim/Render/Enb.h"
@@ -61,6 +63,10 @@ namespace Plugin
 	{
 		Settings::Load();
 		Portal::Manager::Install();
+		// The doors of the loaded game and the scheduler that decides what is held for them, whether or
+		// not portals are on: the manager's releases (a save, a load) reset it.
+		Graph::Install();
+		Portal::Schedule::Install();
 		Pictures::SetPictureHeight(Settings::Int(Settings::Id::kDoorwayPictureHeight));
 		Spaces::LoadTuning();
 		hooksInstalled = Portal::Manager::Enabled() || Diag::AgentMode();

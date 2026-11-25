@@ -12,6 +12,15 @@ namespace Portal::Crossing
 	// Main thread, every frame (the manager's timers).
 	void Tick(float a_delta);
 
+	// Main thread, every frame after the scheduler: the crossing's sequence (Core/Crossing/Sequence.h) is
+	// told which door is being walked up to and whether its way is ready, and keeps its timeouts: a
+	// space not ready in time, or a crossing that did not arrive, makes the door the engine's own.
+	void Drive(float a_delta);
+	// The player arrived in another space, seamlessly or the engine's way.
+	void Arrived();
+	// The sequence's phase, for the status.
+	[[nodiscard]] std::string_view PhaseName();
+
 	// A crossing is possible (not just after one).
 	[[nodiscard]] bool Ready();
 	// The spaces mustn't be attached now: a crossing or the engine's own door trip is under way.

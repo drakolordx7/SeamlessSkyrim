@@ -631,6 +631,53 @@ namespace
 		CHECK(!entered.empty() && entered[0].space == house && entered[0].to == Tier::Live && entered[0].reason == Reason::PlayerEntered);
 	}
 
+	// A door that is only a door right now holds nothing; reset lets go of everything; a graph built
+	// again with more in it keeps the tiers, and the fallbacks, of the spaces and doors it had.
+	void SchedulerBlockedResetRebind()
+	{
+		const auto f = Village();
+		const auto g = SpaceGraph::Build(f.spaces, f.doors);
+		const auto house = g.FindSpace("house");
+		const auto houseDoor = g.FindDoor("houseIn");
+		Walk       walk(g);
+		walk.in.playerSpace = g.FindSpace("tamriel");
+		walk.in.position = { 900, 0, 0 };
+		walk.Stand(3.0f);
+		CHECK(walk.scheduler.TierOf(house) == Tier::LoadedPaused);
+
+		// Locked shut right now (the graph says nothing of it): nothing is held for its doorway.
+		const std::vector<DoorIx> blocked{ houseDoor };
+		walk.in.blockedDoors = blocked;
+		walk.Stand(0.1f);
+		CHECK(walk.scheduler.TierOf(house) == Tier::Cold);
+		walk.Stand(3.0f);
+		CHECK(walk.scheduler.TierOf(house) == Tier::Cold);
+		walk.in.blockedDoors = {};
+		walk.Stand(3.0f);
+		CHECK(walk.scheduler.TierOf(house) == Tier::LoadedPaused);
+
+		// Everything let go: cold again, and then held again as before.
+		walk.scheduler.Reset();
+		CHECK(walk.scheduler.TierOf(house) == Tier::Cold && walk.scheduler.MemoryMb() == 0.0f);
+		walk.Stand(3.0f);
+		CHECK(walk.scheduler.TierOf(house) == Tier::LoadedPaused);
+
+		// The same places and a new one in a graph built again: tiers and the fallback follow by id.
+		auto spaces = f.spaces;
+		auto doors = f.doors;
+		spaces.push_back(Space("cellar", SpaceKind::Interior));
+		Pair(doors, "cellarIn", "tamriel", { -500, 0, 0 }, "cellarOut", "cellar", { 0, 0, 0 });
+		const auto g2 = SpaceGraph::Build(spaces, doors);
+		walk.scheduler.Fallback(g.GetDoor(g.FindDoor("innIn")).doorway);
+		walk.scheduler.Rebind(g, g2);
+		CHECK(g2.SpaceCount() == g.SpaceCount() + 1);
+		CHECK(walk.scheduler.TierOf(g2.FindSpace("house")) == Tier::LoadedPaused);
+		CHECK(walk.scheduler.IsFallback(g2.GetDoor(g2.FindDoor("innIn")).doorway) && !walk.scheduler.IsFallback(g2.GetDoor(g2.FindDoor("houseIn")).doorway));
+		walk.graph = &g2;
+		const auto changes = walk.Stand(1.0f);
+		CHECK(TiersOf(changes, g2.FindSpace("house")).empty());  // nothing to do for what it already holds
+	}
+
 	// ---- the crossing sequence
 
 	using namespace Core::Crossing;
@@ -746,6 +793,7 @@ int RunGraphTests()
 	Run("scheduler: memory budget demotes the least likely", SchedulerBudget);
 	Run("scheduler: only N live, headroom", SchedulerOnlyN);
 	Run("scheduler: fallback, failure, player entering", SchedulerPolicy);
+	Run("scheduler: blocked doors, reset, rebind", SchedulerBlockedResetRebind);
 	Run("crossing sequence: happy path", CrossingHappyPath);
 	Run("crossing sequence: fallback, abort, timeouts", CrossingFallbackAndAbort);
 	Run("crossing sequence: rushed threshold, settle", CrossingRushedAndTimed);

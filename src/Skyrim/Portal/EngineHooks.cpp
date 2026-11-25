@@ -112,17 +112,7 @@ namespace Portal::EngineHooks
 		{
 			static bool Thunk(RE::TESObjectDOOR* a_door, RE::TESObjectREFR* a_target, RE::TESObjectREFR* a_activator, std::uint8_t a_arg3, RE::TESBoundObject* a_object, std::int32_t a_count)
 			{
-				if (auto* linked = Manager::Enabled() && a_target && a_activator == RE::PlayerCharacter::GetSingleton() ? Portal::Doors::UsedPairOf(a_target) : nullptr) {
-					const auto id = a_target->GetFormID();
-					if (Portal::Doors::StandsOpen(a_target, linked)) {
-						logger::info("portal: door {:08X} used: stands open", id);
-					} else if (Portal::DoorUse::Used(id)) {
-						if (Portal::DoorUse::Shut(id)) {
-							Portal::DoorUse::PlayDoorSound(id, linked->GetFormID(), false);
-						}
-					} else if (Portal::DoorUse::Use(id, linked->GetFormID())) {
-						Portal::DoorUse::PlayDoorSound(id, linked->GetFormID(), true);
-					}
+				if (a_target && a_activator == RE::PlayerCharacter::GetSingleton() && UseDoor(a_target)) {
 					return true;
 				}
 				return func(a_door, a_target, a_activator, a_arg3, a_object, a_count);
@@ -163,11 +153,31 @@ namespace Portal::EngineHooks
 					                         cell->GetRuntimeData().worldSpace == portal->cell->GetRuntimeData().worldSpace;
 					if (cell && (cell->IsInteriorCell() || cell == portal->cell || portalWorld)) {
 						Portal::Manager::ReleaseAll("player entered another space");
+						Crossing::Arrived();
 					}
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
 		} cellSink;
+	}
+
+	bool UseDoor(RE::TESObjectREFR* a_target)
+	{
+		auto* linked = Manager::Enabled() ? Portal::Doors::UsedPairOf(a_target) : nullptr;
+		if (!linked) {
+			return false;
+		}
+		const auto id = a_target->GetFormID();
+		if (Portal::Doors::StandsOpen(a_target, linked)) {
+			logger::info("portal: door {:08X} used: stands open", id);
+		} else if (Portal::DoorUse::Used(id)) {
+			if (Portal::DoorUse::Shut(id)) {
+				Portal::DoorUse::PlayDoorSound(id, linked->GetFormID(), false);
+			}
+		} else if (Portal::DoorUse::Use(id, linked->GetFormID())) {
+			Portal::DoorUse::PlayDoorSound(id, linked->GetFormID(), true);
+		}
+		return true;
 	}
 
 	void Install()

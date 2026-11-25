@@ -5,14 +5,17 @@
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Doors/Hold.h"
 #include "Skyrim/Doors/Pair.h"
+#include "Skyrim/Graph/DoorScan.h"
 #include "Skyrim/Pictures/Cache.h"
 #include "Skyrim/Pictures/DoorwaySnapshot.h"
+#include "Skyrim/Portal/Crossing.h"
 #include "Skyrim/Portal/LightOcclusion.h"
 #include "Skyrim/Portal/LightScene.h"
 #include "Skyrim/Portal/MergedCull.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/NpcTravel.h"
 #include "Skyrim/Portal/PortalManager.h"
+#include "Skyrim/Portal/Schedule.h"
 #include "Skyrim/Portal/Selection.h"
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Portal/StreetMerge.h"
@@ -266,18 +269,19 @@ namespace Bridge::PortalDiagnostics
 			 }() },
 			{ "lastEvent", Manager::LastEvent() },
 			{ "lightScenes", LightScene::DescribeAll(Manager::Space().Cell3D()) },
+			// The spaces kept loaded out of sight (tier 3 of the scheduler).
 			{ "warm", [] {
 				 json out = json::array();
-				 for (const auto& space : Selection::Kept()) {
+				 for (const auto& space : Schedule::Kept()) {
 					 out.push_back({ { "cell", Probe::DescribeCell(space.Cell()) }, { "healthy", space.Healthy() }, { "fullyLoaded", space.FullyLoaded() },
 						 { "lights", space.AdoptedLights() }, { "paused", space.Paused() } });
 				 }
-				 return json{ { "max", Selection::ShownRooms() }, { "distance", Selection::kWarmDistance }, { "sparse", Selection::Sparse() }, { "reach", Selection::WarmReach() },
-					 { "activate", Selection::ActivateRadius() }, { "spaces", out }, { "targets", Selection::TargetCount() } };
+				 return json{ { "max", Schedule::LoadedRooms() }, { "spaces", out } };
 			 }() },
-			{ "shownRooms", [] {
-				 return json{ { "setting", Selection::ShownRooms() }, { "pauseUnseen", MergedView::PauseUnseenRooms() } };
-			 }() },
+			// The door graph's counts and the scheduler's state (see also the graph_summary command).
+			{ "graph", Graph::Summary() },
+			{ "schedule", Schedule::Status() },
+			{ "crossingPhase", Crossing::PhaseName() },
 			{ "lightOcclusion", LightOcclusion::Describe() },
 			{ "mergedCull", MergedCull::Describe() },
 			{ "render", json{ { "ready", ::Render::Native::Ready() }, { "enb", ::Render::Enb::Describe() }, { "mask", ::Render::Native::DescribeMask() },
