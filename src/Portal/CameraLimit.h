@@ -8,7 +8,6 @@
 // door frame would, so both pass the doorway together.
 namespace Portal::CameraLimit
 {
-	// Once, at kDataLoaded.
 	void Install();
 
 	// Main thread, per frame before the camera update: the largest horizontal distance the

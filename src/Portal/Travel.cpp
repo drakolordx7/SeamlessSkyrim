@@ -1,53 +1,27 @@
 #include "Portal/Travel.h"
-#include "Spaces/RemoteCell.h"
 
 #include "Diag/Telemetry.h"
-#include "Render/FlashGuard.h"
 #include "Engine/Hooks.h"
-#include "Engine/Paths.h"
+#include "Engine/LoadScreen.h"
 #include "Portal/CameraLimit.h"
-#include "Portal/LightScene.h"
 #include "Portal/NpcTravel.h"
 #include "Portal/PortalManager.h"
-#include "Diag/Probe.h"
+#include "Portal/ResetClothPhysics.h"
+#include "Portal/TransitionStalls.h"
+#include "Portal/TravelTrace.h"
+#include "Render/FlashGuard.h"
+#include "Spaces/RemoteCell.h"
 
 namespace
 {
 	using Clock = std::chrono::steady_clock;
+	using Portal::TravelTrace::Note;
 
-	// ID 13363 (TES: show/hide the loading screen) returns without showing it while this is set.
-	REL::Relocation<bool*> skipLoadScreen{ REL::RelocationID(514187, 400337) };
-	// Set while the loading screen is up (written by ID 13363).
-	REL::Relocation<bool*> loadScreenUp{ REL::RelocationID(514186, 400336) };
-
-	struct Trace
-	{
-		bool                     running = false;
-		Clock::time_point        start;
-		Clock::time_point        lastFrame;
-		RE::FormID               fromCell = 0;
-		RE::FormID               door = 0;
-		std::uint32_t            frames = 0;
-		double                   worstFrameMs = 0.0;
-		double                   arrivedMs = -1.0;
-		std::vector<std::string> events;
-	};
-	Trace                                  trace;
-	json                                   lastResult;
-	std::filesystem::path                  profileFile;       // diagnostics: the next transition is sampled (Sampler) into this file
-	// Diagnostics, agent sessions only ([Portals] sProfileCrossingsTo): every crossing is sampled
-	// for kProfileAllSeconds into a numbered file in this folder. The long frames come up to a few
-	// seconds after the crossing, beyond the bridge command's one and a half.
-	std::filesystem::path                  profileAllTo;
-	constexpr double                       kProfileAllSeconds = 5.0;
-	std::optional<Portal::Manager::Active> pending;
-	bool                                   pendingLimitsCamera = true;
-	float                                  pendingCameraFloor = 0.0f;
-	bool                                   pendingExact = false;  // see Request
-	std::optional<RE::NiPoint3>            exactArrival;          // see Begin
-	constexpr float                        kArrivalStep = 12.0f;
-	constexpr float                        kPlayerRadius = 20.0f;
-	std::optional<float>                   arrivalYaw;  // heading to set once the teleport has run
+	std::optional<Portal::Travel::CrossingRequest> pending;
+	std::optional<RE::NiPoint3>                    exactArrival;  // see Begin
+	constexpr float                                kArrivalStep = 12.0f;
+	constexpr float                                kPlayerRadius = 20.0f;
+	std::optional<float>                           arrivalYaw;  // heading to set once the teleport has run
 	// The doorway the player came out of: the camera is let out again as they walk away from it.
 	struct Arrival
 	{
@@ -98,25 +72,6 @@ namespace
 	double Ms(Clock::duration a_duration)
 	{
 		return std::chrono::duration<double, std::milli>(a_duration).count();
-	}
-
-	std::string OpenMenus()
-	{
-		auto*       ui = RE::UI::GetSingleton();
-		std::string open;
-		for (const std::string_view name : { RE::LoadingMenu::MENU_NAME, RE::FaderMenu::MENU_NAME, std::string_view("LoadWaitSpinner") }) {
-			if (ui && ui->IsMenuOpen(name)) {
-				open += std::format("{} ", name);
-			}
-		}
-		return open;
-	}
-
-	void Note(const std::string& a_what)
-	{
-		const auto at = Ms(Clock::now() - trace.start);
-		trace.events.push_back(std::format("{:7.1f} ms: {}", at, a_what));
-		logger::info("travel: {:7.1f} ms: {}", at, a_what);
 	}
 
 	// The door the player came out of stands open behind them, like the one they walked into,
@@ -170,57 +125,48 @@ namespace
 		return std::nullopt;
 	}
 
+	// Queues the engine's own door teleport for the player through a_door (what activating a load door
+	// does, TESObjectDOOR::HandleOpen, ID 17926: a fade to black whose callback calls ID 17924, which
+	// queues the teleport, PlayerCharacter::queuedTargetLoc, ID 40442; doors flagged "automatic"
+	// skip the fade and call ID 17924 directly). Returns the queued target, for the caller to point
+	// somewhere else than the door's marker.
+	auto& QueueTeleport(RE::TESObjectREFR* a_door)
+	{
+		auto* base = a_door->GetBaseObject()->As<RE::TESObjectDOOR>();
+		SEAMLESS_ASSERT(base);
+		REL::Relocation<void (*)(RE::TESObjectDOOR*, RE::RefHandle*)> teleportThroughDoor{ REL::RelocationID(17523, 17924) };
+		RE::RefHandle                                                handle = a_door->GetHandle().native_handle();
+		auto&                                                        queued = RE::PlayerCharacter::GetSingleton()->GetPlayerRuntimeData().queuedTargetLoc;
+		teleportThroughDoor(base, &handle);
+		SEAMLESS_ASSERT(queued.isValid);
+		return queued;
+	}
+
 	// Queues the engine's own door teleport, without its fade and loading screen, and points it at
 	// the place the player is walking to on the other side instead of the door's marker.
-	void Begin(const Portal::Manager::Active& a_portal, bool a_limitCamera)
+	void Begin(const Portal::Travel::CrossingRequest& a_request)
 	{
+		const auto&            portal = a_request.portal;
 		auto*                  player = RE::PlayerCharacter::GetSingleton();
-		auto*                  door = RE::TESForm::LookupByID<RE::TESObjectREFR>(a_portal.sourceDoor);
-		auto*                  base = door && door->GetBaseObject() ? door->GetBaseObject()->As<RE::TESObjectDOOR>() : nullptr;
+		auto*                  door = RE::TESForm::LookupByID<RE::TESObjectREFR>(portal.sourceDoor);
 		Portal::Doors::Mapping mapping;
 		try {
-			mapping = Portal::Doors::Compute(a_portal);
+			mapping = Portal::Doors::Compute(portal);
 		} catch (const std::exception& e) {
 			logger::warn("travel: door pair unusable: {}", e.what());
 			return;
 		}
-		if (!base) {
-			return;
-		}
-		trace = {};
-		trace.running = true;
-		trace.start = trace.lastFrame = Clock::now();
-		trace.door = door->GetFormID();
-		Diag::AddCount("crossing", 1.0);
+		Portal::TravelTrace::Begin(door->GetFormID(), player->GetParentCell());
 		// The white frame came 2-3 frames after the crossing; a second's worth leaves room for slow ones.
 		::Render::FlashGuard::Guard(60);
-		Diag::CaptureEventFrames(L"crossing", 16);
-		if (!profileFile.empty()) {
-			Diag::SamplerStart(profileFile, 1.5);
-			profileFile.clear();
-		} else if (!profileAllTo.empty() && !Diag::SamplerRunning()) {
-			static int crossings = 0;
-			const auto file = profileAllTo / std::format("crossing_{:02}.txt", ++crossings);
-			Diag::SamplerStart(file, kProfileAllSeconds);
-			Note(std::format("sampling the main thread into {}", file.string()));
-		}
-		trace.fromCell = player->GetParentCell() ? player->GetParentCell()->GetFormID() : 0;
-		Note(std::format("crossing door {:08X} from {} (menus: {})", trace.door, Probe::DescribeCell(player->GetParentCell()), OpenMenus()));
 
 		// The cell goes back to the engine first: the teleport attaches it as the current cell.
-		Portal::Manager::ReleaseAll("player walked through the doorway", 3.0f, a_portal.cell && !a_portal.cell->IsInteriorCell());
+		Portal::Manager::ReleaseAll("player walked through the doorway", 3.0f, portal.cell && !portal.cell->IsInteriorCell());
 
-		*skipLoadScreen = true;
-		// What activating a load door does for the player (TESObjectDOOR::HandleOpen, ID 17926):
-		// start a fade to black whose callback then calls ID 17924, which queues the teleport
-		// (PlayerCharacter::queuedTargetLoc, ID 40442). Doors flagged "automatic" skip the fade and
-		// call ID 17924 directly; an open doorway has no reason to wait either.
-		REL::Relocation<void (*)(RE::TESObjectDOOR*, RE::RefHandle*)> teleportThroughDoor{ REL::RelocationID(17523, 17924) };
-		RE::RefHandle                                                handle = door->GetHandle().native_handle();
-		auto&                                                        queued = player->GetPlayerRuntimeData().queuedTargetLoc;
-		teleportThroughDoor(base, &handle);
-		// Everything below overwrites the queued teleport and treats the next frame as the arrival.
-		SEAMLESS_ASSERT(queued.isValid);
+		Engine::SkipLoadScreen() = true;
+		// An open doorway has no reason to wait for the door's fade either. Everything below
+		// overwrites the queued teleport and treats the next frame as the arrival.
+		auto& queued = QueueTeleport(door);
 
 		// The queued teleport puts the player on the door's marker. Seamless: they come out where
 		// they walked in, mapped through the door pair, facing the same way relative to the door.
@@ -233,8 +179,8 @@ namespace
 		inwardInside.Unitize();
 		// A little further in than the exact mapping, so the camera, right at the player, starts
 		// inside the room rather than in the doorway's plane.
-		queuedPos = mapping.toLinked * player->GetPosition() + (pendingExact ? RE::NiPoint3{} : inwardInside * kArrivalStep);
-		if (!pendingExact) {
+		queuedPos = mapping.toLinked * player->GetPosition() + (a_request.exact ? RE::NiPoint3{} : inwardInside * kArrivalStep);
+		if (!a_request.exact) {
 			// Carried through before reaching the door (in first person as soon as the camera reaches
 			// the doorway's picture, PortalManager's Approach), the mapped position is still short
 			// of the far door: inside the far building's wall. A little past its plane instead.
@@ -246,8 +192,8 @@ namespace
 			// far side (in front of Whiterun's gate, walking out of the city) the next step carried
 			// them through again. Past its collision instead, by about the player's radius.
 			auto* here = player->GetParentCell();
-			if (here && !here->IsInteriorCell() && a_portal.cell && !a_portal.cell->IsInteriorCell()) {
-				if (const auto reach = CollisionReach(RE::TESForm::LookupByID<RE::TESObjectREFR>(a_portal.linkedDoor), farCenter, inwardInside, queuedPos.z + 60.0f)) {
+			if (here && !here->IsInteriorCell() && portal.cell && !portal.cell->IsInteriorCell()) {
+				if (const auto reach = CollisionReach(RE::TESForm::LookupByID<RE::TESObjectREFR>(portal.linkedDoor), farCenter, inwardInside, queuedPos.z + 60.0f)) {
 					wanted = std::max(wanted, *reach + kPlayerRadius);
 				}
 			}
@@ -260,9 +206,9 @@ namespace
 		// door (inside the building's shell), which needn't be level with the room's floor; arriving
 		// 160 units up put them on Alvor's upper floor. Near the door the floor is the marker's.
 		exactArrival.reset();
-		if (!pendingExact) {
+		if (!a_request.exact) {
 			queuedPos.z = std::clamp(queuedPos.z, marker.z - 16.0f, marker.z + 48.0f);
-		} else if (a_portal.cell && !a_portal.cell->IsInteriorCell()) {
+		} else if (portal.cell && !portal.cell->IsInteriorCell()) {
 			// Walking out of a room into its merged copy: the place is inside the house's shell,
 			// solid until the room is merged and the passage opened after the teleport. Sent there,
 			// the engine looked for a free place for 1.2 s and put the player on the ground under
@@ -272,240 +218,12 @@ namespace
 		}
 		auto* from = RE::PlayerCharacter::GetSingleton()->GetParentCell();
 		leftExterior = from && !from->IsInteriorCell();
-		arrival = Arrival{ mapping.toLinked * mapping.sourceCenter, inwardInside, Clock::now(), a_portal.linkedDoor, a_limitCamera, pendingCameraFloor,
+		arrival = Arrival{ mapping.toLinked * mapping.sourceCenter, inwardInside, Clock::now(), portal.linkedDoor, a_request.limitCamera, a_request.cameraFloor,
 			mapping.halfDepth + kPlayerRadius };
 		queuedAngle = { player->GetAngleX(), 0.0f, player->GetAngleZ() + mapping.yawDelta };
 		arrivalYaw = queuedAngle.z;
 		Note(std::format("teleport queued: ({:.0f},{:.0f},{:.0f}) yaw {:.1f} instead of marker ({:.0f},{:.0f},{:.0f})", queuedPos.x,
 			queuedPos.y, queuedPos.z, RE::rad_to_deg(queuedAngle.z), marker.x, marker.y, marker.z));
-	}
-
-	bool seamlessTeleport = false;  // true while ID 40438 carries out a teleport we queued
-
-	// ID 40438 + 0x927: after a door teleport it asks BGSSaveLoadManager (ID 35769) for the
-	// "autosave on travel". Saving stalls the next frames, which in a doorway you just walk
-	// through is a stutter; trips with a loading screen still save.
-	struct TravelAutosaveHook
-	{
-		static void Thunk(void* a_manager, std::uint32_t a_flags)
-		{
-			if (seamlessTeleport) {
-				Note("autosave for this trip skipped");
-				return;
-			}
-			func(a_manager, a_flags);
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
-	// Diagnostics: each part of the stutter can be put back to compare (travel_options).
-	bool skipLoadWait = true;
-	bool skipLoadScreenClose = true;
-
-	// ID 40438 + 0x8B2: after a door teleport, waits until the task pool (*ID 411121, ID 75708)
-	// has finished every queued load, i.e. the new space is complete before the loading screen
-	// goes away. Going outside that was ~470 ms of a ~610 ms stall. Seamless, the remaining
-	// references stream in over the next frames like they do while walking around outdoors.
-	struct WaitForLoadsHook
-	{
-		static std::uint64_t Thunk(void* a_taskPool, std::uint32_t a_level)
-		{
-			if (seamlessTeleport && skipLoadWait) {
-				Note("waiting for queued loads skipped");
-				return 0;
-			}
-			return func(a_taskPool, a_level);
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
-	// The change into an exterior (ID 13317) sets the worldspace up anew when the game's grid isn't
-	// set up yet (the first trip outdoors after loading a save made indoors), and then waits for
-	// the task pool twice (+0x4A0, +0x4D5), until the whole grid around the player has loaded: the
-	// first walk out took 1.2 to 1.4 s, a frozen frame. The cells around the door are attached
-	// already (handed over from the doorway's view, RemoteCell::Release); the rest streams in over
-	// the next frames, as in the trips after it.
-	struct GridLoadWaitHook
-	{
-		static std::uint64_t Thunk(void* a_taskPool, std::uint32_t a_level)
-		{
-			if (seamlessTeleport && skipLoadWait && !Portal::RemoteCell::HandedOver().empty()) {
-				Note("waiting for the outdoor grid to load skipped");
-				return 0;
-			}
-			return func(a_taskPool, a_level);
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
-	// ID 40438 + 0x952: closes the loading screen (ID 13363 with "show" false), which ends with
-	// two Sleep(30) calls, 60 ms of every trip. With the loading screen never shown (ID 400337
-	// makes the "show" call return straight away) there is nothing to close.
-	struct CloseLoadScreenHook
-	{
-		static bool Thunk(bool a_show, void* a_arg2, bool a_arg3, bool a_arg4)
-		{
-			if (seamlessTeleport && skipLoadScreenClose && !a_show && !*loadScreenUp) {
-				Note("closing the loading screen skipped");
-				return false;
-			}
-			return func(a_show, a_arg2, a_arg3, a_arg4);
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
-	// TES::SetCurrentCell (ID 13316) + 0x273: when no loading screen is up it draws one more frame
-	// (Main::Draw, ID 36555) of the space being left, in the middle of the transition: ~15 ms and
-	// a frame nobody should see (the next one is already drawn from the other side).
-	bool skipExtraFrame = true;
-
-	// The lights of the space walked into are queued on arrival, and the world scene's light update
-	// takes each in with a cull of the scene for the shapes it lights (~0.27 ms a light): Understone
-	// Keep's ~150 were ~40 ms of the teleport's frame. For a few frames after a seamless trip the
-	// update takes the nearest ones first, a few per frame, and the rest wait in the queue.
-	// Our light scenes too: the space walked out of is attached again in the frame of arrival, and
-	// taking in its lights (Riften's jail ~175, Understone Keep's ~150) was 20-35 ms of it. Only
-	// after a trip, when that space is behind the player: a room shown at its door while the player
-	// looks at it takes its lights in at once, or they came on one after another in the doorway.
-	constexpr int     kLightsPerUpdate = 32;
-	constexpr int     kSpreadFrames = 30;
-	int               spreadFrames = 0;
-	bool              spreadLights = true;
-	std::atomic<int>  lightsHeld = 0;  // diagnostics: held back in the last update
-
-	template <class F>
-	void UpdateLightsSpread(RE::ShadowSceneNode* a_scene, void* a_arg, F&& a_update)
-	{
-		const bool world = a_scene == RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
-		if (!spreadLights || spreadFrames <= 0 || (!world && !Portal::LightScene::IsOurs(a_scene))) {
-			a_update(a_scene, a_arg);
-			return;
-		}
-		auto&                                   data = a_scene->GetRuntimeData();
-		std::vector<RE::NiPointer<RE::BSLight>> held;
-		std::unordered_set<const RE::BSLight*>  removing;
-		{
-			RE::BSSpinLockGuard locker(data.lightQueueLock);
-			auto&               queue = data.lightQueueAdd;
-			if (queue.size() > kLightsPerUpdate) {
-				const auto at = RE::PlayerCharacter::GetSingleton()->GetPosition();
-				// The arrival queues each light twice; the update takes in the first and, for the
-				// second, walks the scene for the first's shapes again.
-				std::vector<RE::NiPointer<RE::BSLight>> all;
-				std::unordered_set<const RE::NiLight*>  queued;
-				for (auto& light : queue) {
-					if (!light || !light->light || queued.insert(light->light.get()).second) {
-						all.push_back(light);
-					}
-				}
-				const auto distance = [&](const RE::NiPointer<RE::BSLight>& a_light) {
-					return a_light && a_light->light ? a_light->light->world.translate.GetSquaredDistance(at) : 0.0f;
-				};
-				std::ranges::stable_sort(all, {}, distance);
-				queue.clear();
-				for (std::size_t i = 0; i < all.size(); ++i) {
-					if (i < kLightsPerUpdate) {
-						queue.push_back(all[i]);
-					} else {
-						held.push_back(all[i]);
-					}
-				}
-			}
-			for (auto& light : data.lightQueueRemove) {
-				removing.insert(light.get());
-			}
-		}
-		lightsHeld = static_cast<int>(held.size());
-		a_update(a_scene, a_arg);
-		if (!held.empty()) {
-			RE::BSSpinLockGuard locker(data.lightQueueLock);
-			for (auto& light : held) {
-				// Removed meanwhile (the space left again): not taken in later.
-				if (!removing.contains(light.get())) {
-					data.lightQueueAdd.push_back(light);
-				}
-			}
-		}
-	}
-
-	// In the teleport (ID 40744): the arrival's lights.
-	struct TeleportLightsHook
-	{
-		static void Thunk(RE::ShadowSceneNode* a_scene, void* a_arg)
-		{
-			if (seamlessTeleport) {
-				spreadFrames = kSpreadFrames;
-			}
-			UpdateLightsSpread(a_scene, a_arg, [](RE::ShadowSceneNode* a_s, void* a_a) { func(a_s, a_a); });
-			if (lightsHeld > 0) {
-				Note(std::format("{} light(s) left queued for the next frames", lightsHeld.load()));
-			}
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
-	// Every frame (ID 106337, for each registered light scene).
-	struct FrameLightsHook
-	{
-		static void Thunk(RE::ShadowSceneNode* a_scene, void* a_arg)
-		{
-			const bool        world = a_scene == RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
-			const Diag::Scope scope(world ? "lights: world" : "lights: other");
-			UpdateLightsSpread(a_scene, a_arg, [](RE::ShadowSceneNode* a_s, void* a_a) { func(a_s, a_a); });
-			if (world && spreadFrames > 0) {
-				--spreadFrames;
-			}
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
-	struct ExtraFrameHook
-	{
-		static void Thunk(void* a_main)
-		{
-			if (seamlessTeleport && skipExtraFrame) {
-				Note("extra frame inside SetCurrentCell skipped");
-				return;
-			}
-			func(a_main);
-		}
-		static inline REL::Relocation<decltype(Thunk)> func;
-	};
-
-	// Hair and cloth simulated by SMP (hdtSMP64 / FSMP) keep their last positions for a few frames
-	// after a teleport, drawn stretched from the old place to the new one. SMP resets its
-	// simulation when the loading screen closes, which a seamless trip never shows; it is told
-	// the same way, with the menu events alone.
-	//
-	// Only SMP's own listeners hear them: sent to all, other mods did their loading-screen work on
-	// every trip (FasterTextures, seen in the exit's teleport frame).
-	void ResetClothPhysics()
-	{
-		static const auto smp = []() -> std::pair<std::uintptr_t, std::uintptr_t> {
-			auto* module = ::GetModuleHandleW(L"hdtsmp64.dll");
-			if (!module) {
-				return {};
-			}
-			const auto  base = reinterpret_cast<std::uintptr_t>(module);
-			const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-			const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-			return { base, base + nt->OptionalHeader.SizeOfImage };
-		}();
-		auto* ui = RE::UI::GetSingleton();
-		auto* source = ui ? ui->GetEventSource<RE::MenuOpenCloseEvent>() : nullptr;
-		if (!source || !smp.first) {
-			return;
-		}
-		const RE::MenuOpenCloseEvent opened{ RE::LoadingMenu::MENU_NAME, true };
-		const RE::MenuOpenCloseEvent closed{ RE::LoadingMenu::MENU_NAME, false };
-		RE::BSSpinLockGuard          locker(source->lock);
-		for (auto* sink : source->sinks) {
-			const auto vtable = sink ? *reinterpret_cast<const std::uintptr_t*>(sink) : 0;
-			if (vtable >= smp.first && vtable < smp.second) {
-				sink->ProcessEvent(&opened, source);
-				sink->ProcessEvent(&closed, source);
-			}
-		}
 	}
 
 	// Main::Update (ID 36564) processes the player's queued teleport as its first step
@@ -514,18 +232,19 @@ namespace
 	bool endOfFrameHooked = false;
 	std::atomic<bool> arrivalFrame = false;  // the next frame drawn is the first in the new space
 
+
 	struct ProcessTeleportHook
 	{
 		static void Thunk(RE::PlayerCharacter* a_player)
 		{
 			std::scoped_lock guard(lock);
 			if (pending && !endOfFrameHooked) {
-				const auto portal = *pending;
+				const auto request = *pending;
 				pending.reset();
-				Begin(portal, pendingLimitsCamera);
+				Begin(request);
 			}
 			const auto before = Clock::now();
-			seamlessTeleport = arrivalYaw.has_value();
+			Portal::TransitionStalls::SetSeamless(arrivalYaw.has_value());
 			// The teleport resets the third-person camera to the player's head, from where it eases
 			// back out over the next frames (unseen behind a loading screen). Its distance and
 			// offsets are carried over instead.
@@ -539,21 +258,22 @@ namespace
 			auto*                     camera = RE::PlayerCamera::GetSingleton();
 			// On a horse or a dragon too: their camera states are third-person states.
 			auto*                     thirdPerson = Portal::CameraLimit::InThirdPerson() ? static_cast<RE::ThirdPersonState*>(camera->currentState.get()) : nullptr;
-			if (seamlessTeleport && thirdPerson) {
+			if (Portal::TransitionStalls::Seamless() && thirdPerson) {
 				cameraPose = CameraPose{ thirdPerson->posOffsetExpected, thirdPerson->posOffsetActual, thirdPerson->targetZoomOffset, thirdPerson->currentZoomOffset,
 					thirdPerson->pitchZoomOffset, thirdPerson->targetYaw, thirdPerson->currentYaw };
 			}
 			const auto  cameraOffset = camera->cameraRoot->world.translate - a_player->GetPosition();
 			const float yawBefore = a_player->GetAngleZ();
 			{
-				const Diag::Scope scope(seamlessTeleport ? "teleport" : "teleport step");
+				const Diag::Scope scope(Portal::TransitionStalls::Seamless() ? "teleport" : "teleport step");
 				func(a_player);
 			}
-			if (std::exchange(seamlessTeleport, false)) {
+			if (Portal::TransitionStalls::Seamless()) {
+				Portal::TransitionStalls::SetSeamless(false);
 				// The engine only resets the flag after its own short teleports. Ours is done now;
 				// left set until the trace ended (3 s), a save loaded or a fast travel in that time
 				// went without a loading screen.
-				*skipLoadScreen = false;
+				Engine::SkipLoadScreen() = false;
 			}
 			if (cameraPose && arrivalYaw && !(arrival && arrival->limitCamera)) {
 				// The offset turns with the player (heading: forward = (sin, cos)).
@@ -670,19 +390,13 @@ namespace
 					auto* cell = a_player->GetParentCell();
 					Portal::Manager::EndHoldoff(cell && cell->IsInteriorCell() && !Portal::Manager::MergeEnabled() ? 0.15f : 0.0f);
 				}
-				ResetClothPhysics();
+				Portal::ResetClothPhysics();
 				arrivalFrame = true;
 				Note(std::format("camera updated ({:.1f} ms)", Ms(Clock::now() - cameraStart)));
 			}
 		}
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};
-	// Main::Update (ID 36564), the call returning to +0xAC4 (SE: the call at +0x5E8): the wait for
-	// the frame's jobs (ID 35409), after the frame has been drawn. A crossing is carried out here, at the very end of the frame it was detected in,
-	// rather than at the start of the next one: everything the engine updates once per frame for
-	// the space the player is in (sky and ambient, image space, cloth physics, the camera) then
-	// runs for the new space before its first frame is drawn. Done at the start of a frame, that
-	// first frame was drawn with the old space's lighting.
 	// The doorway come out of means nothing in a world the game has since replaced (a save loaded,
 	// fast travel, a door taken with its loading screen): measured against it there, the camera was
 	// held at the player's head, their body hidden, wherever they stood on the far side of its plane.
@@ -695,7 +409,7 @@ namespace
 		exactArrival.reset();
 	}
 
-	// Every trip of the game's own shows its loading screen; a seamless one never does (skipLoadScreen).
+	// Every trip of the game's own shows its loading screen; a seamless one never does (Engine::SkipLoadScreen).
 	struct LoadingScreenSink : RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
 		RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
@@ -707,6 +421,12 @@ namespace
 		}
 	};
 
+	// Main::Update (ID 36564), the call returning to +0xAC4 (SE: the call at +0x5E8): the wait for
+	// the frame's jobs (ID 35409), after the frame has been drawn. A crossing is carried out here, at
+	// the very end of the frame it was detected in, rather than at the start of the next one:
+	// everything the engine updates once per frame for the space the player is in (sky and ambient,
+	// image space, cloth physics, the camera) then runs for the new space before its first frame is
+	// drawn. Done at the start of a frame, that first frame was drawn with the old space's lighting.
 	struct EndOfFrameHook
 	{
 		static void Thunk()
@@ -715,11 +435,11 @@ namespace
 			Portal::RemoteCell::StepAtEndOfFrame();
 			std::unique_lock guard(lock);
 			if (pending) {
-				const auto portal = *pending;
+				const auto request = *pending;
 				pending.reset();
 				{
 					const Diag::Scope scope("crossing begin");
-					Begin(portal, pendingLimitsCamera);
+					Begin(request);
 				}
 				guard.unlock();
 				ProcessTeleportHook::Thunk(RE::PlayerCharacter::GetSingleton());
@@ -728,185 +448,12 @@ namespace
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};
 
-}
+	// How far the camera may trail the player this frame (see Tick).
+	std::optional<float> cameraLimit;
 
-namespace Portal::Travel
-{
-	void Install()
+	// Moves the arrival on (the door given back, the camera let out) and returns the limit.
+	std::optional<float> ArrivalCameraLimit()
 	{
-		if (Diag::AgentMode()) {
-			wchar_t folder[MAX_PATH]{};
-			const auto ini = Paths::PluginDirectory() / "SeamlessSkyrim.ini";
-			if (::GetPrivateProfileStringW(L"Portals", L"sProfileCrossingsTo", L"", folder, MAX_PATH, ini.c_str()) > 0) {
-				profileAllTo = folder;
-				std::error_code error;
-				std::filesystem::create_directories(profileAllTo, error);
-			}
-		}
-		// The engine's teleport (ID 40438) reads its queue at +0x650 and the valid flag at +0x692 (SE:
-		// +0x640, +0x682; AE before 1.7.99: +0x648, +0x68A); CommonLib's layout must agree, or Begin
-		// writes elsewhere.
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		SEAMLESS_ASSERT(reinterpret_cast<std::uintptr_t>(&player->GetPlayerRuntimeData().queuedTargetLoc.isValid) - reinterpret_cast<std::uintptr_t>(player) == Hooks::Offset(0x682, 0x68A, 0x692));
-		REL::Relocation<std::uintptr_t> site{ REL::RelocationID(35565, 36564), REL::Relocate(0x53, 0x6E) };
-		if (!Hooks::CallsTo(site.address(), REL::RelocationID(39366, 40438), "travel: teleport")) {
-			logger::error("travel: walking through doors uses the normal transition");
-			return;
-		}
-		ProcessTeleportHook::func = SKSE::GetTrampoline().write_call<5>(site.address(), ProcessTeleportHook::Thunk);
-		static LoadingScreenSink loadingScreen;
-		RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(&loadingScreen);
-		REL::Relocation<std::uintptr_t> autosave{ REL::RelocationID(39366, 40438), REL::Relocate(0x897, 0x927) };
-		if (Hooks::CallsTo(autosave.address(), REL::RelocationID(34859, 35769), "travel: autosave")) {
-			TravelAutosaveHook::func = SKSE::GetTrampoline().write_call<5>(autosave.address(), TravelAutosaveHook::Thunk);
-		}
-		const REL::RelocationID         kWaitForLoads(73972, 75708);
-		REL::Relocation<std::uintptr_t> waitForLoads{ REL::RelocationID(39366, 40438), REL::Relocate(0x822, 0x8B2) };
-		REL::Relocation<std::uintptr_t> closeLoadScreen{ REL::RelocationID(39366, 40438), REL::Relocate(0x8C3, 0x952) };
-		const auto                      callsTo = [](std::uintptr_t a_site, REL::RelocationID a_id) { return Hooks::CallsTo(a_site, a_id, std::format("travel: call to ID {}", a_id.id())); };
-		if (callsTo(waitForLoads.address(), kWaitForLoads)) {
-			WaitForLoadsHook::func = SKSE::GetTrampoline().write_call<5>(waitForLoads.address(), WaitForLoadsHook::Thunk);
-		} else {
-			logger::warn("travel: load wait call not found, crossings keep waiting for loads");
-		}
-		for (const auto offset : REL::Relocate(std::array{ 0x402, 0x437 }, std::array{ 0x4A0, 0x4D5 })) {
-			REL::Relocation<std::uintptr_t> gridWait{ REL::RelocationID(13172, 13317), offset };
-			if (callsTo(gridWait.address(), kWaitForLoads)) {
-				GridLoadWaitHook::func = SKSE::GetTrampoline().write_call<5>(gridWait.address(), GridLoadWaitHook::Thunk);
-			}
-		}
-		if (callsTo(closeLoadScreen.address(), REL::RelocationID(13214, 13363))) {
-			CloseLoadScreenHook::func = SKSE::GetTrampoline().write_call<5>(closeLoadScreen.address(), CloseLoadScreenHook::Thunk);
-		} else {
-			logger::warn("travel: loading screen close call not found");
-		}
-		REL::Relocation<std::uintptr_t> endOfFrame{ REL::RelocationID(35565, 36564), Hooks::Offset(0x5E8, 0xAAD, 0xABF) };
-		if (callsTo(endOfFrame.address(), REL::RelocationID(34554, 35409))) {
-			EndOfFrameHook::func = SKSE::GetTrampoline().write_call<5>(endOfFrame.address(), EndOfFrameHook::Thunk);
-			endOfFrameHooked = true;
-		} else {
-			logger::warn("travel: end-of-frame call not found, crossings are carried out at the start of a frame");
-		}
-		const REL::RelocationID         kUpdateLights(99701, 106335);
-		REL::Relocation<std::uintptr_t> teleportLights{ REL::RelocationID(39657, 40744), REL::Relocate(0x3DC, 0x3D2) };
-		REL::Relocation<std::uintptr_t> frameLights{ REL::RelocationID(99703, 106337), REL::Relocate(0x2B, 0x2B) };
-		if (callsTo(teleportLights.address(), kUpdateLights) && callsTo(frameLights.address(), kUpdateLights)) {
-			TeleportLightsHook::func = SKSE::GetTrampoline().write_call<5>(teleportLights.address(), TeleportLightsHook::Thunk);
-			FrameLightsHook::func = SKSE::GetTrampoline().write_call<5>(frameLights.address(), FrameLightsHook::Thunk);
-		}
-		REL::Relocation<std::uintptr_t> extraFrame{ REL::RelocationID(13171, 13316), REL::Relocate(0x24C, 0x273) };
-		if (callsTo(extraFrame.address(), REL::RelocationID(35556, 36555))) {
-			ExtraFrameHook::func = SKSE::GetTrampoline().write_call<5>(extraFrame.address(), ExtraFrameHook::Thunk);
-		} else {
-			logger::warn("travel: Main::Draw call in SetCurrentCell not found");
-		}
-	}
-
-	bool ArrivalFramePending()
-	{
-		return arrivalFrame.load();
-	}
-
-	bool ConsumeArrivalFrame()
-	{
-		return arrivalFrame.exchange(false);
-	}
-
-	RE::FormID ArrivalDoor()
-	{
-		std::scoped_lock guard(lock);
-		return arrival ? arrival->door : 0;
-	}
-
-	json SetOptions(const json& a_options)
-	{
-		skipLoadWait = a_options.value("skipLoadWait", skipLoadWait);
-		skipLoadScreenClose = a_options.value("skipLoadScreenClose", skipLoadScreenClose);
-		skipExtraFrame = a_options.value("skipExtraFrame", skipExtraFrame);
-		spreadLights = a_options.value("spreadLights", spreadLights);
-		return { { "skipLoadWait", skipLoadWait }, { "skipLoadScreenClose", skipLoadScreenClose }, { "skipExtraFrame", skipExtraFrame },
-			{ "spreadLights", spreadLights } };
-	}
-
-	void ThroughDoorTo(RE::TESObjectREFR* a_door, const RE::NiPoint3& a_position, float a_yaw)
-	{
-		auto* base = a_door && a_door->GetBaseObject() ? a_door->GetBaseObject()->As<RE::TESObjectDOOR>() : nullptr;
-		SEAMLESS_ASSERT(base);
-		REL::Relocation<void (*)(RE::TESObjectDOOR*, RE::RefHandle*)> teleportThroughDoor{ REL::RelocationID(17523, 17924) };
-		RE::RefHandle handle = a_door->GetHandle().native_handle();
-		auto&         queued = RE::PlayerCharacter::GetSingleton()->GetPlayerRuntimeData().queuedTargetLoc;
-		teleportThroughDoor(base, &handle);
-		SEAMLESS_ASSERT(queued.isValid);
-		queued.location = a_position;
-		queued.angle = { 0.0f, 0.0f, a_yaw };
-		logger::info("travel: after loading, through door {:08X} to ({:.0f},{:.0f},{:.0f})", a_door->GetFormID(), a_position.x, a_position.y, a_position.z);
-	}
-
-	void ThroughDoor(RE::TESObjectREFR* a_door)
-	{
-		auto* base = a_door->GetBaseObject()->As<RE::TESObjectDOOR>();
-		SEAMLESS_ASSERT(base);
-		REL::Relocation<void (*)(RE::TESObjectDOOR*, RE::RefHandle*)> teleportThroughDoor{ REL::RelocationID(17523, 17924) };
-		RE::RefHandle handle = a_door->GetHandle().native_handle();
-		teleportThroughDoor(base, &handle);
-		SEAMLESS_ASSERT(RE::PlayerCharacter::GetSingleton()->GetPlayerRuntimeData().queuedTargetLoc.isValid);
-	}
-
-	void Request(const Manager::Active& a_portal, bool a_limitCamera, float a_cameraFloor, bool a_exact)
-	{
-		std::scoped_lock guard(lock);
-		pending = a_portal;
-		pendingLimitsCamera = a_limitCamera;
-		pendingCameraFloor = a_cameraFloor;
-		pendingExact = a_exact;
-	}
-
-	void Update()
-	{
-		Diag::SamplerSetMainThread();
-		std::scoped_lock guard(lock);
-		if (purgeDeadline && (!LoadsPending() || Clock::now() >= *purgeDeadline)) {
-			const bool timedOut = Clock::now() >= *purgeDeadline;
-			purgeDeadline.reset();
-			RE::TES::GetSingleton()->PurgeBufferedCells();
-			Portal::Manager::EndHoldoff();
-			Note(std::format("cells of the worldspace left purged{}", timedOut ? " (loads still pending)" : ""));
-		}
-		if (!trace.running) {
-			return;
-		}
-		const auto now = Clock::now();
-		const auto frameMs = Ms(now - trace.lastFrame);
-		trace.lastFrame = now;
-		++trace.frames;
-		trace.worstFrameMs = std::max(trace.worstFrameMs, frameMs);
-		auto*      player = RE::PlayerCharacter::GetSingleton();
-		auto*      cell = player->GetParentCell();
-		const auto menus = OpenMenus();
-		if (frameMs > 40.0 || *loadScreenUp || !menus.empty()) {
-			Note(std::format("frame {} took {:.1f} ms, load screen flag {}, menus: {}", trace.frames, frameMs, *loadScreenUp, menus));
-		}
-		if (trace.arrivedMs < 0.0 && cell && cell->GetFormID() != trace.fromCell) {
-			trace.arrivedMs = Ms(now - trace.start);
-			const auto pos = player->GetPosition();
-			Note(std::format("arrived in {} at ({:.0f},{:.0f},{:.0f}) yaw {:.1f}", Probe::DescribeCell(cell), pos.x, pos.y, pos.z, RE::rad_to_deg(player->GetAngleZ())));
-		}
-		if (Ms(now - trace.start) > 3000.0) {
-			trace.running = false;
-			lastResult = {
-				{ "door", std::format("{:08X}", trace.door) },
-				{ "arrivedMs", trace.arrivedMs },
-				{ "frames", trace.frames },
-				{ "worstFrameMs", trace.worstFrameMs },
-				{ "events", trace.events },
-			};
-			Note(std::format("trace done: arrived after {:.1f} ms, worst frame {:.1f} ms", trace.arrivedMs, trace.worstFrameMs));
-		}
-	}
-
-	std::optional<float> CameraLimit()
-	{
-		std::scoped_lock guard(lock);
 		if (!arrival) {
 			return std::nullopt;
 		}
@@ -965,6 +512,96 @@ namespace Portal::Travel
 		}
 		return let;
 	}
+}
+
+namespace Portal::Travel
+{
+	void Install()
+	{
+		TravelTrace::Install();
+		// The engine's teleport (ID 40438) reads its queue at +0x650 and the valid flag at +0x692 (SE:
+		// +0x640, +0x682; AE before 1.7.99: +0x648, +0x68A); CommonLib's layout must agree, or Begin
+		// writes elsewhere.
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		SEAMLESS_ASSERT(reinterpret_cast<std::uintptr_t>(&player->GetPlayerRuntimeData().queuedTargetLoc.isValid) - reinterpret_cast<std::uintptr_t>(player) == Hooks::Offset(0x682, 0x68A, 0x692));
+		REL::Relocation<std::uintptr_t> site{ REL::RelocationID(35565, 36564), REL::Relocate(0x53, 0x6E) };
+		if (!Hooks::CallsTo(site.address(), REL::RelocationID(39366, 40438), "travel: teleport")) {
+			logger::error("travel: walking through doors uses the normal transition");
+			return;
+		}
+		ProcessTeleportHook::func = SKSE::GetTrampoline().write_call<5>(site.address(), ProcessTeleportHook::Thunk);
+		static LoadingScreenSink loadingScreen;
+		RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(&loadingScreen);
+		TransitionStalls::Install();
+		REL::Relocation<std::uintptr_t> endOfFrame{ REL::RelocationID(35565, 36564), Hooks::Offset(0x5E8, 0xAAD, 0xABF) };
+		if (Hooks::CallsTo(endOfFrame.address(), REL::RelocationID(34554, 35409), "travel: call to ID 35409")) {
+			EndOfFrameHook::func = SKSE::GetTrampoline().write_call<5>(endOfFrame.address(), EndOfFrameHook::Thunk);
+			endOfFrameHooked = true;
+		} else {
+			logger::warn("travel: end-of-frame call not found, crossings are carried out at the start of a frame");
+		}
+	}
+
+	bool ArrivalFramePending()
+	{
+		return arrivalFrame.load();
+	}
+
+	bool ConsumeArrivalFrame()
+	{
+		return arrivalFrame.exchange(false);
+	}
+
+	RE::FormID ArrivalDoor()
+	{
+		std::scoped_lock guard(lock);
+		return arrival ? arrival->door : 0;
+	}
+
+	void ThroughDoorTo(RE::TESObjectREFR* a_door, const RE::NiPoint3& a_position, float a_yaw)
+	{
+		auto& queued = QueueTeleport(a_door);
+		queued.location = a_position;
+		queued.angle = { 0.0f, 0.0f, a_yaw };
+		logger::info("travel: after loading, through door {:08X} to ({:.0f},{:.0f},{:.0f})", a_door->GetFormID(), a_position.x, a_position.y, a_position.z);
+	}
+
+	void ThroughDoor(RE::TESObjectREFR* a_door)
+	{
+		QueueTeleport(a_door);
+	}
+
+	void Request(const CrossingRequest& a_request)
+	{
+		std::scoped_lock guard(lock);
+		pending = a_request;
+	}
+
+	void Update()
+	{
+		Diag::SamplerSetMainThread();
+		std::scoped_lock guard(lock);
+		if (purgeDeadline && (!LoadsPending() || Clock::now() >= *purgeDeadline)) {
+			const bool timedOut = Clock::now() >= *purgeDeadline;
+			purgeDeadline.reset();
+			RE::TES::GetSingleton()->PurgeBufferedCells();
+			Portal::Manager::EndHoldoff();
+			Note(std::format("cells of the worldspace left purged{}", timedOut ? " (loads still pending)" : ""));
+		}
+		TravelTrace::Update();
+	}
+
+	void Tick()
+	{
+		std::scoped_lock guard(lock);
+		cameraLimit = ArrivalCameraLimit();
+	}
+
+	std::optional<float> CameraLimit()
+	{
+		std::scoped_lock guard(lock);
+		return cameraLimit;
+	}
 
 	void CloseArrivalDoor()
 	{
@@ -982,15 +619,9 @@ namespace Portal::Travel
 		purgeDeadline.reset();
 	}
 
-	void ProfileNext(const std::filesystem::path& a_file)
-	{
-		std::scoped_lock guard(lock);
-		profileFile = a_file;
-	}
-
 	json Status()
 	{
 		std::scoped_lock guard(lock);
-		return { { "running", trace.running }, { "pending", pending.has_value() }, { "last", lastResult } };
+		return { { "running", TravelTrace::Running() }, { "pending", pending.has_value() }, { "last", TravelTrace::Last() } };
 	}
 }

@@ -38,6 +38,7 @@ namespace Plugin::Frame
 					Portal::Travel::Update();
 				}
 				const auto approach = Portal::Manager::CameraLimit();
+				Portal::Travel::Tick();
 				const auto leave = Portal::Travel::CameraLimit();
 				Portal::CameraLimit::Set(approach && leave ? std::optional(std::min(*approach, *leave)) : approach ? approach : leave);
 			}
