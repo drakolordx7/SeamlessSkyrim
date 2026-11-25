@@ -7,70 +7,84 @@ facts are in ENGINE.md.
 
 | What | Where |
 |---|---|
-| Game | `E:\SteamLibrary\steamapps\common\Skyrim Special Edition` |
+| Game (Steam, AE 1.7.104) | `E:\SteamLibrary\steamapps\common\Skyrim Special Edition` |
+| Test instance (what the agent harness launches) | the Skyrim modding project's MO2 portable instance, `D:\AI\Active\Skyrim\instance` (`SKYRIM_MO2_DIR`), profile `SeamlessTest` |
 | Plugin log | `Documents\My Games\Skyrim Special Edition\SKSE\SeamlessSkyrim.log` |
 | Community Shaders log | same folder, `CommunityShaders.log` (shader compile errors land here) |
 | Crash logs | same folder, `Crashlogs\*.log` (trainwreck); `re_lookup` turns a `SkyrimSE.exe+offset` into an ID |
-| Plugin settings | `<game>\Data\SKSE\Plugins\SeamlessSkyrim.ini` |
-| Load order | `%LOCALAPPDATA%\Skyrim Special Edition\plugins.txt` |
+| Plugin settings | `SeamlessSkyrim.ini` (shipped) and `SeamlessSkyrim_User.ini` (what the in-game menu writes, wins per key), next to the DLL in `SKSE\Plugins` |
+| Load order | `%LOCALAPPDATA%\Skyrim Special Edition\plugins.txt` (the Steam game; MO2 keeps its own in the profile) |
 | Community Shaders fork | `E:\projects\CommunityShaders-Seamless`, branch `seamless-portal` (COMMUNITY-SHADERS-PATCH.md) |
 
 ## SeamlessSkyrim (this repo)
 
 ```powershell
-tools\build.ps1                     # RelWithDebInfo, copied into the game
-tools\build.ps1 -NoDeploy           # compile only; works while the game runs
-tools\build.ps1 -CommunityShaders   # the fork's DLL too (see below)
+tools\build.ps1 -NoDeploy          # compile only; works while the game runs
+tools\deploy-mo2-dev.ps1           # put that build into the MO2 test instance
+tools\build.ps1                    # RelWithDebInfo, and copy it into the Steam game's SKSE\Plugins
+tools\build.ps1 -CommunityShaders  # the fork's DLL too (see below)
 ```
 
 The script finds `cmake`, which isn't on `PATH` (it comes with Visual Studio), and stops before
 building when the game is running and the copy would fail.
 
 - Output: `build/RelWithDebInfo/SeamlessSkyrim.dll` and `.pdb`.
-- The post-build step copies both into `<game>\Data\SKSE\Plugins` (`SKYRIM_PLUGINS_DIR` in
-  CMakeLists.txt). The copy fails while the game runs, so quit it first. It writes into the
-  existing files (`tools/copy-in-place.ps1`), so when Vortex deploys the DLL as a hard link the
-  build lands in the Vortex mod too.
+- **MO2 test instance** (what `game_launch` starts): `tools\deploy-mo2-dev.ps1` writes the DLL and
+  PDB into the local mod `Seamless Dev Build` of the Skyrim modding project (both its
+  `.weaver\files\<mod>` source and `instance\mods\<mod>`, with the build's modification time so
+  that project's `build.py` leaves them alone). The mod sits right after `Seamless Skyrim` in its
+  `modlist.yaml`, so it wins over the Nexus release's DLL while that release's Community Shaders
+  files, ini files and shaders stay. It refuses to run while `SkyrimSE.exe` runs. `-Baseline`
+  deploys `.weaver\baseline` (the upstream plugin) for comparison, `-Source <folder>` any other
+  DLL. Once, from the Skyrim project: `uv run .weaver/tools/build.py --only "Seamless Dev Build"`
+  (the script says so when the mod doesn't exist yet).
+- **Steam game**: the post-build step copies both files into `<game>\Data\SKSE\Plugins`
+  (`SKYRIM_PLUGINS_DIR` in CMakeLists.txt); it fails while the game runs. It writes into the
+  existing files (`tools/copy-in-place.ps1`), so a DLL deployed as a hard link by a mod manager
+  keeps its link.
 
 ### Layout and Core
 
-`src/Skyrim/` is the plugin (everything that touches the engine); `src/Core/` is the
-game-independent library `SeamlessCore` (plain-float maths, ids and the decisions that need no
-engine types), linked into the DLL. Core has no CommonLib, no PCH and no Windows or D3D headers:
-`cmake/CheckCore.cmake` fails the build when a file under `src/Core` includes anything but the
-standard library or another Core header. Engine types are converted at the boundary in
-`src/Skyrim/Engine/CoreConvert.h`.
+`src/Skyrim/` is the plugin (everything that touches the engine), one folder per domain:
 
-The unit tests of Core are a separate executable, not part of the DLL. `toolsuild.ps1` builds
-it with everything else; run it with `build\RelWithDebInfo\SeamlessCoreTests.exe` (exit code 0 when
+| Folder | What lives there |
+|---|---|
+| `Plugin/` | `main.cpp` (SKSE entry, the order things are installed in), `Settings` (the one owner of the ini files), `Frame` (the player-update hook that drives the portals) |
+| `Engine/` | Engine helpers shared by domains: attach/detach a cell, fade, fog layout, same-space, hook-site checks, `CoreConvert.h` |
+| `Doors/` | One door pair: geometry, swing, held-open count, mapping, per-door ini, policy |
+| `Spaces/` | `RemoteCell`: the space behind a door kept alive (attach, Havok step, placement into the world scene, a gate's passage, engine hooks), and `WalkOut` |
+| `Portal/` | `PortalManager` (frame order), selection, merged view/cull, crossing and travel, lights, street merge |
+| `Render/` | Backends (Community Shaders fork / native), portal pass, space lighting, Present hook |
+| `Pictures/` | Doorway pictures: capture, cache, composite |
+| `Bridge/`, `Diag/` | Test tooling (agent mode, the TCP bridge, perf, sampler); `Diag/Telemetry.h` is the no-op sink the portal code reports to |
+| `UI/` | The in-game menu |
+
+`src/Core/` is the game-independent library `SeamlessCore` (plain-float maths, ids and the
+decisions that need no engine types), linked into the DLL. Core has no CommonLib, no PCH and no
+Windows or D3D headers: `cmake/CheckCore.cmake` fails the build when a file under `src/Core`
+includes anything but the standard library or another Core header. Engine types are converted at
+the boundary in `src/Skyrim/Engine/CoreConvert.h`.
+
+The unit tests of Core are a separate executable, not part of the DLL. `tools\build.ps1` builds it
+with everything else; run it with `build\RelWithDebInfo\SeamlessCoreTests.exe` (exit code 0 when
 all checks pass). The source is `tests/Core/CoreTests.cpp`.
 
 ## As a Vortex mod
 
-`tools/deploy-vortex-mod.ps1` puts the plugin (Release build, no PDB), its two ini files from
-`package/`, and the Community Shaders fork's DLL (its ~100 MB PDB only with `-CsPdb`) and changed
-files into `E:\Vortex Mods\skyrimse\SeamlessSkyrim`:
+The release was first tested as a Vortex mod; the agent harness no longer uses it.
+`tools/deploy-vortex-mod.ps1 -Build` still puts the plugin (Release build, no PDB), its ini files
+from `package/` and the Community Shaders fork's DLL into `E:\Vortex Mods\skyrimse\SeamlessSkyrim`
+(`-CsPdb`, `-RestoreStockCommunityShaders` and `-ClearShaderCache` are its other switches). Things
+that cost time:
 
-```powershell
-tools\deploy-vortex-mod.ps1 -Build   # -Build: both DLLs first
-```
-
-- New mod folder: restart Vortex, enable `SeamlessSkyrim`, make it load after Community Shaders
-  and Skylighting, deploy. Later runs write into the deployed files and need no redeploy unless
-  the script says files were added or removed.
-- Doors tuned in game land in `<game>\Data\SKSE\Plugins\SeamlessSkyrim_Doors_User.ini`, never in
-  the shipped `SeamlessSkyrim_Doors.ini` (an update would replace a player's tunings with it).
-  `tools/fold-door-tunings.ps1`, run by this script and `make-release.ps1`, moves them into
-  `package/`'s file and the game's, and deletes the user file; commit `package/`.
-- `-RestoreStockCommunityShaders` puts stock 1.9.1 back into Vortex's own Community Shaders mod.
-  A `cp` into the game's Data folder writes through Vortex's hard links into whichever mod owns
-  the file, which is how the fork's files once ended up in the stock mod.
-- `-ClearShaderCache` after a change to a `Common/*.hlsli` (see below).
-- Vortex shows the version as `?`. A folder it finds in its staging folder gets only a name and
-  an install time (`refreshMods` in Vortex's code); version, author and so on come from Nexus
-  metadata of the downloaded archive, and no file in the mod folder supplies them. Don't name
-  the folder like a Nexus download (`Name-12345-1-0-...`): Vortex takes a `-<number>-` in the
-  name for a Nexus mod ID and may pull some other mod's metadata.
+- A `cp` into the game's Data folder writes through Vortex's hard links into whichever mod owns the
+  file, which is how the fork's files once ended up in the stock Community Shaders mod.
+- Vortex shows the version as `?`, and a mod folder named like a Nexus download
+  (`Name-12345-1-0-...`) is taken for a Nexus mod and may pull another mod's metadata.
+- Doors tuned in game land in `SeamlessSkyrim_Doors_User.ini`, never in the shipped
+  `SeamlessSkyrim_Doors.ini`; `tools/fold-door-tunings.ps1` (run by the Vortex deploy and by
+  `make-release.ps1`) moves them into `package/`'s file and the game's and deletes the user file.
+  Commit `package/`.
 
 ## Release archive
 
@@ -104,10 +118,8 @@ cp build/ALL/Release/CommunityShaders.dll build/ALL/Release/CommunityShaders.pdb
 ```
 
 CMake's build of the fork doesn't copy anything into the game, so do it by hand as above, or run
-`tools/build.ps1 -CommunityShaders` or `tools/deploy-vortex-mod.ps1`. `cp` writes into the
-existing file, which keeps the game's DLL hard link intact, and therefore also changes the Vortex
-mod that file belongs to: once the SeamlessSkyrim mod is deployed that's the right one, before
-it's stock Community Shaders.
+`tools/build.ps1 -CommunityShaders`. `cp` writes into the existing file, which keeps a hard link to
+a mod manager's copy intact and so changes the mod that file belongs to.
 
 Shaders aren't built; the game compiles them from `<game>\Data\Shaders`. After editing one in
 `package/Shaders`, copy it over the game's file:
@@ -127,7 +139,16 @@ cp package/Shaders/Utility.hlsl "/e/SteamLibrary/steamapps/common/Skyrim Special
 
 Launching and the bridge:
 - `game_launch(save=...)` starts the game with the agent bridge and loads the save straight from
-  the main menu (`SEAMLESS_AGENT_LOAD`).
+  the main menu (`SEAMLESS_AGENT_LOAD`). By default it goes through the MO2 instance
+  (`ModOrganizer.exe moshortcut://:SKSE`, so the mods are in the game's virtual file system) with
+  the profile `SeamlessTest`: its own saves folder, autosaves off, so a test run never touches the
+  user's saves. It refuses while MO2 itself is open (a game it starts has no bridge) and for a
+  profile without local saves. `SKYRIM_LAUNCH=skse` with `SKYRIM_GAME_DIR` starts the Steam game
+  directly instead; every `SKYRIM_*` setting (MO2 dir, profile, base save, docs dir, saves dir) can
+  also go in a `harness.json` beside `server.py` (see the top of that file).
+- A route's `{"load": name}` save that doesn't exist on this machine falls back to `starts.json`:
+  the stored place or cell (and console lines) to start from, applied to the clean new-game save
+  `SeamlessTestBase` (`make_base_save`).
 - Never launch or quit while the user is playing: check `Get-Process SkyrimSE` first. A game the
   user started has no bridge, and the plugin log says `agent mode: off`.
 - Background mode moves the game window to a second virtual desktop **once** per launch and then

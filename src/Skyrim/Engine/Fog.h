@@ -6,10 +6,15 @@
 // as the lighting shader's technique setup (ID 107320) and the SSAO composite read it.
 namespace Engine::Fog
 {
-	// Everything this plugin reads or writes, as one block: near colour +0x38, far colour +0x44,
-	// near +0x50, far +0x54, power +0x84, most it covers +0x88.
-	inline constexpr std::size_t kBegin = 0x38;
-	inline constexpr std::size_t kEnd = 0x8C;
+	inline constexpr std::size_t kNearColor = 0x38;  // three floats
+	inline constexpr std::size_t kFarColor = 0x44;   // three floats
+	inline constexpr std::size_t kNear = 0x50;
+	inline constexpr std::size_t kFar = 0x54;
+	inline constexpr std::size_t kPower = 0x84;
+	inline constexpr std::size_t kMost = 0x88;  // the most it covers
+	// Everything this plugin reads or writes, as one block.
+	inline constexpr std::size_t kBegin = kNearColor;
+	inline constexpr std::size_t kEnd = kMost + sizeof(float);
 
 	// The fog property of a light scene (0: the world's); the active one is the one the scene
 	// index (ID 390982) names.
@@ -40,16 +45,16 @@ namespace Engine::Fog
 	// a_fog's values into a_property, as the engine would hold them.
 	inline void Write(std::byte* a_property, const Render::SpaceFog& a_fog)
 	{
-		Write(a_property, 0x38, a_fog.nearColor.red);
-		Write(a_property, 0x3C, a_fog.nearColor.green);
-		Write(a_property, 0x40, a_fog.nearColor.blue);
-		Write(a_property, 0x44, a_fog.farColor.red);
-		Write(a_property, 0x48, a_fog.farColor.green);
-		Write(a_property, 0x4C, a_fog.farColor.blue);
-		Write(a_property, 0x50, a_fog.nearDistance);
-		Write(a_property, 0x54, a_fog.farDistance);
-		Write(a_property, 0x84, a_fog.power);
-		Write(a_property, 0x88, a_fog.most);
+		Write(a_property, kNearColor, a_fog.nearColor.red);
+		Write(a_property, kNearColor + 4, a_fog.nearColor.green);
+		Write(a_property, kNearColor + 8, a_fog.nearColor.blue);
+		Write(a_property, kFarColor, a_fog.farColor.red);
+		Write(a_property, kFarColor + 4, a_fog.farColor.green);
+		Write(a_property, kFarColor + 8, a_fog.farColor.blue);
+		Write(a_property, kNear, a_fog.nearDistance);
+		Write(a_property, kFar, a_fog.farDistance);
+		Write(a_property, kPower, a_fog.power);
+		Write(a_property, kMost, a_fog.most);
 	}
 
 	// The world's fog laid out as the engine uploads it (FogParam: near / (far - near), 1 / (far -
@@ -63,17 +68,17 @@ namespace Engine::Fog
 		if (!property) {
 			return out;
 		}
-		const float fogNear = Read(property, 0x50), fogFar = Read(property, 0x54);
+		const float fogNear = Read(property, kNear), fogFar = Read(property, kFar);
 		// The engine uploads a constant for "no fog" when both are 0; a most-it-covers of 0 is that here.
 		if (fogFar - fogNear > 1e-3f) {
 			out[1] = 1.0f / (fogFar - fogNear);
 			out[0] = fogNear * out[1];
-			out[2] = Read(property, 0x84);
-			out[3] = Read(property, 0x88);
+			out[2] = Read(property, kPower);
+			out[3] = Read(property, kMost);
 		}
-		for (int i = 0; i < 3; ++i) {
-			out[4 + i] = Read(property, 0x38 + 4 * i);
-			out[8 + i] = Read(property, 0x44 + 4 * i);
+		for (std::size_t i = 0; i < 3; ++i) {
+			out[4 + i] = Read(property, kNearColor + 4 * i);
+			out[8 + i] = Read(property, kFarColor + 4 * i);
 		}
 		return out;
 	}

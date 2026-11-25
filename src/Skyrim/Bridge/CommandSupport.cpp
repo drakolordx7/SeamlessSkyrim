@@ -9,6 +9,11 @@ namespace Bridge::Support
 		return std::format("{:08X}", a_id);
 	}
 
+	std::string Address(const void* a_pointer)
+	{
+		return std::format("{:X}", reinterpret_cast<std::uintptr_t>(a_pointer));
+	}
+
 	RE::FormID ParseFormID(const json& a_value)
 	{
 		if (a_value.is_number_unsigned() || a_value.is_number_integer()) {

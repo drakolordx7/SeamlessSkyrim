@@ -11,7 +11,4 @@ namespace Plugin::Frame
 	// Runs right after the engine's own player update, before the portals' (the bridge's walk_to).
 	using PreUpdate = void (*)(RE::PlayerCharacter* a_player, float a_delta);
 	void SetPreUpdate(PreUpdate a_callback);
-
-	// Diagnostics: frame times of the last 120 frames (average, median, 95th percentile, worst).
-	json FrameStats();
 }

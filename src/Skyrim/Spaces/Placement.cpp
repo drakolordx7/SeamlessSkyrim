@@ -52,19 +52,19 @@ namespace Portal
 	{
 		SEAMLESS_ASSERT(merged);
 		placed = a_placement;
-		const auto& a_toSource = a_placement.toSource;
+		const auto& toSource = a_placement.toSource;
 		RestoreBounds();
 		for (auto* cell : movedCells) {
 			if (auto* cell3D = Cell3D(cell)) {
 				movedBounds.Capture(cell3D);
 				movedBounds.UnfixBeforeMove(cell3D);
-				cell3D->local = a_toSource;
+				cell3D->local = toSource;
 				RE::NiUpdateData update;
 				cell3D->Update(update);
 				SettleMotion(cell3D);
 			}
 		}
-		MoveBounds(a_toSource);
+		MoveBounds(toSource);
 	}
 
 	// By hand: NiNode's own UpdateWorldBound does nothing (the scene update merges the children's
@@ -170,16 +170,9 @@ namespace Portal
 
 	void MovedBounds::Unfix(RE::NiAVObject* a_root)
 	{
-		bool any = false;
-		RE::BSVisit::TraverseScenegraphObjects(a_root, [&](RE::NiAVObject* a_object) {
-			if (a_object->GetFlags().any(RE::NiAVObject::Flag::kFixedBound)) {
-				a_object->GetFlags().reset(RE::NiAVObject::Flag::kFixedBound);
-				fixed.emplace_back(a_object);
-				any = true;
-			}
-			return RE::BSVisit::BSVisitControl::kContinue;
-		});
-		if (any) {
+		const auto before = fixed.size();
+		UnfixBeforeMove(a_root);
+		if (fixed.size() != before) {
 			RecomputeBounds(a_root);
 		}
 	}
@@ -232,10 +225,22 @@ namespace Portal
 		movedBounds.Restore();
 	}
 
+	bool RemoteCell::StillCollision(RE::NiAVObject* a_object)
+	{
+		auto* collision = a_object->collisionObject ? netimmerse_cast<RE::bhkNiCollisionObject*>(a_object->collisionObject.get()) : nullptr;
+		if (!collision || !collision->flags.any(RE::bhkNiCollisionObject::Flag::kActive)) {
+			return false;
+		}
+		stilledClutter.emplace_back(RE::NiPointer<RE::NiAVObject>(a_object), collision->flags.underlying());
+		Pristine::FlagsChanged(collision, collision->flags.underlying());
+		collision->flags.reset(RE::bhkNiCollisionObject::Flag::kActive, RE::bhkNiCollisionObject::Flag::kSyncOnUpdate);
+		return true;
+	}
+
 	json RemoteCell::Merge(const Placement& a_placement)
 	{
 		placed = a_placement;
-		const auto& a_toSource = a_placement.toSource;
+		const auto& toSource = a_placement.toSource;
 		auto* here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
 		auto* here3D = Cell3D(here);
 		auto* worldParent = here3D ? here3D->parent : nullptr;
@@ -254,24 +259,23 @@ namespace Portal
 				movedBounds.UnfixBeforeMove(cell3D.get());
 				root->DetachChild(cell3D.get());
 				worldParent->AttachChild(cell3D.get(), true);
-				cell3D->local = a_toSource;
+				cell3D->local = toSource;
 				// Loose objects (a mace on a shelf, cheese, plates) take their place from their
 				// physics body, in the cell's own coordinates: they stayed behind, tens of thousands
 				// of units away, and the shelves of the merged room were empty. While merged their
 				// collision objects don't drive the 3D, which then follows the cell like the rest.
 				RE::BSVisit::TraverseScenegraphObjects(cell3D.get(), [&](RE::NiAVObject* a_object) {
-					auto* collision = a_object->collisionObject ? netimmerse_cast<RE::bhkNiCollisionObject*>(a_object->collisionObject.get()) : nullptr;
-					bool ofActor = false;
-					for (auto* up = a_object; collision && up && up != cell3D.get(); up = up->parent) {
-						if (auto* owner = up->GetUserData(); owner && owner->Is(RE::FormType::ActorCharacter)) {
-							ofActor = true;  // skeletons keep their ragdoll and controller ties
-							break;
-						}
+					if (!a_object->collisionObject) {
+						return RE::BSVisit::BSVisitControl::kContinue;
 					}
-					if (collision && !ofActor && collision->flags.any(RE::bhkNiCollisionObject::Flag::kActive)) {
-						stilledClutter.emplace_back(RE::NiPointer<RE::NiAVObject>(a_object), collision->flags.underlying());
-						Pristine::FlagsChanged(collision, collision->flags.underlying());
-						collision->flags.reset(RE::bhkNiCollisionObject::Flag::kActive, RE::bhkNiCollisionObject::Flag::kSyncOnUpdate);
+					// Skeletons keep their ragdoll and controller ties.
+					bool ofActor = false;
+					for (auto* up = a_object; up && up != cell3D.get() && !ofActor; up = up->parent) {
+						auto* owner = up->GetUserData();
+						ofActor = owner && owner->Is(RE::FormType::ActorCharacter);
+					}
+					if (!ofActor) {
+						StillCollision(a_object);
 					}
 					return RE::BSVisit::BSVisitControl::kContinue;
 				});
@@ -281,7 +285,7 @@ namespace Portal
 				++moved;
 			}
 		}
-		MoveBounds(a_toSource);
+		MoveBounds(toSource);
 		// The room's lights stay in the portal's light scene: the patched Community Shaders lights the
 		// merged shapes from there (SetupPortalStrictLights). Handed to the world's, they lit the
 		// street around the door, through walls, took shadow slots from the town's own lights (its

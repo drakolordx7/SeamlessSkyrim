@@ -11,8 +11,8 @@
 //
 // One class, in files by reason to change: Attach.cpp (lifecycle, readiness, persistent
 // references, release), Havok.cpp (stepping), Placement.cpp (merging into the world's scene,
-// bounds), Collision.cpp (a gate's passage), EngineHooks.cpp
-// (hooks on the engine's attach and unload), Describe.cpp (diagnostics).
+// bounds), Collision.cpp (a gate's passage), EngineHooks.cpp (hooks on the engine's attach and
+// unload). The bridge describes a space from the accessors (Bridge::PortalDiagnostics).
 namespace Portal
 {
 	class RemoteCell
@@ -52,12 +52,16 @@ namespace Portal
 		// The cell the portal door leads into (the neighbours only fill the view).
 		[[nodiscard]] RE::TESObjectCELL* Cell() const { return cells.empty() ? nullptr : cells.front(); }
 		[[nodiscard]] RE::NiAVObject*    Cell3D() const;
+		[[nodiscard]] static RE::NiAVObject* Cell3D(const RE::TESObjectCELL* a_cell);
+		[[nodiscard]] static std::vector<RE::Actor*> ActorsIn(const RE::TESObjectCELL* a_cell);
 		[[nodiscard]] const std::vector<RE::TESObjectCELL*>& Cells() const { return cells; }
 		// New on every attach, unique among all spaces; the renderer starts fresh render state when
 		// it changes.
 		[[nodiscard]] std::uint32_t Generation() const { return generation; }
 		[[nodiscard]] int AdoptedLights() const { return adoptedLights; }
-		// Persistent references' 3D hung under our exterior cells (see AttachOne).
+		// Frames in which a remote world was stepped, since the last attach of any space.
+		[[nodiscard]] static std::uint64_t SteppedFrames() { return steppedFrames; }
+		// Persistent references' 3D hung under our exterior cells (see AdoptPersistent).
 		[[nodiscard]] const std::vector<RE::NiPointer<RE::NiAVObject>>& BorrowedPersistent() const { return borrowedPersistent; }
 
 		// Exterior cells around the door's (1 = the 3x3 block).
@@ -111,11 +115,6 @@ namespace Portal
 		static void HangHandedPersistent();
 		[[nodiscard]] static bool PersistentToHang() { return !handedPersistent.empty(); }
 
-		json Describe() const;
-		// Diagnostics: the cached render passes of the remote cells' shapes; a_drop forgets the
-		// lists that hold passes already returned to the pool.
-		json RenderPasses(bool a_drop);
-
 	private:
 		// Collision objects switched to "visual only" while merged (see Merge), with their flags.
 		using Stilled = std::vector<std::pair<RE::NiPointer<RE::NiAVObject>, std::uint32_t>>;
@@ -126,8 +125,6 @@ namespace Portal
 		static constexpr float kQuietSecondsRequired = 1.5f;
 		static constexpr float kQuietSecondsPreloaded = 0.0f;  // drawn the frame it is attached
 
-		static RE::NiAVObject*          Cell3D(const RE::TESObjectCELL* a_cell);
-		static std::vector<RE::Actor*>  ActorsIn(const RE::TESObjectCELL* a_cell);
 		static bool                     Attachable(const RE::TESObjectCELL* a_cell);
 
 		// Attach.cpp
@@ -167,6 +164,10 @@ namespace Portal
 		// Placement.cpp
 		void MoveBounds(const RE::NiTransform& a_toSource);
 		void RestoreBounds();
+		// The object's collision object switched to "visual only" (no longer driving its 3D from its
+		// body) and kept in stilledClutter, which Release puts back. False if it has none, or it
+		// isn't active.
+		bool StillCollision(RE::NiAVObject* a_object);
 
 		std::vector<RE::TESObjectCELL*>            cells;  // [0] = the door's cell
 		RE::NiPointer<RE::ShadowSceneNode>         scene;  // the root the cells hang under; see LightScene

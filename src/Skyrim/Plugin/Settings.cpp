@@ -69,8 +69,7 @@ namespace Plugin::Settings
 				value.number = Clamped(entry, value.number);
 			}
 		}
-		logger::info("settings: {} then {}; remote Havok stepping mode {}{}", kShippedFile, kUserFile, Int(Id::kStepRemoteHavok),
-			::GetModuleHandleW(L"Precision.dll") ? " (Precision is loaded)" : "");
+		logger::info("settings: {} then {}; remote Havok stepping mode {}", kShippedFile, kUserFile, Int(Id::kStepRemoteHavok));
 	}
 
 	int Int(Id a_id)

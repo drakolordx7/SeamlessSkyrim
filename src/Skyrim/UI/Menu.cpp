@@ -17,16 +17,11 @@ namespace
 	using Plugin::Settings::Id;
 
 	// What is set here is kept in the user ini (Settings::SaveUser), never in the shipped one.
-	void Save(Id a_id, int a_value)
-	{
-		Plugin::Settings::SaveUser(a_id, a_value);
-	}
-
 	// A slider is written once, when it is let go: dragged, it changes every frame.
 	void SaveWhenReleased(Id a_id, int a_value)
 	{
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
-			Save(a_id, a_value);
+			Plugin::Settings::SaveUser(a_id, a_value);
 		}
 	}
 
@@ -63,23 +58,17 @@ namespace
 	// portal again, so this is the only way back to its settings.
 	constexpr float kNearDoorDistance = 600.0f;
 
-	Pair MakePair(RE::FormID a_source, RE::FormID a_linked)
-	{
-		Pair pair;
-		pair.source = RE::TESForm::LookupByID<RE::TESObjectREFR>(a_source);
-		pair.linked = RE::TESForm::LookupByID<RE::TESObjectREFR>(a_linked);
-		if (pair.source && pair.linked) {
-			pair.key = Portal::Doors::CorrectionDoor(pair.source, pair.linked);
-		}
-		return pair;
-	}
-
 	Pair CurrentPair()
 	{
+		Pair pair;
 		if (const auto at = Portal::Selection::DoorPairAt(kNearDoorDistance)) {
-			return MakePair(at->sourceDoor, at->linkedDoor);
+			pair.source = RE::TESForm::LookupByID<RE::TESObjectREFR>(at->sourceDoor);
+			pair.linked = RE::TESForm::LookupByID<RE::TESObjectREFR>(at->linkedDoor);
+			if (pair.source && pair.linked) {
+				pair.key = Portal::Doors::CorrectionDoor(pair.source, pair.linked);
+			}
 		}
-		return {};
+		return pair;
 	}
 
 	std::string Describe(RE::TESObjectREFR* a_door)
@@ -119,7 +108,7 @@ namespace
 		bool merge = Portal::MergedView::MergeEnabled();
 		if (ImGui::Checkbox("Draw rooms into the world (seen from outside)", &merge)) {
 			Portal::Manager::SetMergeEnabled(merge);
-			Save(Id::kMerge, merge);
+			Plugin::Settings::SaveUser(Id::kMerge, merge);
 		}
 
 		ImGui::NewLine();
@@ -143,7 +132,7 @@ namespace
 		bool pause = Portal::MergedView::PauseUnseenRooms();
 		if (ImGui::Checkbox("Pause rooms nobody can see", &pause)) {
 			Portal::MergedView::SetPauseUnseenRooms(pause);
-			Save(Id::kPauseUnseenRooms, pause);
+			Plugin::Settings::SaveUser(Id::kPauseUnseenRooms, pause);
 		}
 		ImGui::TextWrapped("A loaded room whose doorway is out of view isn't simulated or drawn until it comes into view; "
 						   "the room at the door you're at always runs.");
@@ -153,7 +142,7 @@ namespace
 		bool step = Portal::Manager::StepExterior();
 		if (ImGui::Checkbox("Street physics while indoors (people outside walk)", &step)) {
 			Portal::Manager::SetStepExterior(step);
-			Save(Id::kStepExteriorFromInside, step);
+			Plugin::Settings::SaveUser(Id::kStepExteriorFromInside, step);
 		}
 
 		ImGui::NewLine();
@@ -163,7 +152,7 @@ namespace
 			constexpr const char* labels[]{ "As set for each door", "All open (locked ones too)", "All shut until used" };
 			if (ImGui::Combo("Doors", &force, labels, static_cast<int>(std::size(labels)))) {
 				Portal::DoorUse::SetForce(static_cast<Portal::DoorUse::Force>(force));
-				Save(Id::kForceDoors, force);
+				Plugin::Settings::SaveUser(Id::kForceDoors, force);
 			}
 			ImGui::TextWrapped("A door opens when you or someone else uses it, and shuts a few seconds after nobody stands in it. "
 							   "City gates and doors set to always open stand open. All shut: those too stay shut until used.");
@@ -210,7 +199,7 @@ namespace
 			}
 			if (ImGui::Combo("Doorway picture size (texels)", &index, items.data(), static_cast<int>(items.size()))) {
 				Portal::Snapshot::SetPictureHeight(heights[index]);
-				Save(Id::kDoorwayPictureHeight, heights[index]);
+				Plugin::Settings::SaveUser(Id::kDoorwayPictureHeight, heights[index]);
 			}
 			ImGui::TextWrapped("The blurred picture a doorway shows while the space behind it loads, in texels across the doorway. "
 							   "Larger is sharper; each door is taken again at the new size when next seen open (doors to the outdoors "

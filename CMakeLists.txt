@@ -16,11 +16,14 @@ set(ENABLE_SKYRIM_SE ON CACHE BOOL "" FORCE)
 set(ENABLE_SKYRIM_AE ON CACHE BOOL "" FORCE)
 set(ENABLE_SKYRIM_VR OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
-# Render and cell hooks will need hand-written trampolines.
+# xbyak support for CommonLib's trampoline. Nothing in src/ uses it now (the hooks write raw bytes
+# or plain calls); not removed because it changes CommonLib's dependencies and was not tried.
 set(SKSE_SUPPORT_XBYAK ON CACHE BOOL "" FORCE)
 
 add_subdirectory(extern/CommonLibSSE-NG EXCLUDE_FROM_ALL)
 
+# The in-game test harness runs on a Mod Organizer 2 instance instead: build with
+# tools/build.ps1 -NoDeploy and put the DLL there with tools/deploy-mo2-dev.ps1.
 set(SKYRIM_PLUGINS_DIR
 	"E:/SteamLibrary/steamapps/common/Skyrim Special Edition/Data/SKSE/Plugins"
 	CACHE PATH "Where the post-build step copies the DLL and PDB. Empty disables the copy.")

@@ -15,8 +15,6 @@
 
 namespace
 {
-	// ---- walk_to ---------------------------------------------------------------------------
-
 	struct WalkState
 	{
 		FrameHooks::WalkRequest request;
@@ -78,8 +76,6 @@ namespace
 		controls->data.running = walk.request.run;
 	}
 
-	// ---- screenshot -------------------------------------------------------------------------
-
 	struct CaptureRequest
 	{
 		std::wstring                       path;
@@ -100,20 +96,37 @@ namespace
 	};
 	FrameSequence frameSequence;  // under captureLock
 
+	// The swap chain's back buffer with its device and context.
+	struct BackBuffer
+	{
+		Microsoft::WRL::ComPtr<ID3D11Texture2D>     texture;
+		Microsoft::WRL::ComPtr<ID3D11Device>        device;
+		Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+		D3D11_TEXTURE2D_DESC                        desc{};
+
+		static std::optional<BackBuffer> Of(IDXGISwapChain* a_swapChain)
+		{
+			BackBuffer buffer;
+			if (FAILED(a_swapChain->GetBuffer(0, IID_PPV_ARGS(buffer.texture.GetAddressOf())))) {
+				return std::nullopt;
+			}
+			buffer.texture->GetDevice(buffer.device.GetAddressOf());
+			buffer.device->GetImmediateContext(buffer.context.GetAddressOf());
+			buffer.texture->GetDesc(&buffer.desc);
+			return buffer;
+		}
+	};
+
 	void TakeSequenceFrame(IDXGISwapChain* a_swapChain)
 	{
 		auto& sequence = frameSequence;
-		Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
-		if (FAILED(a_swapChain->GetBuffer(0, IID_PPV_ARGS(backBuffer.GetAddressOf())))) {
+		const auto buffer = BackBuffer::Of(a_swapChain);
+		if (!buffer) {
 			sequence = {};
 			return;
 		}
-		Microsoft::WRL::ComPtr<ID3D11Device>        device;
-		Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
-		backBuffer->GetDevice(device.GetAddressOf());
-		device->GetImmediateContext(context.GetAddressOf());
-		D3D11_TEXTURE2D_DESC desc{};
-		backBuffer->GetDesc(&desc);
+		const auto& [backBuffer, device, context, backDesc] = *buffer;
+		auto desc = backDesc;
 		desc.Usage = D3D11_USAGE_DEFAULT;
 		desc.BindFlags = 0;
 		desc.CPUAccessFlags = 0;
@@ -141,36 +154,42 @@ namespace
 
 	json Capture(IDXGISwapChain* a_swapChain, const std::wstring& a_path)
 	{
-		ID3D11Texture2D* backBuffer = nullptr;
-		if (FAILED(a_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer)))) {
+		const auto buffer = BackBuffer::Of(a_swapChain);
+		if (!buffer) {
 			throw std::runtime_error("GetBuffer failed");
 		}
-		ID3D11Device*        device = nullptr;
-		ID3D11DeviceContext* context = nullptr;
-		backBuffer->GetDevice(&device);
-		device->GetImmediateContext(&context);
-
-		D3D11_TEXTURE2D_DESC desc{};
-		backBuffer->GetDesc(&desc);
-
+		const auto& desc = buffer->desc;
 		// WIC needs COM on this thread; an already-initialized apartment is fine either way.
 		const HRESULT coInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 		// Force 24-bit BGR: the back buffer may be 10-bit or HDR, which JPEG can't hold.
-		const HRESULT saved = DirectX::SaveWICTextureToFile(context, backBuffer, GUID_ContainerFormatJpeg, a_path.c_str(), &GUID_WICPixelFormat24bppBGR);
+		const HRESULT saved = DirectX::SaveWICTextureToFile(buffer->context.Get(), buffer->texture.Get(), GUID_ContainerFormatJpeg, a_path.c_str(), &GUID_WICPixelFormat24bppBGR);
 		if (SUCCEEDED(coInit)) {
 			CoUninitialize();
 		}
-
-		context->Release();
-		device->Release();
-		backBuffer->Release();
 		if (FAILED(saved)) {
 			throw std::runtime_error(std::format("SaveWICTextureToFile failed (0x{:08X}, format {})", static_cast<std::uint32_t>(saved), static_cast<int>(desc.Format)));
 		}
 		return { { "width", desc.Width }, { "height", desc.Height }, { "format", static_cast<int>(desc.Format) } };
 	}
 
-	// ---- brightness log -------------------------------------------------------------------------
+	// Wall-clock time between player updates (= frame time), the last 120 frames.
+	std::mutex                                           frameLock;
+	std::array<float, 120>                               frameMs{};
+	std::size_t                                          frameIndex = 0;
+	std::optional<std::chrono::steady_clock::time_point> lastFrame;
+
+	void OnPlayerUpdate(RE::PlayerCharacter* a_player, float a_delta)
+	{
+		{
+			const auto       now = std::chrono::steady_clock::now();
+			std::scoped_lock lock(frameLock);
+			if (lastFrame) {
+				frameMs[frameIndex++ % frameMs.size()] = std::chrono::duration<float, std::milli>(now - *lastFrame).count();
+			}
+			lastFrame = now;
+		}
+		SteerPlayer(a_player, a_delta);
+	}
 
 	struct BrightnessSample
 	{
@@ -208,12 +227,11 @@ namespace
 		const float ms = lastPresent ? std::chrono::duration<float, std::milli>(now - *lastPresent).count() : 0.0f;
 		lastPresent = now;
 
-		Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
-		if (FAILED(a_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(backBuffer.GetAddressOf())))) {
+		const auto buffer = BackBuffer::Of(a_swapChain);
+		if (!buffer) {
 			return;
 		}
-		D3D11_TEXTURE2D_DESC desc{};
-		backBuffer->GetDesc(&desc);
+		const auto& [backBuffer, device, context, desc] = *buffer;
 		const bool known = desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM ||
 		                   desc.Format == DXGI_FORMAT_R10G10B10A2_UNORM;
 		if (!known || desc.SampleDesc.Count != 1) {
@@ -221,10 +239,6 @@ namespace
 			brightnessOn = false;
 			return;
 		}
-		Microsoft::WRL::ComPtr<ID3D11Device>        device;
-		Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
-		backBuffer->GetDevice(device.GetAddressOf());
-		device->GetImmediateContext(context.GetAddressOf());
 
 		auto& slot = readbacks[readbackIndex++ % readbacks.size()];
 		if (slot.filled) {
@@ -301,7 +315,7 @@ namespace FrameHooks
 {
 	void Register()
 	{
-		Plugin::Frame::SetPreUpdate(SteerPlayer);
+		Plugin::Frame::SetPreUpdate(OnPlayerUpdate);
 		Render::Present::SetCallback(OnPresent);
 	}
 
@@ -327,7 +341,15 @@ namespace FrameHooks
 
 	json FrameStats()
 	{
-		return Plugin::Frame::FrameStats();
+		std::scoped_lock lock(frameLock);
+		const auto       count = std::min(frameIndex, frameMs.size());
+		if (!count) {
+			return nullptr;
+		}
+		std::vector<float> sorted(frameMs.begin(), frameMs.begin() + count);
+		std::ranges::sort(sorted);
+		const float sum = std::accumulate(sorted.begin(), sorted.end(), 0.0f);
+		return { { "frames", count }, { "avgMs", sum / count }, { "medianMs", sorted[count / 2] }, { "p95Ms", sorted[count * 95 / 100] }, { "maxMs", sorted.back() } };
 	}
 
 	json WalkStatus()

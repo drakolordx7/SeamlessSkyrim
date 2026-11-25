@@ -50,6 +50,17 @@ namespace
 		return static_cast<double>(a_ticks) / perMs;
 	}
 
+	void AddCpu(const char* a_name, double a_ms)
+	{
+		if (!on) {
+			return;
+		}
+		std::scoped_lock l(lock);
+		auto&            s = Find(cpu, a_name);
+		s.current += a_ms;
+		s.touched = true;
+	}
+
 	// GPU: a ring of frames, each with a disjoint query and, per section, two timestamps and the
 	// pipeline statistics. A frame's results are read when its slot comes round again, by then
 	// long finished on the GPU, so nothing waits.
@@ -153,22 +164,6 @@ namespace
 
 namespace Perf
 {
-	bool On()
-	{
-		return on;
-	}
-
-	void AddCpu(const char* a_name, double a_ms)
-	{
-		if (!on) {
-			return;
-		}
-		std::scoped_lock l(lock);
-		auto&            s = Find(cpu, a_name);
-		s.current += a_ms;
-		s.touched = true;
-	}
-
 	void AddCount(const char* a_name, double a_value)
 	{
 		if (!on) {
@@ -190,15 +185,6 @@ namespace Perf
 		if (a_start) {
 			AddCpu(a_name, TicksToMs(Ticks() - a_start));
 		}
-	}
-
-	Scope::Scope(const char* a_name) :
-		name(a_name), start(ScopeBegin())
-	{}
-
-	Scope::~Scope()
-	{
-		ScopeEnd(name, start);
 	}
 
 	void GpuBegin(const char* a_name)

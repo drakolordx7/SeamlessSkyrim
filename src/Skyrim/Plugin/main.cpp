@@ -53,8 +53,6 @@ namespace
 			Portal::Travel::ForgetTrip();
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
-			Probe::DumpWorldState("game loaded");
-			break;
 		case SKSE::MessagingInterface::kNewGame:
 			Probe::DumpWorldState("game loaded");
 			break;

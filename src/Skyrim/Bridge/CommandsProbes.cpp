@@ -4,6 +4,7 @@
 #include "Skyrim/Bridge/FrameHooks.h"
 #include "Skyrim/Bridge/GpuTrack.h"
 #include "Skyrim/Bridge/Perf.h"
+#include "Skyrim/Bridge/PortalDiagnostics.h"
 #include "Skyrim/Bridge/ReverseEngineering.h"
 #include "Skyrim/Bridge/Sampler.h"
 #include "Skyrim/Diag/Probe.h"
@@ -103,7 +104,6 @@ namespace
 		auto*      cellGraph = loaded ? loaded->portalGraph.get() : nullptr;
 		auto*      cell3D = loaded ? loaded->cell3D.get() : nullptr;
 		auto*      worldRoot = RE::Main::WorldRootNode();
-		const auto ptr = [](const void* a_p) { return std::format("{:X}", reinterpret_cast<std::uintptr_t>(a_p)); };
 		json       actors = json::array();
 		cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
 			auto* actor = a_ref ? a_ref->As<RE::Actor>() : nullptr;
@@ -189,8 +189,8 @@ namespace
 		});
 		return {
 			{ "cell", CellJson(cell) },
-			{ "worldSceneGraph", ptr(worldGraph) },
-			{ "cellGraph", ptr(cellGraph) },
+			{ "worldSceneGraph", Address(worldGraph) },
+			{ "cellGraph", Address(cellGraph) },
 			{ "cellRooms", cellGraph ? cellGraph->rooms.size() : 0 },
 			{ "actors", actors },
 		};
@@ -574,8 +574,7 @@ namespace
 		}
 		Probe::DumpWorldState("bridge request");
 		logger::info("outdoors probe: {}", OutdoorsProbe({}).dump());
-		auto passes = Portal::Manager::Space().RenderPasses(false);
-		passes.erase("tree");
+		const auto passes = Bridge::PortalDiagnostics::RenderPasses(Portal::Manager::Space(), false);
 		logger::info("remote render passes: {}", passes.dump());
 		return { { "logged", true } };
 	}
@@ -707,7 +706,7 @@ namespace Bridge
 					 const auto& t = node->shape->translation;
 					 shapes.push_back(std::format("{} ({:.0f} {:.0f} {:.0f}) state {}", node->shape->IsOcclusionPlane() ? "plane" : "box", t.x, t.y, t.z, node->shape->visibilityState));
 				 }
-				 return json{ { "graph", std::format("{:X}", reinterpret_cast<std::uintptr_t>(graph)) }, { "count", list ? list->count : 0 }, { "aside", aside.has_value() }, { "shapes", shapes } };
+				 return json{ { "graph", Address(graph) }, { "count", list ? list->count : 0 }, { "aside", aside.has_value() }, { "shapes", shapes } };
 			 } } },
 			// Diagnostics: references (temporary and persistent) within a radius of a point in a
 			// worldspace, with where their 3D hangs.

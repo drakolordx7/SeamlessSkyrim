@@ -105,7 +105,7 @@ namespace Bridge
 				 auto status = PortalDiagnostics::Status();
 				 return json{ { "shownRooms", status["shownRooms"] }, { "warm", status["warm"] }, { "mergedCull", status["mergedCull"] }, { "frames", FrameHooks::FrameStats() } };
 			 } } },
-			{ "portal_passes", { [](const json& a) { return Portal::Manager::Space().RenderPasses(a.value("drop", false)); } } },
+			{ "portal_passes", { [](const json& a) { return PortalDiagnostics::RenderPasses(Portal::Manager::Space(), a.value("drop", false)); } } },
 			{ "portals_enable", { [](const json& a) {
 				 Portal::Manager::SetEnabled(a.value("enabled", true));
 				 return PortalDiagnostics::Status();

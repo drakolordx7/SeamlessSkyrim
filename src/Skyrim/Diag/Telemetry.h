@@ -7,7 +7,7 @@ namespace Diag
 {
 	struct Sink
 	{
-		// Perf::Scope: a start stamp (0: not timing), and the scope's end.
+		// Diag::Scope's two ends: a start stamp (0: not timing), and the scope's end.
 		std::int64_t (*scopeBegin)() = [] { return std::int64_t{ 0 }; };
 		void (*scopeEnd)(const char* a_name, std::int64_t a_start) = [](const char*, std::int64_t) {};
 		void (*addCount)(const char* a_name, double a_value) = [](const char*, double) {};
@@ -33,7 +33,7 @@ namespace Diag
 		return agentMode;
 	}
 
-	// RAII: times the scope in the perf report (Perf::Scope).
+	// RAII: times the scope in the perf report.
 	class Scope
 	{
 	public:

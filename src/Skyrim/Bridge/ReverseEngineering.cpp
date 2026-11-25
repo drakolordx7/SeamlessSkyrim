@@ -1,5 +1,6 @@
 #include "Skyrim/Bridge/ReverseEngineering.h"
 
+#include "Skyrim/Bridge/CommandSupport.h"
 #include "Skyrim/Portal/LightScene.h"
 #include "Skyrim/Portal/PortalManager.h"
 
@@ -58,18 +59,6 @@ namespace ReverseEngineering
 
 	namespace
 	{
-		RE::FormID FormIDArg(const json& a_value)
-		{
-			if (a_value.is_string()) {
-				auto text = a_value.get<std::string>();
-				if (text.starts_with("0x")) {
-					text.erase(0, 2);
-				}
-				return static_cast<RE::FormID>(std::stoul(text, nullptr, 16));
-			}
-			return a_value.get<RE::FormID>();
-		}
-
 		// Argument descriptors, so the agent can name engine objects instead of raw pointers:
 		//   {"cell": "portal" | formid}, {"ref": formid}, {"node": "portalRoot"}, {"tes": true},
 		//   {"player": true}, {"singleton": id} (pointer stored at an Address Library id),
@@ -97,14 +86,14 @@ namespace ReverseEngineering
 			}
 			if (a_arg.contains("cell")) {
 				const auto& v = a_arg["cell"];
-				auto* cell = v.is_string() && v.get<std::string>() == "portal" ? (Portal::Manager::ActivePortal() ? Portal::Manager::ActivePortal()->cell : nullptr) : RE::TESForm::LookupByID<RE::TESObjectCELL>(FormIDArg(v));
+				auto* cell = v.is_string() && v.get<std::string>() == "portal" ? (Portal::Manager::ActivePortal() ? Portal::Manager::ActivePortal()->cell : nullptr) : RE::TESForm::LookupByID<RE::TESObjectCELL>(Bridge::Support::ParseFormID(v));
 				if (!cell) {
 					throw std::runtime_error("cell not found");
 				}
 				return reinterpret_cast<std::uintptr_t>(cell);
 			}
 			if (a_arg.contains("ref")) {
-				auto* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(FormIDArg(a_arg["ref"]));
+				auto* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(Bridge::Support::ParseFormID(a_arg["ref"]));
 				if (!ref) {
 					throw std::runtime_error("reference not found");
 				}

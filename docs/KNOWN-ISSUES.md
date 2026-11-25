@@ -55,7 +55,7 @@
   towards the doorway. Seen at 4749361, before the gate reach changes.
 - Seen from indoors without Sky Sync, the street's sun direction and colours are those of the
   moment the player came in, for half a game hour; then they jump to the computed ones
-  (`PortalRender.cpp`, `RecentOutdoors`).
+  (`Render/SpaceLighting.cpp`, `RecentOutdoors`).
 - A door's 3D rebuilt while held open is noticed at the next `Doors::Open` on it; the door the
   player came out of is opened once and waits for another opener.
 - Walking out of Solitude's gate and turning round at once: for up to 4 s the gateway shows

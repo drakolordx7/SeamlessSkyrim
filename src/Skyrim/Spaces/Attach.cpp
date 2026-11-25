@@ -257,7 +257,6 @@ namespace Portal
 		return hung;
 	}
 
-
 	void RemoteCell::AttachOne(RE::TESObjectCELL* a_cell)
 	{
 		// The engine's attach installs the cell's room/portal occlusion graph in the *world* light
@@ -441,7 +440,6 @@ namespace Portal
 		logger::info("portal: attached {} (+{} neighbouring cells, {} lights)", Probe::DescribeCell(a_cell), cells.size() - 1, adoptedLights);
 		return true;
 	}
-
 
 	bool RemoteCell::Healthy() const
 	{
@@ -761,18 +759,14 @@ namespace Portal
 				}
 			}
 			AnimateReferences(cell);
-			// A merged street's lights were adopted before the merge. In the world scene the engine
-			// registers one of them anew every frame; taking each into ours, the world scene's queued
-			// removal of the one before crashed (ID 106335 -> 106342).
-			if (!(merged && !cell->IsInteriorCell())) {
-				late += LightScene::Adopt(scene.get(), Cell3D(cell));
-			}
-			// A street merged into an interior hangs in the world scene: the light update there queued
-			// a new light in the world's light scene every frame, which was adopted here, and the
-			// world scene's queued removal of the one before crashed (ID 106335 -> 106342).
+			// A street merged into an interior hangs in the world scene, and its lights were adopted
+			// before the merge. There the light update queues a new light in the world's light scene
+			// every frame; adopted here, the world scene's queued removal of the one before crashed
+			// (ID 106335 -> 106342).
 			if (merged && !cell->IsInteriorCell()) {
 				continue;
 			}
+			late += LightScene::Adopt(scene.get(), Cell3D(cell));
 			// The engine only animates the lights of references in current cells; a light that
 			// flickers or pulses (most of a Lux interior) starts with a negative fade as "not
 			// updated yet" and stays dark until its reference's light update runs.
@@ -788,8 +782,8 @@ namespace Portal
 			adoptedLights += late;
 			logger::info("portal: adopted {} late light(s), {} in total", late, adoptedLights);
 		}
-		// The Havok step itself happens in the engine's step job (see StepHook) or at the end of
-		// the frame; this only says which world to step. An exterior cell's world is the whole
+		// The Havok step itself happens in the engine's step job (StepInEngineJob) or at the end of
+		// the frame (StepAtEndOfFrame); this only says which world to step. An exterior cell's world is the whole
 		// worldspace's, which the engine leaves alone while the player is indoors (see Spaces::Tuning::stepExterior).
 		auto* primary = cells.front();
 		// The street seen from indoors is only simulated once there is ground under its NPCs and
@@ -877,11 +871,7 @@ namespace Portal
 			}
 			bool newlyStilled = false;
 			RE::BSVisit::TraverseScenegraphObjects(object, [&](RE::NiAVObject* a_object) {
-				auto* collision = a_object->collisionObject ? netimmerse_cast<RE::bhkNiCollisionObject*>(a_object->collisionObject.get()) : nullptr;
-				if (collision && collision->flags.any(RE::bhkNiCollisionObject::Flag::kActive)) {
-					stilledClutter.emplace_back(RE::NiPointer<RE::NiAVObject>(a_object), collision->flags.underlying());
-					Pristine::FlagsChanged(collision, collision->flags.underlying());
-					collision->flags.reset(RE::bhkNiCollisionObject::Flag::kActive, RE::bhkNiCollisionObject::Flag::kSyncOnUpdate);
+				if (StillCollision(a_object)) {
 					newlyStilled = true;
 					++stilled;
 				}
@@ -943,7 +933,6 @@ namespace Portal
 		}
 		logger::info("portal: loose items in {}: {} total, {} with 3D ({} of them far from the item), {} loaded now, {} still without 3D, {} left to the engine's queue",
 			Probe::DescribeCell(Cell()), total, with3D, fallen, loaded, stillMissing, skippedQueued);
-
 	}
 
 	namespace
@@ -992,5 +981,4 @@ namespace Portal
 		}
 		return ground;
 	}
-
 }

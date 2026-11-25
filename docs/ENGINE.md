@@ -53,15 +53,17 @@ Found porting the plugin; each was checked in the code of both.
   - ID 19063 (cell, true) finishes: state Attached, actors in high process with 3D. Its gate
     (ID 13308) only checks the cell's state, not whether the cell is current.
   - The attach also installs the cell's room graph in the world light scene
-    (`ShadowSceneNode::SetPortalGraph`, slot 0): put the world's back, or the main view culls
-    with the other cell's rooms (actors vanish, crashes).
+    (`ShadowSceneNode::SetPortalGraph`, slot 0), and the main view then culls with the other
+    cell's rooms (actors vanish, crashes). `AttachGraphHook` (`Spaces/EngineHooks.cpp`) skips that
+    call for our attaches; `RemoteCell::AttachOne` still sets the world's graph again afterwards,
+    which is what undid it before the hook and what holds where the hook's call site isn't found.
 - **Detaching:** take the cell's 3D off our root first, then call ID 19130 (cell, true).
   Detached with the 3D still under our root, it took `objRoot`'s first child instead, the
   temporary node manager (`TES+0x98`). The game then crashed in its update (`NiAVObject::Update`
   from ID 13292).
 - **Interior buffer** (`TES+0xC8`): detaching puts a cell at its front, and the one falling off
   the end is unloaded by ID 13721. ID 13721 has about 25 callers, and a cell we still hold must
-  not go through any of them: hooked at its entry (`RemoteCell::InstallGridHook`). A held cell
+  not go through any of them: hooked at its entry (`InstallUnloadHook` in `Spaces/EngineHooks.cpp`). A held cell
   unloaded the same way crashed in ID 13292.
 - **Persistent references** (a town's houses, porches, paving) belong to the worldspace's
   persistent cell. The grid hangs their 3D under the cell they stand in, and takes it off some
@@ -110,15 +112,15 @@ Found porting the plugin; each was checked in the code of both.
   `NiInterpolator::Update1` into an `NiQuatTransform` (translate, quaternion, scale; CommonLib
   only declares it). Whiterun's house doors: 0.6 s each; `Open` stands still for the first
   0.15 s, then eases in and out; `Close` eases in and out. Portal doors replay them
-  (`Doors::SwingAmount`), turned by the pair's own angle and towards the side they open into.
+  (`Doors::Swing`, curves sampled by `SwingCurvesOf`), turned by the pair's own angle and towards the side they open into.
 - **A door's open and close sounds** are its base form's `TESObjectDOOR::openSound` and
   `closeSound`; `BSAudioManager::GetSoundHandle`, then `SetPosition`/`SetObjectToFollow`, `Play`.
 - **A door's model isn't always upright.** Castle Dour's doors (`SDoorJail02Load.nif`, 00025199
   and 000223B2) are modelled lying down, y up; their references are turned 90° about x to stand
-  them up. The door code works in the model turned so its z is up (`Upright` in `DoorPair.cpp`).
+  them up. The door code works in the model turned so its z is up (`Upright` in `Doors/Geometry.cpp`).
   Bridge `ref_3d` prints each node's local rotation.
 - **Land meshes** are built only when a cell is loaded into the engine's own grid (IDs 13285 and
-  13427 call it right after 19063). A remote cell needs it called itself (`RemoteCell::AttachOne`).
+  13427 call it right after 19063). A remote cell needs it called itself (`RemoteCell::AttachOne`, `Spaces/Attach.cpp`).
 
 ## Simulation
 
@@ -292,7 +294,7 @@ Found porting the plugin; each was checked in the code of both.
 - **Arriving in a cell queues each of its lights twice** in the world scene (Understone Keep: 306
   for 153). The update takes in the first and, finding the second's NiLight active, walks the
   scene for it again. The teleport (ID 40744 + 0x3D2) and every frame (ID 106337 + 0x2B) call the
-  update; after a seamless trip `Travel.cpp` lets it take 32 lights at a time, nearest first, in
+  update; after a seamless trip `Portal/TransitionStalls.cpp` lets it take 32 lights at a time, nearest first, in
   the world scene and in ours (the space walked out of, attached again with its ~150 lights).
 - **The teleport's cost** (ID 40438, loading screen and waits skipped): 15-40 ms into an interior,
   25-60 ms out to a street seen before, 60-70 ms out of Belethor's the first time after a load
@@ -410,7 +412,7 @@ Found porting the plugin; each was checked in the code of both.
   the fade check, a visible-room check, then `UpdateSelectedDownwardPass` of the 3D with the
   frame's time (ID 400333) and flags 2, which runs the controllers and so the particle systems.
   ID 18894 skips the references of a room merged into the street; the selective update on its
-  own runs them (`RemoteCell.cpp`, `AnimateReferences`).
+  own runs them (`Spaces/Attach.cpp`, `AnimateReferences`).
 - **`ShadowSceneNode::particleNodes`** (+0x1C8) is only a queue: the light update (ID 106335)
   pairs each new particle node with lights and empties it every frame. It doesn't animate.
 - **`BGSTerrainManager` layout:**

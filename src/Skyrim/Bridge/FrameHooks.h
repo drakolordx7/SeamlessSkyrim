@@ -1,11 +1,11 @@
 #pragma once
 
-// Per-frame hooks the bridge needs: steering the player (walk_to) and grabbing the back buffer
-// (screenshot). Both run inside the engine's own frame so they see consistent state.
+// Per-frame hooks the bridge needs: steering the player (walk_to), frame times, and grabbing the
+// back buffer (screenshot). All run inside the engine's own frame so they see consistent state.
 namespace FrameHooks
 {
-	// Registers the bridge's parts of the frame: steering before the portals' update, and the
-	// brightness log, screenshots and frame sequences at Present. At plugin load.
+	// Registers the bridge's parts of the frame: steering and frame timing before the portals'
+	// update, and the brightness log, screenshots and frame sequences at Present. At plugin load.
 	void Register();
 
 	struct WalkRequest
