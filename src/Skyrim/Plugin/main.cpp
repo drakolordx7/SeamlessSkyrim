@@ -1,12 +1,9 @@
 #include "Skyrim/Bridge/AgentMode.h"
 #include "Skyrim/Bridge/Bridge.h"
-#include "Skyrim/Portal/NpcTravel.h"
-#include "Skyrim/Portal/PortalManager.h"
-#include "Skyrim/Plugin/Frame.h"
-#include "Skyrim/Plugin/Settings.h"
-#include "Skyrim/Portal/Travel.h"
-#include "Skyrim/UI/Menu.h"
 #include "Skyrim/Diag/Probe.h"
+#include "Skyrim/Plugin/Install.h"
+#include "Skyrim/Portal/PortalManager.h"
+#include "Skyrim/Portal/Travel.h"
 
 // Runs on SE 1.5.97 and on AE from 1.6.629. We read engine structs directly (cells, TES, process
 // lists), so declare the post-1.6.629 layout honestly: AE's SKSE then refuses to load us on the
@@ -25,19 +22,7 @@ namespace
 	{
 		switch (a_msg->type) {
 		case SKSE::MessagingInterface::kDataLoaded:
-			// Event sources, the data handler and the renderer's swap chain all exist by now.
-			Plugin::Settings::Load();
-			Portal::Manager::Install();
-			if (Portal::Manager::HooksInstalled()) {
-				Portal::NpcTravel::Install();
-			}
-			UI::Menu::Register();
-			Plugin::Frame::Install();
-			if (AgentMode::Enabled()) {
-				Bridge::ForceAlwaysActive();
-				AgentMode::InstallInputGuards();
-				AgentMode::InstallAutoLoad();
-			}
+			Plugin::Install();
 			break;
 		// A foreign cell attached under our root must never end up in a save, and a load replaces
 		// the world the portal refers to; the manager re-attaches on the next frames anyway.

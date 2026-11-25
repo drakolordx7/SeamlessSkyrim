@@ -4,6 +4,7 @@
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Pictures/Cache.h"
 #include "Skyrim/Pictures/DoorwaySnapshot.h"
+#include "Skyrim/Plugin/Install.h"
 #include "Skyrim/Plugin/Settings.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
@@ -81,7 +82,7 @@ namespace
 	void __stdcall RenderSettings()
 	{
 		bool enabled = Portal::Manager::Enabled();
-		const bool available = Portal::Manager::HooksInstalled();
+		const bool available = Plugin::HooksInstalled();
 
 		ImGui::TextWrapped("Rendering: %s", Render::Backend::Current().Name());
 		if (available && !Render::Backend::Current().CanMerge()) {

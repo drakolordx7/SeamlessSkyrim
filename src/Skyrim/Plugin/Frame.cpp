@@ -1,4 +1,5 @@
 #include "Skyrim/Plugin/Frame.h"
+#include "Skyrim/Plugin/Install.h"
 
 #include "Skyrim/Diag/Telemetry.h"
 #include "Skyrim/Portal/CameraLimit.h"
@@ -35,8 +36,8 @@ namespace Plugin::Frame
 	void Install()
 	{
 		// The player update drives the portals and the agent's walking; with neither there is
-		// nothing for it to do (Portal::Manager::Install runs first and decides about portals).
-		if (!Diag::AgentMode() && !Portal::Manager::HooksInstalled()) {
+		// nothing for it to do (Plugin::Install decides about portals first).
+		if (!Diag::AgentMode() && !HooksInstalled()) {
 			logger::info("frame hooks: none needed");
 			return;
 		}

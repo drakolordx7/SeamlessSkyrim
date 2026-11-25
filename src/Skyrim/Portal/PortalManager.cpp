@@ -10,12 +10,11 @@
 #include "Skyrim/Doors/Policy.h"
 #include "Skyrim/Doors/Settings.h"
 #include "Skyrim/Doors/Swing.h"
-#include "Skyrim/Engine/Paths.h"
 #include "Skyrim/Pictures/DoorwaySnapshot.h"
+#include "Skyrim/Plugin/Install.h"
 #include "Skyrim/Plugin/Settings.h"
 #include "Skyrim/Portal/CameraLimit.h"
 #include "Skyrim/Portal/Crossing.h"
-#include "Skyrim/Portal/EngineHooks.h"
 #include "Skyrim/Portal/Gates.h"
 #include "Skyrim/Portal/ImageSpaceBlend.h"
 #include "Skyrim/Portal/MergedCull.h"
@@ -27,8 +26,6 @@
 #include "Skyrim/Portal/StreetLOD.h"
 #include "Skyrim/Portal/StreetMerge.h"
 #include "Skyrim/Portal/Travel.h"
-#include "Skyrim/Render/Backend.h"
-#include "Skyrim/Render/Frame.h"
 #include "Skyrim/Spaces/RemoteCell.h"
 #include "Skyrim/Spaces/Tuning.h"
 
@@ -37,7 +34,6 @@ namespace Portal::Manager
 	namespace
 	{
 		bool                  enabled = false;
-		bool                  hooksInstalled = false;  // see Install
 		Spaces::RemoteCell            remote;                  // the space shown behind the portal's door
 		std::mutex            activeLock;
 		std::optional<Active> active;
@@ -299,50 +295,12 @@ namespace Portal::Manager
 		enabled = Bool(Id::kEnabled);
 		Selection::Install();
 		Portal::DoorUse::SetForce(static_cast<Portal::DoorUse::Force>(Int(Id::kForceDoors)));
-		Pictures::SetPictureHeight(Int(Id::kDoorwayPictureHeight));
 		MergedCull::SetMode(static_cast<MergedCull::Mode>(Int(Id::kMergedCull)));
-		// Precision patches the engine's world step loop (ID 77851 + 0x407) with a pre-step hook
-		// that takes its own locks for whichever world is stepped; stepping a second world in the
-		// step job deadlocked the game in that hook (main thread waiting for the job, ID 35409).
-		// Without stepping, NPCs behind the door don't move physically until the player is there.
-		// See Settings kStepRemoteHavok for the modes; the default is 2 with Precision loaded
-		// (see RemoteCell::StepAtEndOfFrame), else 1.
-		const bool stepRemote = Int(Id::kStepRemoteHavok) != 0;
-		Spaces::LoadTuning();
-		// The hooks below patch engine code in the draw, cull, physics and travel paths. With
-		// portals off they did nothing yet were all there, one more thing to clash with other
-		// mods' hooks (as with Precision's in the physics step). They can't be put in later when
-		// portals are switched on: the physics step's call site runs on job threads, and code
-		// can't be patched safely under them. Agent sessions get them always (portals_enable).
-		hooksInstalled = enabled || Diag::AgentMode();
-		if (!hooksInstalled) {
-			logger::info("portal: off in {}; no hooks installed (switching on needs a restart)", Paths::PluginDirectory().string());
-			return;
-		}
-		// Before anything asks whether a room can be merged (MergedView::Mergeable).
-		::Render::Backend::Install();
-		Spaces::RemoteCell::InstallStepHook(stepRemote);
-		Spaces::RemoteCell::InstallGridHook();
-		Render::Frame::Install();
-		Render::Frame::Prewarm();
-		Pictures::Prewarm();
-		Portal::Travel::Install();
-		Portal::CameraLimit::Install();
-		Portal::StreetLOD::Install();
-		MergedCull::Install();
-		Portal::Doors::InstallPromptHook();
-		EngineHooks::Install();
-		logger::info("portal: manager installed, {} ({})", enabled ? "enabled" : "disabled", Paths::PluginDirectory().string());
-	}
-
-	bool HooksInstalled()
-	{
-		return hooksInstalled;
 	}
 
 	void SetEnabled(bool a_enabled)
 	{
-		if (a_enabled && !hooksInstalled) {
+		if (a_enabled && !Plugin::HooksInstalled()) {
 			logger::warn("portal: can't be switched on in this session (off in the ini at startup)");
 			return;
 		}

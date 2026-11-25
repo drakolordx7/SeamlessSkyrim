@@ -14,15 +14,12 @@ namespace Spaces
 // order of a frame.
 namespace Portal::Manager
 {
-	// Takes its settings from Plugin::Settings (bEnabled, on by default) and hooks the events the
-	// manager reacts to. Call at kDataLoaded.
+	// Takes its settings from Plugin::Settings (bEnabled, on by default). Called by Plugin::Install.
 	void Install();
 
-	// Switching on only works when the hooks were installed at startup (HooksInstalled).
+	// Switching on only works when the hooks were installed at startup (Plugin::HooksInstalled).
 	void               SetEnabled(bool a_enabled);
 	[[nodiscard]] bool Enabled();
-	// Portals were on in the ini at startup, or this is an agent session.
-	[[nodiscard]] bool HooksInstalled();
 
 	// Main thread, every frame (PlayerCharacter::Update hook).
 	void Update(float a_delta);
