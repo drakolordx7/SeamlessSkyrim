@@ -7,22 +7,19 @@ facts are in ENGINE.md.
 
 | What | Where |
 |---|---|
-| Game (Steam, AE 1.7.104) | `E:\SteamLibrary\steamapps\common\Skyrim Special Edition` |
+| Game (AE 1.7.104) | your Skyrim Special Edition install (`<game>` below) |
 | Test instance (what the agent harness launches) | the Skyrim modding project's MO2 portable instance, `D:\AI\Active\Skyrim\instance` (`SKYRIM_MO2_DIR`), profile `SeamlessTest` |
 | Plugin log | `Documents\My Games\Skyrim Special Edition\SKSE\SeamlessSkyrim.log` |
-| Community Shaders log | same folder, `CommunityShaders.log` (shader compile errors land here) |
 | Crash logs | same folder, `Crashlogs\*.log` (trainwreck); `re_lookup` turns a `SkyrimSE.exe+offset` into an ID |
 | Plugin settings | `SeamlessSkyrim.ini` (shipped) and `SeamlessSkyrim_User.ini` (what the in-game menu writes, wins per key), next to the DLL in `SKSE\Plugins` |
 | Load order | `%LOCALAPPDATA%\Skyrim Special Edition\plugins.txt` (the Steam game; MO2 keeps its own in the profile) |
-| Community Shaders fork | `E:\projects\CommunityShaders-Seamless`, branch `seamless-portal` (COMMUNITY-SHADERS-PATCH.md) |
 
 ## SeamlessSkyrim (this repo)
 
 ```powershell
 tools\build.ps1 -NoDeploy          # compile only; works while the game runs
 tools\deploy-mo2-dev.ps1           # put that build into the MO2 test instance
-tools\build.ps1                    # RelWithDebInfo, and copy it into the Steam game's SKSE\Plugins
-tools\build.ps1 -CommunityShaders  # the fork's DLL too (see below)
+tools\build.ps1                    # RelWithDebInfo, and copy it into SKYRIM_PLUGINS_DIR if one is set
 ```
 
 The script finds `cmake`, which isn't on `PATH` (it comes with Visual Studio), and stops before
@@ -38,10 +35,9 @@ building when the game is running and the copy would fail.
   deploys `.weaver\baseline` (the upstream plugin) for comparison, `-Source <folder>` any other
   DLL. Once, from the Skyrim project: `uv run .weaver/tools/build.py --only "Seamless Dev Build"`
   (the script says so when the mod doesn't exist yet).
-- **Steam game**: the post-build step copies both files into `<game>\Data\SKSE\Plugins`
-  (`SKYRIM_PLUGINS_DIR` in CMakeLists.txt); it fails while the game runs. It writes into the
-  existing files (`tools/copy-in-place.ps1`), so a DLL deployed as a hard link by a mod manager
-  keeps its link.
+- **A game folder**: configure with `-DSKYRIM_PLUGINS_DIR=<game>\Data\SKSE\Plugins` and the
+  post-build step copies both files there; it fails while the game runs. Empty by default (no
+  copy).
 
 ### Layout and Core
 
@@ -54,7 +50,7 @@ building when the game is running and the copy would fail.
 | `Doors/` | One door pair: geometry, swing, held-open count, mapping, per-door ini, policy |
 | `Spaces/` | `RemoteCell`: the space behind a door kept alive (attach, Havok step, placement into the world scene, a gate's passage, engine hooks), and `WalkOut` |
 | `Portal/` | `PortalManager` (frame order), selection, merged view/cull, crossing and travel, lights, street merge |
-| `Render/` | Backends (Community Shaders fork / native), portal pass, space lighting, Present hook |
+| `Render/` | The native renderer (`Native/`: doorway mask, lighting swap), ENB detection, portal pass, space lighting, Present hook |
 | `Pictures/` | Doorway pictures: capture, cache, composite |
 | `Bridge/`, `Diag/` | Test tooling (agent mode, the TCP bridge, perf, sampler); `Diag/Telemetry.h` is the no-op sink the portal code reports to |
 | `UI/` | The in-game menu |
@@ -69,71 +65,25 @@ The unit tests of Core are a separate executable, not part of the DLL. `tools\bu
 with everything else; run it with `build\RelWithDebInfo\SeamlessCoreTests.exe` (exit code 0 when
 all checks pass). The source is `tests/Core/CoreTests.cpp`.
 
-## As a Vortex mod
+## Door tunings
 
-The release was first tested as a Vortex mod; the agent harness no longer uses it.
-`tools/deploy-vortex-mod.ps1 -Build` still puts the plugin (Release build, no PDB), its ini files
-from `package/` and the Community Shaders fork's DLL into `E:\Vortex Mods\skyrimse\SeamlessSkyrim`
-(`-CsPdb`, `-RestoreStockCommunityShaders` and `-ClearShaderCache` are its other switches). Things
-that cost time:
-
-- A `cp` into the game's Data folder writes through Vortex's hard links into whichever mod owns the
-  file, which is how the fork's files once ended up in the stock Community Shaders mod.
-- Vortex shows the version as `?`, and a mod folder named like a Nexus download
-  (`Name-12345-1-0-...`) is taken for a Nexus mod and may pull another mod's metadata.
-- Doors tuned in game land in `SeamlessSkyrim_Doors_User.ini`, never in the shipped
-  `SeamlessSkyrim_Doors.ini`; `tools/fold-door-tunings.ps1` (run by the Vortex deploy and by
-  `make-release.ps1`) moves them into `package/`'s file and the game's and deletes the user file.
-  Commit `package/`.
+Doors tuned in game land in `SeamlessSkyrim_Doors_User.ini`, never in the shipped
+`SeamlessSkyrim_Doors.ini`; `tools/fold-door-tunings.ps1 -GameData <game>\Data` (run by
+`make-release.ps1`) moves them into `package/`'s file and the game's and deletes the user file.
+Commit `package/`.
 
 ## Release archive
 
-`tools/make-release.ps1 -Build` writes `build/release/SeamlessSkyrim-<version>.zip` (version from
+`tools/make-release.ps1 -GameData <game>\Data -Build` writes `build/release/SeamlessSkyrim-<version>.zip` (version from
 `CMakeLists.txt`), a FOMOD installer (`package/fomod/`):
 
 - `Core/`, always installed: the plugin (Release, no PDB) and `package/`'s two ini, the in-game
   door tunings folded in first (commit them).
-- `CommunityShaders/`, optional: the fork's DLL and changed files. The installer preselects it
-  when `SKSE\Plugins\CommunityShaders.dll` is already installed, and leaves it unselected but
-  selectable otherwise. On its own the fork is a partial Community Shaders: its DLL runs without
-  the shaders and data it expects, rendering breaks, and SeamlessSkyrim picks the fork backend
-  instead of the native one. It still can't tell Community Shaders versions apart: the option's text says 1.9.1.
-- `LICENSE`, `SOURCE.txt` and `THIRD-PARTY-NOTICES.txt` at the archive's root, outside both
-  options: the GPL text, the GitHub links to this repo and the fork (`-SourceUrl`, `-CsSourceUrl`),
-  and the license of every library in both DLLs, gathered from each build tree's
-  `vcpkg_installed/<triplet>/share/*/copyright` and the license files under `extern/`.
-- Quit the game first: `-Build` runs the post-build copy into the game, which fails while it runs.
-  Without `-Build` a DLL older than its sources stops the script.
-
-## Community Shaders fork
-
-`tools\build.ps1 -CommunityShaders` does the two steps below. By hand: the build tree is
-`build/ALL` (Visual Studio generator), and only the `CommunityShaders` target is needed:
-
-```sh
-cd /e/projects/CommunityShaders-Seamless
-cmake --build build/ALL --config Release --target CommunityShaders   # about 1.5 minutes
-cp build/ALL/Release/CommunityShaders.dll build/ALL/Release/CommunityShaders.pdb \
-   "/e/SteamLibrary/steamapps/common/Skyrim Special Edition/Data/SKSE/Plugins/"
-```
-
-CMake's build of the fork doesn't copy anything into the game, so do it by hand as above, or run
-`tools/build.ps1 -CommunityShaders`. `cp` writes into the existing file, which keeps a hard link to
-a mod manager's copy intact and so changes the mod that file belongs to.
-
-Shaders aren't built; the game compiles them from `<game>\Data\Shaders`. After editing one in
-`package/Shaders`, copy it over the game's file:
-
-```sh
-cp package/Shaders/Utility.hlsl "/e/SteamLibrary/steamapps/common/Skyrim Special Edition/Data/Shaders/"
-```
-
-- Community Shaders only notices a change to a shader's own file. After changing an include
-  (`Common/*.hlsli`), delete that shader's folder under `<game>\Data\ShaderCache\` (for example
-  `Lighting`, `Utility`).
-- The lighting shaders then recompile in the background for minutes. Until they're done, the
-  patch doesn't show.
-- A shader that fails to compile is reported in `CommunityShaders.log` ("Failed to compile ...").
+- `LICENSE`, `SOURCE.txt` and `THIRD-PARTY-NOTICES.txt` at the archive's root: the GPL text, the
+  GitHub link to this repo (`-SourceUrl`), and the license of every library in the DLL, gathered
+  from the build tree's `vcpkg_installed/<triplet>/share/*/copyright` and the license files under
+  `extern/`.
+- Without `-Build` a DLL older than its sources stops the script.
 
 ## Driving the game from an agent (tools/skyrim-mcp)
 
@@ -258,7 +208,7 @@ Diagnostics:
 Frame rate:
 - `perf {"on": true, "reset": true}`, wait, `perf {"on": false}`: per frame over the last 300,
   main-thread ms of the portal's and the manager's parts (`cpu`), GPU ms and thousands of pixels
-  shaded of the world draw, the portal pass, its shadows and its submit (`gpu`), and counts. A
+  shaded of the world draw, the portal pass and its submit (`gpu`), and counts. A
   long `present` means the GPU (or frame generation) holds the main thread back. Off by default:
   its queries cost a little every frame.
 - A crossing frame by frame: `perf {"on": true, "reset": true}`, walk through, then
@@ -279,8 +229,8 @@ Frame rate:
 - `profile {file, seconds}` samples the main thread now; `travel_profile {file}` for 1.5 s from
   the next crossing. The first second or two after a merge is the light-occlusion rays catching up
   (`lightOcclusion.raysTotal` in `portal_status`).
-- `sampler_report.py file [from_ms to_ms]` names the functions in SeamlessSkyrim's and the fork's
-  frames from their build folders' PDBs, so the DLLs in the game must be those builds.
+- `sampler_report.py file [from_ms to_ms]` names the functions in SeamlessSkyrim's frames
+  from the build folder's PDB, so the DLL in the game must be that build.
 - The camera moving changes the numbers a lot. Measure with nobody at the controls.
 - Left alone, the game's idle camera starts orbiting the player after a while (camera state 1 in
   bridge `camera`), so pictures and numbers taken a few seconds apart look in different
@@ -291,13 +241,13 @@ Frame rate:
 
 ## SE 1.5.97
 
-A second game at `E:\Oldrim-1.5.97` (SKSE 2.0.20, Address Library `version-1-5-97-0.bin`
-copied from the AE game's plugins folder, trainwreck, no Community Shaders). It shares
+A second game install, `<se>` below (SKSE 2.0.20, Address Library `version-1-5-97-0.bin`
+copied from the AE game's plugins folder, trainwreck). It shares
 `Documents\My Games\Skyrim Special Edition` with AE: logs, crash logs, ini files and saves.
 
 - Deploy by hand: copy `build/RelWithDebInfo/SeamlessSkyrim.dll` and `.pdb` (and the two ini
-  files) into `E:\Oldrim-1.5.97\Data\SKSE\Plugins`. `tools\build.ps1` deploys to AE only.
-- The MCP server drives it with `SKYRIM_GAME_DIR=E:\Oldrim-1.5.97` (set when the server starts;
+  files) into `<se>\Data\SKSE\Plugins`. `SKYRIM_PLUGINS_DIR` copies into one game only.
+- The MCP server drives it with `SKYRIM_GAME_DIR=<se>` (set when the server starts;
   from a script: `SKYRIM_GAME_DIR=... PYTHONPATH=. uv run python script.py` in `tools/skyrim-mcp`).
 - The saves are AE saves and don't load in 1.5.97 (a crash after loading). Start from the main
   menu with `coc`/`place_go`. A place whose cell is `Wilderness` (`understone-keep-front`) can't
@@ -310,7 +260,7 @@ copied from the AE game's plugins folder, trainwreck, no Community Shaders). It 
 
 ### AE 1.6.1170
 
-A third game at `E:\Oldrim-1.6.1170` (SKSE 2.2.6, `versionlib-1-6-1170-0.bin` from the AE game's
+A third game install, `<ae1170>` below (SKSE 2.2.6, `versionlib-1-6-1170-0.bin` from the AE game's
 plugins folder, trainwreck). Same shared Documents folder.
 
 - It closes at startup: it can't parse the `ContentCatalog.txt` that 1.7.104 writes into the
@@ -318,7 +268,7 @@ plugins folder, trainwreck). Same shared Documents folder.
   the main menu is up, then put it back.
 - Its exe on disk is encrypted too: `dump.py` as for 1.5.97. `addrlib.py` reads its
   `versionlib` (format 2).
-- Deploy by hand like 1.5.97, into `E:\Oldrim-1.6.1170\Data\SKSE\Plugins`.
+- Deploy by hand like 1.5.97, into `<ae1170>\Data\SKSE\Plugins`.
 
 Porting an address (every engine address is a `REL::RelocationID(se, ae)`; call sites inside a
 function take `REL::Relocate(seOffset, aeOffset)`, or `Hooks::Offset(se, ae, ae1799)` where AE

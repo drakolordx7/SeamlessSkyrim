@@ -6,7 +6,7 @@ Read this before proposing a new approach. The engine facts behind it are in ENG
 
 | Situation | How the other side is shown |
 |---|---|
-| Outdoors, a door into a room | The room merged into the world scene (3), up to four at once (`[Portals] iShownRooms`) |
+| Outdoors, a door into a room | The room merged into the world scene (3), one at a time; `[Portals] iShownRooms` more keeps others loaded out of sight, their open doors showing a picture |
 | Indoors, the door out to the street | The street merged into the interior (9, `[Portals] bMergeOutdoors`, on) |
 | Interior ↔ interior, exterior ↔ exterior (city gates) | The portal pass (1); through a city gate the world's own shapes are masked as far as the portal pass draws (`UpdateGateMask`) |
 | A room's doorway before its merge | A picture taken with the portal pass, kept per door. From inside a building, none of the street: its door stays shut until the street is shown live (`StreetShownLive`) |
@@ -54,11 +54,9 @@ light scene with the other cell's lights.
 Why it falls short: it isn't the game's world render.
 - **No deferred lighting:** the pass runs with `inWorld == false`, so Community Shaders' deferred
   path and its effects don't run.
-- **Sun shadows of its own, soft:** an outdoor space's sun shadow light (its light scene's) is run
-  through the engine's sequence with the portal camera into shadow maps of ours
-  (`RenderPortalShadows`), and the fork lights the pass with their soft copy (Volumetric Shadows'
-  VSM, 512 texels a cascade), not the world's crisp shadow mask; terrain and cloud shadows as
-  outdoors (the other worldspace's heightmap). Community Shaders fork only.
+- **No sun shadows:** an outdoor space seen through a city gate is lit by its sun everywhere it
+  reaches, also what its cliffs and walls would shade. (A shadow pass of the other side's sun light
+  was run for the fork; removed with it, to be rebuilt on our own.)
 - **A doorway picture's capture frame** draws the pass with the capture camera into the hidden
   target set, so the doorway shows the previous frame's picture that frame. A picture that never
   came out the size asked for was retaken every other frame for good (Whiterun's gate: the view
@@ -83,7 +81,7 @@ street is handed over to the engine still attached. About 45 ms per crossing.
 ## 3. Render-merge (looking in)
 
 The room's 3D is hung into the world scene, moved by the door mapping, and the game's main pass
-draws it at full quality. The render backend (RENDER-BACKENDS.md) masks the two spaces per pixel
+draws it at full quality. The native renderer (RENDER-BACKENDS.md) masks the two spaces per pixel
 at the door plane and lights the room's shapes with the room's own light.
 
 Before the main view, `MergedCull` hides what the mask would throw away whole: everything when no
@@ -196,13 +194,12 @@ The game's own renderer draws the view out at full quality.
 - **Light:** the street is lit with the outdoor sun and ambient, worked out from the weather the
   way the sky does it (equal to the engine's to 1e-7), times the outdoor image space's sunlight
   scale (without it the street was a dull grey).
-- **Sun shadows:** Community Shaders' Interior Sun is switched on (`SeamlessPortal_SetInteriorSun`),
-  and the engine's sun shadow light gets a directional light of its own pointed at the outdoor
-  sun. Its shadows fall on the street only; the room keeps its own unshadowed directional light.
+- **Sun shadows:** none: the street isn't shadowed by the outdoor sun inside the interior (the
+  fork's Interior Sun did it; removed with it).
 - **Fog:** the street's own fog.
-- **Rain and snow:** the engine's precipitation update runs as outdoors while the street is
-  merged (`PrecipitationUpdateHook`); the fork's particle shader keeps the rain to the street's
-  side of the doorway and lights it with the street's light. Community Shaders fork only.
+- **Rain and snow:** not drawn through the doorway (the precipitation update ran as outdoors while
+  the street was merged, and the fork's particle shader kept the rain to the street's side of the
+  doorway; both removed with the fork).
 - **Doors:** both door panels are hidden. The interior's shapes standing just beyond the door
   plane are culled (Belethor's backing panel).
 - **Culling:** the street hangs in the interior's statics branch, or in the door's room for an
@@ -212,6 +209,6 @@ The game's own renderer draws the view out at full quality.
 How it was found to work: a RenderDoc capture inside Belethor's. The street's shapes were drawn
 in the depth pre-pass and discarded by the shader, because the doorway mask was another door's.
 `World::Sectors` (removed since) sent its nearest door every frame, after the portal manager had
-sent its own, and Community Shaders then held only one doorway mask.
+sent its own, and the renderer then held only one doorway mask.
 
 Still open: people in a room looking out are in another cell than the street's people.

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The patched Community Shaders is gone: the mod draws with the game's own shaders only (also
+  under ENB), and no release ships Community Shaders files. Rooms behind doors are masked and lit
+  by the plugin itself, one room at a time. Gone with the fork until rebuilt: rooms merged beside
+  the shown one, the other worldspace's sun shadows through a city gate, the street's sun shadows
+  inside an interior, rain and snow seen through the doorway, the street's light and fog on a room
+  seen from across the street, Sky Sync's sun direction, skylighting settling on walking out.
+  `[Render] sBackend` is gone.
+- Doorway picture files of an older version are no longer read; they are taken again.
+
 - Settings changed in the in-game menu are kept in `SeamlessSkyrim_User.ini` and survive updates;
   `SeamlessSkyrim.ini` is no longer written. A key in the user file wins over the shipped one.
 - The old `iWarmPortals` key is no longer read (`iShownRooms` replaced it); `bWorldDoors` and
