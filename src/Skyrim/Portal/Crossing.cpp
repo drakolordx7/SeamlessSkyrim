@@ -3,8 +3,9 @@
 #include "Core/Crossing/Approach.h"
 
 #include "Skyrim/Doors/Geometry.h"
-#include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Doors/Hold.h"
+#include "Skyrim/Engine/CoreConvert.h"
+#include "Skyrim/Engine/Havok.h"
 #include "Skyrim/Portal/CameraLimit.h"
 #include "Skyrim/Portal/Gates.h"
 #include "Skyrim/Portal/MergedView.h"
@@ -66,16 +67,12 @@ namespace Portal::Crossing
 
 		RE::TESObjectREFR* Blocker(RE::bhkWorld* a_world, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to, float& a_fraction)
 		{
-			const float     scale = RE::bhkWorld::GetWorldScale();
-			RE::bhkPickData pick;
-			pick.rayInput.from = RE::hkVector4(a_from.x * scale, a_from.y * scale, a_from.z * scale, 0.0f);
-			pick.rayInput.to = RE::hkVector4(a_to.x * scale, a_to.y * scale, a_to.z * scale, 0.0f);
-			pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kCharController);
-			if (!a_world->PickObject(pick) || !pick.rayOutput.HasHit()) {
+			const auto hit = Engine::Havok::Ray(a_world, a_from, a_to, RE::COL_LAYER::kCharController);
+			if (!hit) {
 				return nullptr;
 			}
-			a_fraction = pick.rayOutput.hitFraction;
-			return RE::TESHavokUtilities::FindCollidableRef(*pick.rayOutput.rootCollidable);
+			a_fraction = hit->fraction;
+			return hit->Ref();
 		}
 
 		void OpenPassage(RE::PlayerCharacter* a_player, const Portal::Doors::Mapping& a_mapping)

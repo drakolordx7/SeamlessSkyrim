@@ -59,8 +59,6 @@ namespace Render::PortalPass
 	using ScreenRect = std::array<float, 4>;
 	[[nodiscard]] std::optional<ScreenRect> DoorwayOnScreen(const Portal::Active& a_portal);
 
-	// A city gate: both sides outdoors. Its doorway is the gate's whole opening (DoorwayQuad).
-	[[nodiscard]] bool IsGate(const Portal::Active& a_portal);
 	[[nodiscard]] std::array<RE::NiPoint3, 4> DoorwayQuad(const Portal::Active& a_portal, const RE::NiPoint3& a_viewer);
 
 	// A portal pass drawn with the doorway picture's own camera (Portal::Snapshot::CaptureCamera)
@@ -69,7 +67,7 @@ namespace Render::PortalPass
 	{
 		RE::FormID door;
 		bool       outdoors;  // the space behind the door
-		bool       gate;      // IsGate: the doorway is the gate's whole opening (DoorwayQuad)
+		bool       gate;      // Gates::IsGate: the doorway is the gate's whole opening (DoorwayQuad)
 		float      nearClip;
 		float      farClip;
 	};

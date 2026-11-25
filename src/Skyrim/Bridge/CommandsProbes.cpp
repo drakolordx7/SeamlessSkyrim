@@ -9,6 +9,7 @@
 #include "Skyrim/Bridge/Sampler.h"
 #include "Skyrim/Diag/Probe.h"
 #include "Skyrim/Doors/Hold.h"
+#include "Skyrim/Engine/Havok.h"
 #include "Skyrim/Portal/LightScene.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
@@ -599,18 +600,13 @@ namespace Bridge
 				 }
 				 const auto&     f = a.at("from");
 				 const auto&     t = a.at("to");
-				 const float     scale = RE::bhkWorld::GetWorldScale();
-				 RE::bhkPickData pick;
-				 pick.rayInput.from = RE::hkVector4(f.at(0).get<float>() * scale, f.at(1).get<float>() * scale, f.at(2).get<float>() * scale, 0.0f);
-				 pick.rayInput.to = RE::hkVector4(t.at(0).get<float>() * scale, t.at(1).get<float>() * scale, t.at(2).get<float>() * scale, 0.0f);
-				 pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kCharController);
-				 if (!world->PickObject(pick) || !pick.rayOutput.HasHit()) {
+				 const auto hit = Engine::Havok::Ray(world, { f.at(0).get<float>(), f.at(1).get<float>(), f.at(2).get<float>() }, { t.at(0).get<float>(), t.at(1).get<float>(), t.at(2).get<float>() }, RE::COL_LAYER::kCharController);
+				 if (!hit) {
 					 return json{ { "hit", false } };
 				 }
-				 auto*       ref = RE::TESHavokUtilities::FindCollidableRef(*pick.rayOutput.rootCollidable);
-				 const auto* collidable = pick.rayOutput.rootCollidable;
-				 return json{ { "hit", true }, { "fraction", pick.rayOutput.hitFraction },
-					 { "layer", collidable ? static_cast<int>(collidable->GetCollisionLayer()) : -1 },
+				 auto* ref = hit->Ref();
+				 return json{ { "hit", true }, { "fraction", hit->fraction },
+					 { "layer", static_cast<int>(hit->collidable->GetCollisionLayer()) },
 					 { "ref", ref ? std::format("{:08X} cell {:08X}", ref->GetFormID(), ref->GetParentCell() ? ref->GetParentCell()->GetFormID() : 0) : "" } };
 			 } } },
 			// Tests: what the player's Havok world has under a point (the player's by default).
@@ -630,16 +626,12 @@ namespace Bridge
 					 const auto& p = a.at("pos");
 					 at = { p.at(0).get<float>(), p.at(1).get<float>(), p.at(2).get<float>() };
 				 }
-				 const float     scale = RE::bhkWorld::GetWorldScale();
-				 RE::bhkPickData pick;
-				 pick.rayInput.from = RE::hkVector4(at.x * scale, at.y * scale, (at.z + 100.0f) * scale, 0.0f);
-				 pick.rayInput.to = RE::hkVector4(at.x * scale, at.y * scale, (at.z - 1000.0f) * scale, 0.0f);
-				 pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kCharController);
-				 if (!world->PickObject(pick) || !pick.rayOutput.HasHit()) {
+				 const auto hit = Engine::Havok::Ray(world, { at.x, at.y, at.z + 100.0f }, { at.x, at.y, at.z - 1000.0f }, RE::COL_LAYER::kCharController);
+				 if (!hit) {
 					 return json{ { "hit", false } };
 				 }
-				 auto* ref = RE::TESHavokUtilities::FindCollidableRef(*pick.rayOutput.rootCollidable);
-				 return json{ { "hit", true }, { "z", at.z + 100.0f - 1100.0f * pick.rayOutput.hitFraction },
+				 auto* ref = hit->Ref();
+				 return json{ { "hit", true }, { "z", at.z + 100.0f - 1100.0f * hit->fraction },
 					 { "ref", ref ? std::format("{:08X} cell {:08X}", ref->GetFormID(), ref->GetParentCell() ? ref->GetParentCell()->GetFormID() : 0) : "" } };
 			 } } },
 			// Tests: GPU textures and buffers still alive, grouped by the code that made them. The

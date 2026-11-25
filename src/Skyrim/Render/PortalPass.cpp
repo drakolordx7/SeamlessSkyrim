@@ -3,6 +3,7 @@
 #include "Skyrim/Diag/Telemetry.h"
 #include "Skyrim/Doors/Geometry.h"
 #include "Skyrim/Doors/Pair.h"
+#include "Skyrim/Portal/Gates.h"
 #include "Skyrim/Portal/LightScene.h"
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Render/Backend.h"
@@ -770,16 +771,9 @@ namespace Render::PortalPass
 		*depth = savedDepth;
 	}
 
-	bool IsGate(const Active& a_portal)
-	{
-		auto* door = RE::TESForm::LookupByID<RE::TESObjectREFR>(a_portal.sourceDoor);
-		auto* here = door ? door->GetParentCell() : nullptr;
-		return here && !here->IsInteriorCell() && a_portal.cell && !a_portal.cell->IsInteriorCell();
-	}
-
 	std::array<RE::NiPoint3, 4> DoorwayQuad(const Active& a_portal, const RE::NiPoint3& a_viewer)
 	{
-		const bool gate = IsGate(a_portal);
+		const bool gate = Portal::Gates::IsGate(a_portal);
 		return Portal::Doors::Quad(Portal::Doors::Door(a_portal.sourceDoor), a_viewer, { .behindPanel = !gate, .wholeMesh = gate });
 	}
 
@@ -921,7 +915,7 @@ namespace Render::PortalPass
 			// In the player's space's units, as the picture keeps its distances: the depth read with
 			// them gives the far side's distances divided by the mapping's scale.
 			const float scale = mapping.toLinked.scale;
-			captureDrawn = CaptureDrawn{ a_capture->door, !a_portal.cell->IsInteriorCell(), IsGate(a_portal), portalCamera->GetRuntimeData2().viewFrustum.fNear / scale,
+			captureDrawn = CaptureDrawn{ a_capture->door, !a_portal.cell->IsInteriorCell(), Portal::Gates::IsGate(a_portal), portalCamera->GetRuntimeData2().viewFrustum.fNear / scale,
 				portalCamera->GetRuntimeData2().viewFrustum.fFar / scale };
 		} else {
 			portalNear = portalCamera->GetRuntimeData2().viewFrustum.fNear;

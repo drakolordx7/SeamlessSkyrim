@@ -11,6 +11,8 @@ namespace Portal::Gates
 {
 	// The two cells are outdoors both: what is behind the door is another worldspace.
 	[[nodiscard]] bool IsGate(const RE::TESObjectCELL* a_here, const RE::TESObjectCELL* a_behind);
+	// The portal's door and the cell behind it.
+	[[nodiscard]] bool IsGate(const Active& a_portal);
 
 	// A stand-in on a gate shows its picture only if the gate is set to (Doors::PictureFromAfar);
 	// else the player's own worldspace shows through it, drawn in 3D.

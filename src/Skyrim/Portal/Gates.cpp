@@ -7,6 +7,7 @@
 #include "Skyrim/Doors/Pair.h"
 #include "Skyrim/Doors/Policy.h"
 #include "Skyrim/Doors/Settings.h"
+#include "Skyrim/Engine/Havok.h"
 #include "Skyrim/Portal/PortalManager.h"
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Render/Backend.h"
@@ -74,6 +75,11 @@ namespace Portal::Gates
 	bool IsGate(const RE::TESObjectCELL* a_here, const RE::TESObjectCELL* a_behind)
 	{
 		return a_here && !a_here->IsInteriorCell() && a_behind && !a_behind->IsInteriorCell();
+	}
+
+	bool IsGate(const Active& a_portal)
+	{
+		return IsGate(RE::TESForm::LookupByID<RE::TESObjectREFR>(a_portal.sourceDoor)->GetParentCell(), a_portal.cell);
 	}
 
 	bool ShowsPicture(RE::TESObjectREFR* a_door, RE::FormID a_linked, bool a_linkedOutdoors, bool a_gate)
@@ -162,20 +168,16 @@ namespace Portal::Gates
 			return std::nullopt;
 		}
 		constexpr float kSpan = 80.0f;
-		const float     scale = RE::bhkWorld::GetWorldScale();
 		RE::NiPoint3    from = a_center + a_inward * kSpan;
 		RE::NiPoint3    to = a_center - a_inward * kSpan;
 		from.z = to.z = a_height;
 		for (int i = 0; i < 8; ++i) {
-			RE::bhkPickData pick;
-			pick.rayInput.from = RE::hkVector4(from.x * scale, from.y * scale, from.z * scale, 0.0f);
-			pick.rayInput.to = RE::hkVector4(to.x * scale, to.y * scale, to.z * scale, 0.0f);
-			pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kCharController);
-			if (!world->PickObject(pick) || !pick.rayOutput.HasHit()) {
+			const auto ray = Engine::Havok::Ray(world, from, to, RE::COL_LAYER::kCharController);
+			if (!ray) {
 				return std::nullopt;
 			}
-			const auto hit = from + (to - from) * pick.rayOutput.hitFraction;
-			auto*      ref = RE::TESHavokUtilities::FindCollidableRef(*pick.rayOutput.rootCollidable);
+			const auto hit = from + (to - from) * ray->fraction;
+			auto*      ref = ray->Ref();
 			if (ref && !ref->As<RE::Actor>()) {
 				return (hit.x - a_center.x) * a_inward.x + (hit.y - a_center.y) * a_inward.y;
 			}

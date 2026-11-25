@@ -5,6 +5,7 @@
 #include "Skyrim/Doors/Hold.h"
 #include "Skyrim/Engine/AttachCell.h"
 #include "Skyrim/Engine/Fade.h"
+#include "Skyrim/Engine/Havok.h"
 #include "Skyrim/Portal/LightScene.h"
 #include "Skyrim/Portal/Pristine.h"
 #include "Skyrim/Spaces/Tuning.h"
@@ -940,13 +941,8 @@ namespace Portal
 		// Whether the Havok world has something to stand on below a_pos (within 200 units).
 		bool GroundBelow(RE::bhkWorld* a_world, const RE::NiPoint3& a_pos)
 		{
-			const float     scale = RE::bhkWorld::GetWorldScale();
-			RE::bhkPickData pick;
-			pick.rayInput.from = RE::hkVector4(a_pos.x * scale, a_pos.y * scale, (a_pos.z + 50.0f) * scale, 0.0f);
-			pick.rayInput.to = RE::hkVector4(a_pos.x * scale, a_pos.y * scale, (a_pos.z - 200.0f) * scale, 0.0f);
-			pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kCharController);
 			RE::BSReadLockGuard lock(a_world->worldLock);
-			return a_world->PickObject(pick) && pick.rayOutput.HasHit();
+			return Engine::Havok::Ray(a_world, { a_pos.x, a_pos.y, a_pos.z + 50.0f }, { a_pos.x, a_pos.y, a_pos.z - 200.0f }, RE::COL_LAYER::kCharController).has_value();
 		}
 	}
 

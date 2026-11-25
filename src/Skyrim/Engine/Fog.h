@@ -65,9 +65,6 @@ namespace Engine::Fog
 	{
 		std::array<float, 12> out{};
 		const auto*           property = Property(0);
-		if (!property) {
-			return out;
-		}
 		const float fogNear = Read(property, kNear), fogFar = Read(property, kFar);
 		// The engine uploads a constant for "no fog" when both are 0; a most-it-covers of 0 is that here.
 		if (fogFar - fogNear > 1e-3f) {

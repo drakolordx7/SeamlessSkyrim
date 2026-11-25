@@ -1,5 +1,6 @@
 #include "Skyrim/Portal/LightOcclusion.h"
 
+#include "Skyrim/Engine/Havok.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Render/Wire.h"
 
@@ -125,17 +126,13 @@ namespace
 	// is the surface the point lies on.
 	bool Clear(RE::bhkWorld* a_world, const RE::NiPoint3& a_from, const RE::NiPoint3& a_to)
 	{
-		const float     scale = RE::bhkWorld::GetWorldScale();
-		RE::bhkPickData pick;
-		pick.rayInput.from = RE::hkVector4(a_from.x * scale, a_from.y * scale, a_from.z * scale, 0.0f);
-		pick.rayInput.to = RE::hkVector4(a_to.x * scale, a_to.y * scale, a_to.z * scale, 0.0f);
-		pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kLOS);
 		++raysTotal;
-		if (!a_world->PickObject(pick) || !pick.rayOutput.HasHit()) {
+		const auto hit = Engine::Havok::Ray(a_world, a_from, a_to, RE::COL_LAYER::kLOS);
+		if (!hit) {
 			return true;
 		}
 		const float length = a_from.GetDistance(a_to);
-		return (1.0f - pick.rayOutput.hitFraction) * length < 12.0f;
+		return (1.0f - hit->fraction) * length < 12.0f;
 	}
 
 	// How far a ray from a light goes before it counts as gone into the void around the cell. Four
@@ -152,16 +149,10 @@ namespace
 	bool OutsideShell(RE::bhkWorld* a_world, const RE::NiPoint3& a_source)
 	{
 		const RE::NiPoint3 directions[] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
-		const float        scale = RE::bhkWorld::GetWorldScale();
 		int                escaped = 0;
 		for (const auto& direction : directions) {
-			const auto      to = a_source + direction * kShellReach;
-			RE::bhkPickData pick;
-			pick.rayInput.from = RE::hkVector4(a_source.x * scale, a_source.y * scale, a_source.z * scale, 0.0f);
-			pick.rayInput.to = RE::hkVector4(to.x * scale, to.y * scale, to.z * scale, 0.0f);
-			pick.rayInput.filterInfo.SetCollisionLayer(RE::COL_LAYER::kLOS);
 			++raysTotal;
-			if (!a_world->PickObject(pick) || !pick.rayOutput.HasHit()) {
+			if (!Engine::Havok::Ray(a_world, a_source, a_source + direction * kShellReach, RE::COL_LAYER::kLOS)) {
 				++escaped;
 			}
 		}
