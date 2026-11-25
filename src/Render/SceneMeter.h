@@ -3,7 +3,7 @@
 // Brightness as an eye judges a scene: the geometric mean of the luminance, in the main scene's
 // units (before tone mapping). Skyrim has no lasting eye adaptation (the tone map's exposure is
 // the ratio of two adapted copies of the same average, 1 once settled), so a room seen from a
-// sunlit street came out as bright as from inside it; the room lights Manager::RoomLightScale
+// sunlit street came out as bright as from inside it; the room lights MergedView::RoomLightScale
 // works out compare these instead.
 namespace Render::SceneMeter
 {

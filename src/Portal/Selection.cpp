@@ -45,8 +45,6 @@ namespace Portal::Selection
 		std::vector<WarmTarget> warmTargets;
 		std::vector<RemoteCell> warm;
 
-		// The portal door to show, within ActivateRadius; also sets warmTargets, sparse and the reaches
-		// that follow from it.
 		std::optional<Candidate> NearestPortalDoor(RE::PlayerCharacter* a_player)
 		{
 			warmTargets.clear();
@@ -271,25 +269,21 @@ namespace Portal::Selection
 		heading = length > 500.0f ? RE::NiPoint3() : step / length;
 	}
 
-	// a_door's distance from a_origin as the reaches and the order of doors count it.
 	float Reach(const RE::NiPoint3& a_origin, RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
 	{
 		const float distance = a_origin.GetDistance(a_door->GetPosition());
 		return Portal::Doors::Outdoors(a_door) && Portal::Doors::Outdoors(a_linked) ? distance * Gates::kReachWeight : distance;
 	}
 
-	// What doors are ordered by: the reach, a little less for a door ahead of the player and a
-	// little more for one behind.
 	float Rank(const RE::NiPoint3& a_origin, RE::TESObjectREFR* a_door, RE::TESObjectREFR* a_linked)
 	{
 		const auto to = a_door->GetPosition() - a_origin;
 		return Reach(a_origin, a_door, a_linked) - kHeadingNudge * heading.Dot(to) / std::max(to.Length(), 1.0f);
 	}
 
-	// Load doors into another space: outside -> interior, interior -> outside or another interior,
-	// and from one worldspace into another (a walled city's gate). Exterior doors within one
-	// worldspace aren't portals: both ends are in the scene already.
-	// The door at the other end of a_ref when a_ref would be a portal door, the menu's switch aside.
+	// Portal doors are load doors into another space: outside -> interior, interior -> outside or
+	// another interior, and from one worldspace into another (a walled city's gate). Exterior doors
+	// within one worldspace aren't: both ends are in the scene already.
 	RE::NiPointer<RE::TESObjectREFR> PortalLink(RE::TESObjectREFR* a_ref, RE::TESObjectCELL* a_here)
 	{
 		auto* base = a_ref ? a_ref->GetBaseObject() : nullptr;

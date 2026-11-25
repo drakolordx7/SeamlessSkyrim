@@ -59,7 +59,7 @@ namespace Render::Frame
 	// indoors it is in dome-only mode. While the street is merged in, the update runs as outdoors:
 	// the street through the doorway has the weather's rain, fading in and out with the weather as
 	// it does outdoors. The shape follows the camera into the room; the doorway mask keeps it to the
-	// street (Manager::MergedRoomOf).
+	// street (MergedView::RoomOf).
 	struct PrecipitationUpdateHook
 	{
 		static void Thunk(RE::Precipitation* a_precip, float a_delta)

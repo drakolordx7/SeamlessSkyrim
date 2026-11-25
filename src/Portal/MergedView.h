@@ -9,7 +9,7 @@
 // room's and, outdoors, those of the kept rooms beside it whose door is open. The render backend
 // (the patched Community Shaders, or the native one on the game's own shaders; Render/Backend.h)
 // masks the merged spaces and the player's against each other. It needs each room's doorway
-// every frame, and MergedRoomOf tells it per draw which room a shape is in.
+// every frame, and RoomOf tells it per draw which room a shape is in.
 //
 // A merged room is in a slot with the render backend: slot 0 is the shown room (the only one
 // that can be walked into and be the street merged into an interior), 1..3 are the rooms merged
@@ -73,8 +73,7 @@ namespace Portal::MergedView
 	// A kept space is shown beside the shown room by the door it is merged through.
 	[[nodiscard]] bool BesideDoor(RE::FormID a_door);
 
-	// Publishes what the renderer asks for (MergedRoomOf, MergedRoomScene, IsPlayerShape,
-	// IsShownCell), whenever a room is merged, handed from one role to the other, or let go.
+	// Publishes what the renderer asks for (RoomOf, SceneOf, IsPlayerShape, IsShownCell), whenever a room is merged, handed from one role to the other, or let go.
 	void Publish();
 	// The cells on screen behind a door right now (merged into the world, or drawn by the portal
 	// pass), for the actor cull; a_shown false: none.

@@ -345,7 +345,7 @@ namespace
 				const auto cameraStart = Clock::now();
 				RE::PlayerCamera::GetSingleton()->Update();
 				// The image space follows the camera; set before the camera had moved (by the
-				// Manager::Update above, from the door outside), a room walked out into was drawn for
+				// Manager::OnArrival above, from the door outside), a room walked out into was drawn for
 				// one frame with the outdoors' and flashed white.
 				Portal::ImageSpaceBlend::Update(Portal::Manager::ReadyPortal());
 				Note(std::format("image space blended: {}", Portal::ImageSpaceBlend::On()));

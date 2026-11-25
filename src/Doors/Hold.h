@@ -33,7 +33,7 @@ namespace Portal::Doors
 	[[nodiscard]] bool IsOpen(RE::FormID a_door);
 	// Main thread: the door is held open passable (Open), its collision out of the Havok world.
 	[[nodiscard]] bool BodiesHidden(RE::FormID a_door);
-	// Main thread, tests (Manager::SceneCheck): the door's shapes hidden that no opener hid.
+	// Main thread, tests (PortalDiagnostics::SceneCheck): the door's shapes hidden that no opener hid.
 	[[nodiscard]] std::uint32_t HiddenByNoOpener(RE::TESObjectREFR* a_door);
 
 	// Once at startup: an open doorway shows no "Open ..." prompt, or "Close ..." when it can be

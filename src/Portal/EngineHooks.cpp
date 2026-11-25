@@ -86,8 +86,8 @@ namespace Portal::EngineHooks
 		// The actor's 3D position update (ID 37995, every frame for each actor in high process, on the
 		// job threads) hangs its 3D into its cell's node for actors whenever it hangs elsewhere (ID 19165,
 		// which queues the attach). A merged room's people hang directly under their cell's 3D, where the
-		// scene's cull reaches them (UpdateMerged): the engine moved them back every frame, and they were
-		// hung again every frame. Only UpdateMerged hangs an actor there, so that alone tells them apart,
+		// scene's cull reaches them (MergedView): the engine moved them back every frame, and they were
+		// hung again every frame. Only MergedView hangs an actor there, so that alone tells them apart,
 		// without asking the manager from a job thread. One walked out into the street has a new cell
 		// and is hung into it as usual.
 		struct ActorHangHook

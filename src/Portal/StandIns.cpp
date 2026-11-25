@@ -290,7 +290,6 @@ namespace Portal::StandIns
 		a_swing.TakeOver(a_door);
 	}
 
-	// a_mergeable: the room would be merged now.
 	bool WaitForPicture(const Active& a_portal, const RE::TESObjectCELL* a_here, bool a_mergeable)
 	{
 		pictureWanted = 0;

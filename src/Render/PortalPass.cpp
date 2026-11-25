@@ -923,7 +923,7 @@ namespace Render::PortalPass
 		const OwnTargetsInPlace targets(DrawingTargets());  // to the end of the function, past the restore below
 
 		// The linked door itself sits right at the clip distance; hide it for this pass. Not when it
-		// is the one swung open (Manager's OpenDoor): its leaves stand in the space behind, and a
+		// is the one swung open (PortalDoor::Update): its leaves stand in the space behind, and a
 		// city gate's doorway stood empty.
 		auto*      linked3D = linked->Get3D();
 		const bool wasCulled = linked3D->GetAppCulled();

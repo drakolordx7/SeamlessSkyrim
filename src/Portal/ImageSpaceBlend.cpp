@@ -7,11 +7,6 @@ namespace Portal::ImageSpaceBlend
 {
 	namespace
 	{
-		// An interior and the outdoors have different image spaces (tone mapping, brightness, tint);
-		// the engine switches when the player changes space. Through an open doorway that is a jump:
-		// the room seen from the porch is drawn with the outdoor one, and darkens at once on walking
-		// in. Instead the two are blended by where the camera is relative to the doorway, on both
-		// sides of the crossing, through the manager's override.
 		RE::ImageSpaceBaseData toneBlend;
 		// The outdoors' as the engine last had it, with the weather and the hour it was taken in: it
 		// holds for those. Kept for good, a save loaded indoors at night after a noon outdoors blended
@@ -52,7 +47,7 @@ namespace Portal::ImageSpaceBlend
 		void UpdateTone(RE::TESObjectCELL* a_here, RE::TESObjectCELL* a_behindDoor, float a_interiorDepth, float a_inDoorway)
 		{
 			auto* manager = RE::ImageSpaceManager::GetSingleton();
-			if (!manager || !a_here || !a_behindDoor || a_here->IsInteriorCell() == a_behindDoor->IsInteriorCell() ) {
+			if (!manager || !a_here || !a_behindDoor || a_here->IsInteriorCell() == a_behindDoor->IsInteriorCell()) {
 				Clear();
 				return;
 			}

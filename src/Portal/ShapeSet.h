@@ -1,7 +1,7 @@
 #pragma once
 
 // A set of shapes, open-addressed: a merged room's shapes are asked about for every draw (is this
-// one of them, Manager::MergedRoomOf), and std::unordered_set's nodes took ~1 ms a frame in cache
+// one of them, MergedView::RoomOf), and std::unordered_set's nodes took ~1 ms a frame in cache
 // misses with Understone Keep merged (~16000 shapes). Filled while the shapes are listed, a few
 // roots per frame (MarkPass), so it is never built in one go.
 namespace Portal

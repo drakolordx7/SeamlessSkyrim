@@ -146,12 +146,12 @@ namespace Portal::MergedView
 			return a;
 		}();
 
-		// What the renderer reads, off the manager's update. The rooms by slot (MergedRoomOf,
-		// MergedRoomScene) are set again (Publish) whenever a room is merged, handed from one role to
-		// the other, or let go. These, each room's shapes and the player's shapes are written in the
-		// manager's update and read by the renderer, both on the main thread, so without a lock:
-		// MergedRoomOf is asked several times for every draw. The shown cells are read by the actor
-		// cull (ID 40335, ActorCullHook), which also runs off the main thread.
+		// What the renderer reads, off the manager's update. The rooms by slot (RoomOf, SceneOf) are
+		// set again (Publish) whenever a room is merged, handed from one role to the other, or let
+		// go. These, each room's shapes and the player's shapes are written in the manager's update
+		// and read by the renderer, both on the main thread, so without a lock: RoomOf is asked
+		// several times for every draw. The shown cells are read by the actor cull (ID 40335,
+		// ActorCullHook), which also runs off the main thread.
 		struct Published
 		{
 			std::array<const MergedRoom*, ::Render::kMaxRooms>    rooms{};
@@ -524,7 +524,7 @@ namespace Portal::MergedView
 				StandIns::TakeOverDoor(mergedRoom.swing, swung->GetFormID());
 			}
 			Doors::Swing::Reclaim(swung->GetFormID());
-			const bool wasShut = mergedRoom.swing.Step(swung, a_wanted, a_delta);  // see OpenDoor
+			const bool wasShut = mergedRoom.swing.Step(swung, a_wanted, a_delta);  // see PortalDoor::Update
 			if (a_wanted && wasShut && Doors::OpenFromAfar(source, linked)) {
 				mergedRoom.swing.SnapOpen();
 			}
@@ -541,7 +541,7 @@ namespace Portal::MergedView
 				HideDoorsInDoorway(mergedRoom, source, mapping.sourceCenter);
 			}
 			// At once in the merge's first frame (and after someone walked through the doorway,
-			// RefreshMergedShapes); otherwise twice a second, spread over frames (MarkPass).
+			// RefreshShapes); otherwise twice a second, spread over frames (MarkPass).
 			if (!mergedRoom.marked) {
 				mergedRoom.marked = true;
 				mergedRoom.markTimer = 0.5f;
@@ -798,7 +798,6 @@ namespace Portal::MergedView
 			logger::info("portal: {} {} (doorway {})", Probe::DescribeCell(a_room.cell), a_paused ? "paused" : "woken", a_paused ? "out of sight" : "in sight");
 		}
 
-		// What the renderers ask about the shapes they draw (Render::SceneQuery).
 		class RenderedScene final : public ::Render::SceneQuery
 		{
 		public:
@@ -892,7 +891,6 @@ namespace Portal::MergedView
 		return pauseUnseen && (!slot || rooms[slot]->beside.paused);
 	}
 
-	// Where a space merged through a_portal stands.
 	Portal::RemoteCell::Placement PlacementOf(const Active& a_portal, const Portal::Doors::Mapping& a_mapping)
 	{
 		using RE::TESForm;

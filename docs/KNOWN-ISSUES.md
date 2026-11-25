@@ -42,7 +42,7 @@
 - `place_go` out of that house with the street merged into it: `coc Wilderness` left the player
   in the house's cell, then moved to the street's coordinates and falling. Once.
 - The street merged into an interior stays merged until it is let go, also far from the door
-  (2400 units in an interior with few doors): the cost `closeBy` in `Manager::Update` is there
+  (2400 units in an interior with few doors): the cost `closeBy` in `PortalManager.cpp` is there
   to avoid (2.6 ms a frame in Honningbrew Meadery's cellar) is only avoided coming from afar.
   Nothing takes a merge back short of letting the space go.
 - Outdoors with few doors around, a fourth space coming within reach halves the reach

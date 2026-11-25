@@ -99,7 +99,7 @@ namespace Portal::Crossing
 					}
 					const bool ofRoom = std::ranges::find(Manager::Space().Cells(), blocker->GetParentCell()) != Manager::Space().Cells().end();
 					if (Portal::Doors::IsOpen(blocker->GetFormID()) || ofRoom) {
-						// (Also the merged room's own collision copied into the world, MergeCollision: it
+						// (Or the space behind the doorway, which shares the Havok world at a city gate: it
 						// is meant to be there.)
 						// A door held open can still stop the ray (Whiterun's doors have a body the layer
 						// change doesn't reach) though not the player: what blocks the way is behind
@@ -343,7 +343,7 @@ namespace Portal::Crossing
 		}
 		const bool      cross = merged ? (depth >= 15.0f && cameraDepth >= 2.0f) || depth >= kMergedCrossDepth :
 		                                 (depth >= -lead && inDoorway && (approaching || depth >= 0.0f)) || cameraAtPicture;
-		if (crossCooldown <= 0.0f && cross) {
+		if (Ready() && cross) {
 			logger::info("portal: crossing at depth {:.1f}, side {:.1f}, camera depth {:.1f}{}", depth, side, cameraDepth, merged ? " (merged)" : "");
 			Request({ .portal = a_portal, .limitCamera = pullIn || merged, .cameraFloor = merged ? kMergedCameraMin : 0.0f });
 		}

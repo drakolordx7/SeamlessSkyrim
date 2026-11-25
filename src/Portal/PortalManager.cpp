@@ -100,7 +100,6 @@ namespace Portal::Manager
 			Portal::DoorUse::PublishOpen(std::move(doors));
 		}
 
-		// The shown space let go; the ones kept warm stay.
 		void ReleaseShown(std::string_view a_reason, float a_holdoff = 0.0f, bool a_handOver = false)
 		{
 			Crossing::HoldAttach(a_holdoff);
@@ -118,7 +117,7 @@ namespace Portal::Manager
 			PortalDoor::Close();
 			Crossing::ClosePassage();
 			MergedView::EndShown();
-			Portal::StreetLOD::Hide();
+			StreetMerge::HideLOD();
 			SetActive(std::nullopt);
 			MergedView::PublishShownCells(false);
 			remote.Release(a_handOver);
@@ -177,9 +176,7 @@ namespace Portal::Manager
 					PortalDoor::SetWanted(false);  // the other door's, until the next frame decides for this one
 					// The street's distant land is placed by the door pair, as at the attach: kept, it
 					// stood where the first door's pair put it, off the street seen through this one.
-					if (const auto mapping = Doors::TryCompute(*CurrentPortal()); mapping && a_here->IsInteriorCell() && !portal->cell->IsInteriorCell()) {
-						Portal::StreetLOD::Show(portal->cell, mapping->toLinked, false);
-					}
+					StreetMerge::PlaceLOD(*CurrentPortal(), a_here);
 					lastEvent = std::format("switched to door {:08X} into the same space", a_candidate->door->GetFormID());
 					logger::info("portal: {}", lastEvent);
 				} else if (!(better && Demote(a_here, *portal))) {
@@ -224,9 +221,7 @@ namespace Portal::Manager
 				// the engine's own update at the crossing, centred on the interior, showed the low LOD
 				// town and land in the street's houses for the half second the portal's picture was
 				// drawn before the merge.
-				if (const auto mapping = Doors::TryCompute(*CurrentPortal()); mapping && a_here->IsInteriorCell() && !a_candidate->cell->IsInteriorCell()) {
-					Portal::StreetLOD::Show(a_candidate->cell, mapping->toLinked, false);
-				}
+				StreetMerge::PlaceLOD(*CurrentPortal(), a_here);
 			} else {
 				retry.Failed(a_candidate->cell->GetFormID());
 				lastEvent = std::format("could not attach {}", Probe::DescribeCell(a_candidate->cell));

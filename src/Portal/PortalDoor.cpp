@@ -65,7 +65,7 @@ namespace Portal::PortalDoor
 		}
 		if (openSwing.Shut()) {
 			// Swung shut: an ordinary door again, solid, a gate shown. The portal isn't drawn on
-			// it any more (DoorwayOpen); its quad lies on the panel's face.
+			// it any more (Shut); its quad lies on the panel's face.
 			Portal::Doors::RestoreLeaves(a_door->GetFormID());
 			Portal::Doors::RestoreLeaves(openDoorSwung);
 			Portal::Doors::Close(openDoor);

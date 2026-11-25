@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Portal/Active.h"
+
 // The street merged into the interior the player is in (docs/APPROACHES.md, 9): its cells, its
 // distant land, objects and trees (the LOD) and the persistent references' 3D hung into the
 // interior's scene, moved with the street, so the view out is drawn by the game's main pass
@@ -12,6 +14,12 @@ namespace Portal::StreetMerge
 
 	// The shown space is the street merged into an interior.
 	[[nodiscard]] bool Merged();
+
+	// a_portal, shown from an interior: the street's distant LOD is placed for it (StreetLOD) from
+	// now on, not from the merge, as its picture is drawn before. a_here: the player's cell.
+	void PlaceLOD(const Active& a_portal, RE::TESObjectCELL* a_here);
+	// The street's distant LOD let go (StreetLOD), merged or not.
+	void HideLOD();
 
 	// a_door: the interior's door the street is seen through. The distant LOD shown in the
 	// interior and moved with the street (a_toSource), the interior's sky dome given if it has none.

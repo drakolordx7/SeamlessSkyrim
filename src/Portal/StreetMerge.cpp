@@ -1,6 +1,7 @@
 #include "Portal/StreetMerge.h"
 
 #include "Diag/Telemetry.h"
+#include "Doors/Pair.h"
 #include "Portal/PortalManager.h"
 #include "Portal/StreetLOD.h"
 #include "Portal/WaterReflections.h"
@@ -35,7 +36,6 @@ namespace Portal::StreetMerge
 		};
 		std::optional<MergedLOD> mergedLOD;
 
-		// Hangs a_object into the interior's branch where it is drawn now.
 		void HangInto(RE::NiNode* a_branch, RE::NiAVObject* a_object)
 		{
 			RE::NiPointer<RE::NiAVObject> keep(a_object);
@@ -108,6 +108,18 @@ namespace Portal::StreetMerge
 		}
 	}
 
+	void PlaceLOD(const Active& a_portal, RE::TESObjectCELL* a_here)
+	{
+		if (const auto mapping = Doors::TryCompute(a_portal); mapping && a_here->IsInteriorCell() && !a_portal.cell->IsInteriorCell()) {
+			Portal::StreetLOD::Show(a_portal.cell, mapping->toLinked, false);
+		}
+	}
+
+	void HideLOD()
+	{
+		Portal::StreetLOD::Hide();
+	}
+
 	bool Merged()
 	{
 		return Manager::Space().Merged() && Manager::Space().Cell() && !Manager::Space().Cell()->IsInteriorCell();
@@ -153,7 +165,6 @@ namespace Portal::StreetMerge
 		}
 	}
 
-	// a_door: the interior's door the street is seen through.
 	void Show(const RE::NiTransform& a_toSource, RE::TESObjectREFR* a_door)
 	{
 		Portal::StreetLOD::Show(Manager::Space().Cell(), a_toSource.Invert(), true);
@@ -240,7 +251,7 @@ namespace Portal::StreetMerge
 	void Hide()
 	{
 		const Diag::Scope scope("unmerge LOD");
-		Portal::StreetLOD::Hide();
+		HideLOD();
 		RestoreSkyMode();
 		if (!mergedLOD) {
 			return;
