@@ -261,7 +261,7 @@ namespace
 				const Diag::Scope arrivalScope("arrival");
 				arrivalYaw.reset();
 				// Before the space just left is attached below, which forgets them.
-				Portal::RemoteCell::HangHandedPersistent();
+				Spaces::RemoteCell::HangHandedPersistent();
 				// The space just left is attached (and merged, with the doorway passable) before the
 				// camera is placed: otherwise the camera, behind the player in that doorway, collides
 				// with the building's shell and starts at the player's head for two frames.
@@ -369,7 +369,7 @@ namespace
 		static void Thunk()
 		{
 			func();
-			Portal::RemoteCell::StepAtEndOfFrame();
+			Spaces::RemoteCell::StepAtEndOfFrame();
 			std::unique_lock guard(lock);
 			if (pending) {
 				const auto request = *pending;

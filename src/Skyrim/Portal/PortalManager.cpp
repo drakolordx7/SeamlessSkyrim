@@ -38,7 +38,7 @@ namespace Portal::Manager
 	{
 		bool                  enabled = false;
 		bool                  hooksInstalled = false;  // see Install
-		RemoteCell            remote;                  // the space shown behind the portal's door
+		Spaces::RemoteCell            remote;                  // the space shown behind the portal's door
 		std::mutex            activeLock;
 		std::optional<Active> active;
 		Selection::AttachRetry retry;
@@ -252,7 +252,7 @@ namespace Portal::Manager
 				// stand-ins ran before it this frame, when those doors weren't in view yet.
 				StandIns::Update(a_player, a_here, 0.0f);
 				logger::info("portal: merge took {:.1f} ms", std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - mergeStarted).count());
-				logger::info("portal: merged {} into the world ({})", Probe::DescribeCell(a_portal.cell), result.dump());
+				logger::info("portal: merged {} into the world ({} cells under {})", Probe::DescribeCell(a_portal.cell), result.cells, result.parent);
 			} catch (const std::exception& e) {
 				logger::warn("portal: merge failed: {}", e.what());
 			}
@@ -321,8 +321,8 @@ namespace Portal::Manager
 		}
 		// Before anything asks whether a room can be merged (MergedView::Mergeable).
 		::Render::Backend::Install();
-		RemoteCell::InstallStepHook(stepRemote);
-		RemoteCell::InstallGridHook();
+		Spaces::RemoteCell::InstallStepHook(stepRemote);
+		Spaces::RemoteCell::InstallGridHook();
 		Render::Frame::Install();
 		Render::Frame::Prewarm();
 		Pictures::Prewarm();
@@ -383,8 +383,8 @@ namespace Portal::Manager
 		if (!here) {
 			return;
 		}
-		if (!here->IsInteriorCell() && RemoteCell::PersistentToHang()) {
-			RemoteCell::HangHandedPersistent();
+		if (!here->IsInteriorCell() && Spaces::RemoteCell::PersistentToHang()) {
+			Spaces::RemoteCell::HangHandedPersistent();
 		}
 		if (remote.Attached() && !remote.Healthy()) {
 			ReleaseShown("remote cell no longer attached under the portal");
@@ -461,7 +461,7 @@ namespace Portal::Manager
 		return approachLimit;
 	}
 
-	RemoteCell& Space()
+	Spaces::RemoteCell& Space()
 	{
 		return remote;
 	}

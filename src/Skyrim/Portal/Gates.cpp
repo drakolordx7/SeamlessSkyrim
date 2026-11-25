@@ -139,7 +139,7 @@ namespace Portal::Gates
 				const float depth = farGate.x * mapping->inward.x + farGate.y * mapping->inward.y;
 				if (depth > Core::Doorway::kMargin) {
 					constexpr float kCellSize = 4096.0f;
-					passage = depth + kCellSize * Portal::RemoteCell::kNeighbourRadius;
+					passage = depth + kCellSize * Spaces::RemoteCell::kNeighbourRadius;
 					door = Render::UprightDoor(mapping->sourceCenter, mapping->inward, mapping->halfWidth, mapping->halfHeight, false);
 				}
 			}

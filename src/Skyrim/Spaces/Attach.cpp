@@ -81,7 +81,7 @@ namespace
 	}
 }
 
-namespace Portal
+namespace Spaces
 {
 	std::vector<RE::Actor*> RemoteCell::ActorsIn(const RE::TESObjectCELL* a_cell)
 	{
@@ -305,7 +305,7 @@ namespace Portal
 		// they land in the world scene and are adopted like any other.
 		REL::Relocation<void (*)(RE::TESObjectCELL*, bool)> attachRefLights{ REL::RelocationID(18590, 19059) };
 		attachRefLights(a_cell, true);
-		adoptedLights += LightScene::Adopt(scene.get(), Cell3D(a_cell));
+		adoptedLights += Portal::LightScene::Adopt(scene.get(), Cell3D(a_cell));
 	}
 
 	bool RemoteCell::Attach(RE::TESObjectCELL* a_cell, bool a_toMerge, bool a_show)
@@ -313,9 +313,9 @@ namespace Portal
 		if (!cells.empty() || !Attachable(a_cell)) {
 			return false;
 		}
-		scene = LightScene::Create();
+		scene = Portal::LightScene::Create();
 		if (a_show) {
-			LightScene::Show(scene.get());
+			Portal::LightScene::Show(scene.get());
 		}
 		generation = ++lastGeneration;
 		adoptedLights = 0;
@@ -332,7 +332,7 @@ namespace Portal
 		// lights (25 -> 0 in a lit room: seen from inside, every candle and fire went dark for
 		// good, since nothing makes them again while the cell stays loaded), through the change of
 		// its room graph that AttachGraphHook now prevents. Whatever still goes is put back.
-		const auto worldLights = LightScene::WorldLights();
+		const auto worldLights = Portal::LightScene::WorldLights();
 		// The door's cell can be in memory without having been read from the plugin files: a game
 		// loaded indoors holds the exterior cells of persistent references (the door) as shells, with
 		// no land and no temporary references. Read like its neighbours below (a no-op when it was).
@@ -392,12 +392,12 @@ namespace Portal
 			for (auto* cell : cells) {
 				// Their lights (a lantern on a house) come with them.
 				if (AdoptPersistent(cell, persistent)) {
-					adoptedLights += LightScene::Adopt(scene.get(), Cell3D(cell));
+					adoptedLights += Portal::LightScene::Adopt(scene.get(), Cell3D(cell));
 				}
 			}
 		}
 		if (auto* worldScene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]) {
-			const auto kept = LightScene::WorldLights();
+			const auto kept = Portal::LightScene::WorldLights();
 			// A light of the attached cells left the world scene because it was adopted into the
 			// portal's (a cell the player left a moment ago can still have its lights there); put
 			// back, it would be registered in both.
@@ -584,14 +584,14 @@ namespace Portal
 		for (auto& [object, flags] : stilledClutter) {
 			if (auto* collision = object->collisionObject ? netimmerse_cast<RE::bhkNiCollisionObject*>(object->collisionObject.get()) : nullptr) {
 				*reinterpret_cast<std::uint32_t*>(&collision->flags) = flags;
-				Pristine::FlagsBack(collision);
+				Portal::Pristine::FlagsBack(collision);
 			}
 		}
 		stilledClutter.clear();
 		RestoreBounds();
 		// Our lights are copies of the cells' light refs; entering a cell normally re-creates them
 		// in the world scene, so they must not stay registered here too.
-		LightScene::Clear(scene.get());
+		Portal::LightScene::Clear(scene.get());
 		// Persistent references' 3D goes back to how the engine left it (unparented); the grid
 		// attaches it again when the player comes back out. Only if it is still ours: if the
 		// engine has hung it into the world again meanwhile (the player came back out another
@@ -643,7 +643,7 @@ namespace Portal
 		roundPersistent.clear();
 		fadeForced = false;
 		adoptedLights = 0;
-		LightScene::Retire(std::move(scene));
+		Portal::LightScene::Retire(std::move(scene));
 	}
 
 	void RemoteCell::HangHandedPersistent()
@@ -767,7 +767,7 @@ namespace Portal
 			if (merged && !cell->IsInteriorCell()) {
 				continue;
 			}
-			late += LightScene::Adopt(scene.get(), Cell3D(cell));
+			late += Portal::LightScene::Adopt(scene.get(), Cell3D(cell));
 			// The engine only animates the lights of references in current cells; a light that
 			// flickers or pulses (most of a Lux interior) starts with a negative fade as "not
 			// updated yet" and stays dark until its reference's light update runs.
@@ -859,7 +859,7 @@ namespace Portal
 		// engine takes them in on its next light update. (Their light-geometry pairs stay empty,
 		// unlike a space attached shown; merged rooms are lit by distance in the CS patch, and
 		// looked the same.)
-		LightScene::Show(scene.get());
+		Portal::LightScene::Show(scene.get());
 	}
 
 	void RemoteCell::StillLooseObjects(RE::TESObjectCELL* a_cell)

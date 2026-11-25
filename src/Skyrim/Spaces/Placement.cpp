@@ -30,7 +30,7 @@ namespace
 	}
 }
 
-namespace Portal
+namespace Spaces
 {
 	// Moving a whole cell (merging it, or putting it back) changes every object's world transform
 	// in one step, and static objects are never updated again: their "previous" transform, which
@@ -232,12 +232,12 @@ namespace Portal
 			return false;
 		}
 		stilledClutter.emplace_back(RE::NiPointer<RE::NiAVObject>(a_object), collision->flags.underlying());
-		Pristine::FlagsChanged(collision, collision->flags.underlying());
+		Portal::Pristine::FlagsChanged(collision, collision->flags.underlying());
 		collision->flags.reset(RE::bhkNiCollisionObject::Flag::kActive, RE::bhkNiCollisionObject::Flag::kSyncOnUpdate);
 		return true;
 	}
 
-	json RemoteCell::Merge(const Placement& a_placement)
+	RemoteCell::MergeResult RemoteCell::Merge(const Placement& a_placement)
 	{
 		placed = a_placement;
 		const auto& toSource = a_placement.toSource;
@@ -291,6 +291,6 @@ namespace Portal
 		// street around the door, through walls, took shadow slots from the town's own lights (its
 		// shadows changed as doors were passed) and stayed behind after the room was let go.
 		merged = true;
-		return { { "cells", moved }, { "parent", worldParent->name.c_str() } };
+		return { moved, worldParent->name.c_str() };
 	}
 }

@@ -28,7 +28,7 @@ namespace Portal::Selection
 		float warmAttachTimer = 0.0f;
 
 		Core::Selection::WarmTargets warmTargets;
-		std::vector<RemoteCell> warm;
+		std::vector<Spaces::RemoteCell> warm;
 
 		std::optional<Candidate> NearestPortalDoor(RE::PlayerCharacter* a_player)
 		{
@@ -313,7 +313,7 @@ namespace Portal::Selection
 		}
 		// Fewer kept than before (changed in the menu): the farthest go first.
 		while (std::cmp_greater_equal(warm.size(), shownRoomsSetting)) {
-			LetGoKept(std::ranges::max_element(warm, {}, [](const Portal::RemoteCell& a_space) { return warmTargets.RankOf(a_space.Cell()->GetFormID()); }),
+			LetGoKept(std::ranges::max_element(warm, {}, [](const Spaces::RemoteCell& a_space) { return warmTargets.RankOf(a_space.Cell()->GetFormID()); }),
 				"fewer kept");
 		}
 		for (auto it = warm.begin(); it != warm.end();) {
@@ -329,7 +329,7 @@ namespace Portal::Selection
 			}
 		}
 		const auto kept = [](RE::FormID a_cell) {
-			return std::ranges::any_of(warm, [&](const Portal::RemoteCell& a_space) { return a_space.Cell()->GetFormID() == a_cell; });
+			return std::ranges::any_of(warm, [&](const Spaces::RemoteCell& a_space) { return a_space.Cell()->GetFormID() == a_cell; });
 		};
 		const auto wanted = WarmWanted(warmReach);
 		const auto next = std::ranges::find_if(wanted, [&](RE::FormID a_cell) { return !kept(a_cell) && !a_context.retry.Blocks(a_cell); });
@@ -348,7 +348,7 @@ namespace Portal::Selection
 		// Running along a street the order changes all the time; let go for every change, rooms
 		// were attached and let go again a fifth of a second later.
 		if (std::cmp_greater_equal(warm.size() + 1, shownRoomsSetting)) {
-			const auto farthest = std::ranges::max_element(warm, {}, [](const Portal::RemoteCell& a_space) { return warmTargets.RankOf(a_space.Cell()->GetFormID()); });
+			const auto farthest = std::ranges::max_element(warm, {}, [](const Spaces::RemoteCell& a_space) { return warmTargets.RankOf(a_space.Cell()->GetFormID()); });
 			if (farthest == warm.end() || !Core::Selection::MakesWayFor(warmTargets.RankOf(*next), warmTargets.RankOf(farthest->Cell()->GetFormID()))) {
 				return;
 			}
@@ -356,7 +356,7 @@ namespace Portal::Selection
 		}
 		warmAttachTimer = Core::Selection::kWarmAttachSeconds;
 		const auto started = std::chrono::steady_clock::now();
-		RemoteCell space;
+		Spaces::RemoteCell space;
 		bool       attachedKept = false;
 		{
 			const Diag::Scope scope("attach kept");
@@ -372,23 +372,23 @@ namespace Portal::Selection
 		}
 	}
 
-	std::vector<RemoteCell>& Kept()
+	std::vector<Spaces::RemoteCell>& Kept()
 	{
 		return warm;
 	}
 
-	RemoteCell* KeptSpace(const RE::TESObjectCELL* a_cell)
+	Spaces::RemoteCell* KeptSpace(const RE::TESObjectCELL* a_cell)
 	{
 		const auto it = FindKept(a_cell);
 		return it != warm.end() ? &*it : nullptr;
 	}
 
-	std::vector<RemoteCell>::iterator FindKept(const RE::TESObjectCELL* a_cell)
+	std::vector<Spaces::RemoteCell>::iterator FindKept(const RE::TESObjectCELL* a_cell)
 	{
-		return std::ranges::find(warm, a_cell, &RemoteCell::Cell);
+		return std::ranges::find(warm, a_cell, &Spaces::RemoteCell::Cell);
 	}
 
-	std::vector<RemoteCell>::iterator LetGoKept(std::vector<RemoteCell>::iterator a_space, std::string_view a_why)
+	std::vector<Spaces::RemoteCell>::iterator LetGoKept(std::vector<Spaces::RemoteCell>::iterator a_space, std::string_view a_why)
 	{
 		MergedView::HideBesideOf(a_space->Cell(), a_why);
 		logger::info("portal: let go of {}, kept behind its door ({})", Probe::DescribeCell(a_space->Cell()), a_why);

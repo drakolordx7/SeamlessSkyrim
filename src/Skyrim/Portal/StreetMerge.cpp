@@ -32,7 +32,7 @@ namespace Portal::StreetMerge
 			std::vector<Moved>        persistent;
 			RE::NiTransform           toSource;
 			RE::NiPointer<RE::NiNode> branch;  // the interior's, where the street hangs (null: under the world scene)
-			Portal::MovedBounds       bounds;  // of the LOD root (the engine's outdoor cells with it) and the persistent nodes
+			Spaces::MovedBounds       bounds;  // of the LOD root (the engine's outdoor cells with it) and the persistent nodes
 		};
 		std::optional<MergedLOD> mergedLOD;
 
@@ -152,7 +152,7 @@ namespace Portal::StreetMerge
 			if (mergedLOD->branch) {
 				HangInto(mergedLOD->branch.get(), node.get());
 			}
-			Portal::SettleMotion(node.get());
+			Spaces::SettleMotion(node.get());
 			++taken;
 		}
 		if (taken) {
@@ -238,7 +238,7 @@ namespace Portal::StreetMerge
 		logger::info("portal: distant LOD shown in the interior{}", branch ? std::format(", it and the street hung into the interior's {} of {} objects", netimmerse_cast<RE::BSMultiBoundRoom*>(branch) ? "room at the door" : "branch", most) : std::string());
 		// The upscaler's motion vectors: moved in one step, the distant land and objects reached back to
 		// where they were drawn outdoors, and with DLSS the view out was low resolution and shimmered.
-		Portal::SettleMotion(root);
+		Spaces::SettleMotion(root);
 		mergedLOD = std::move(state);
 		MergePersistent();
 	}
@@ -261,8 +261,8 @@ namespace Portal::StreetMerge
 			node->local = local;
 			RE::NiUpdateData update;
 			node->Update(update);
-			Portal::RecomputeBounds(node.get());
-			Portal::SettleMotion(node.get());
+			Spaces::RecomputeBounds(node.get());
+			Spaces::SettleMotion(node.get());
 		}
 		for (auto& [node, culled] : mergedLOD->culled) {
 			node->SetAppCulled(culled);
@@ -277,8 +277,8 @@ namespace Portal::StreetMerge
 		root->local = mergedLOD->local;
 		RE::NiUpdateData update;
 		root->Update(update);
-		Portal::RecomputeBounds(root.get());
-		Portal::SettleMotion(root.get());
+		Spaces::RecomputeBounds(root.get());
+		Spaces::SettleMotion(root.get());
 		mergedLOD->bounds.Restore();
 		mergedLOD.reset();
 	}

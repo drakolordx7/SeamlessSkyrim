@@ -45,7 +45,7 @@ namespace Portal::MergedView
 	[[nodiscard]] bool KeptRoomPaused(const RE::TESObjectCELL* a_cell);
 
 	// Where a space merged through a_portal stands.
-	[[nodiscard]] RemoteCell::Placement PlacementOf(const Active& a_portal, const Doors::Mapping& a_mapping);
+	[[nodiscard]] Spaces::RemoteCell::Placement PlacementOf(const Active& a_portal, const Doors::Mapping& a_mapping);
 
 	// Main thread, every frame the shown space is merged: its room is drawn and updated (slot 0).
 	// a_wanted: its door swings towards open. Its cull is added to a_culls.

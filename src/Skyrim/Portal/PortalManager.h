@@ -2,7 +2,7 @@
 
 #include "Skyrim/Portal/Active.h"
 
-namespace Portal
+namespace Spaces
 {
 	class RemoteCell;
 }
@@ -48,7 +48,7 @@ namespace Portal::Manager
 
 	// The space behind the portal's door, the one shown: for the portal modules, which each work on
 	// a part of it.
-	[[nodiscard]] RemoteCell& Space();
+	[[nodiscard]] Spaces::RemoteCell& Space();
 	// The door pair in use, merged or not, loaded or not.
 	[[nodiscard]] std::optional<Active> CurrentPortal();
 	// The portal whose other side is ready, drawn by the portal pass or merged.

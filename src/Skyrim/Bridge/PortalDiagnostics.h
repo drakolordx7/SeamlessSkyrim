@@ -3,7 +3,7 @@
 // What the portal modules report to the test tooling: the status of the portal and each module,
 // the scene check run_suite uses as its oracle, and the measurements of the merged rooms. Read
 // only; each module gives out its state through accessors.
-namespace Portal
+namespace Spaces
 {
 	class RemoteCell;
 }
@@ -21,8 +21,8 @@ namespace Bridge::PortalDiagnostics
 	// Diagnostics (portal_merge): the brightness of the view and of the rooms merged, and their scales.
 	[[nodiscard]] json DescribeAdaptation();
 	// A remote space: its cells, load state, lights, fade and people.
-	[[nodiscard]] json DescribeSpace(const Portal::RemoteCell& a_space);
+	[[nodiscard]] json DescribeSpace(const Spaces::RemoteCell& a_space);
 	// Diagnostics (portal_passes): the cached render passes of a space's shapes; a_drop forgets the
 	// lists that hold passes already returned to the pool.
-	[[nodiscard]] json RenderPasses(const Portal::RemoteCell& a_space, bool a_drop);
+	[[nodiscard]] json RenderPasses(const Spaces::RemoteCell& a_space, bool a_drop);
 }

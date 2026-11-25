@@ -236,7 +236,7 @@ namespace Bridge::PortalDiagnostics
 				 return out;
 			 }() },
 			{ "doorwayPictures", Pictures::Describe() },
-			{ "remoteStepping", RemoteCell::SteppingEnabled() },
+			{ "remoteStepping", Spaces::RemoteCell::SteppingEnabled() },
 			{ "active", portal ? json{ { "sourceDoor", std::format("{:08X}", portal->sourceDoor) }, { "linkedDoor", std::format("{:08X}", portal->linkedDoor) }, { "mapping", [&] {
 										 try {
 											 const auto m = Portal::Doors::Compute(*portal);
@@ -310,7 +310,7 @@ namespace Bridge::PortalDiagnostics
 		};
 	}
 
-	json RenderPasses(const RemoteCell& a_space, bool a_drop)
+	json RenderPasses(const Spaces::RemoteCell& a_space, bool a_drop)
 	{
 		static const auto [begin, end] = [] {
 			const auto& module = REL::Module::get();
@@ -370,7 +370,7 @@ namespace Bridge::PortalDiagnostics
 		};
 		nlohmann::json tree = nlohmann::json::array();
 		for (auto* cell : a_space.Cells()) {
-			if (auto* cell3D = RemoteCell::Cell3D(cell)) {
+			if (auto* cell3D = Spaces::RemoteCell::Cell3D(cell)) {
 				visit(cell3D);
 				std::string line = std::format("{:08X} flags {:X} parent '{}'{}:", cell->GetFormID(), cell3D->GetFlags().underlying(), cell3D->parent ? cell3D->parent->name.c_str() : "",
 					LightScene::IsOurs(cell3D->parent) ? " (portal scene)" : "");
@@ -397,14 +397,14 @@ namespace Bridge::PortalDiagnostics
 			{ "ownFade", ownFade }, { "otherFade", otherFade }, { "sample", sample } };
 	}
 
-	json DescribeSpace(const RemoteCell& a_space)
+	json DescribeSpace(const Spaces::RemoteCell& a_space)
 	{
 		auto* cell = a_space.Cell();
 		if (!cell) {
 			return nullptr;
 		}
 		json actors = json::array();
-		for (auto* actor : RemoteCell::ActorsIn(cell)) {
+		for (auto* actor : Spaces::RemoteCell::ActorsIn(cell)) {
 			const auto pos = actor->GetPosition();
 			actors.push_back({
 				{ "name", actor->GetDisplayFullName() },
@@ -442,7 +442,7 @@ namespace Bridge::PortalDiagnostics
 				 visit(a_space.Cell3D());
 				 return json{ { "hidden", hidden }, { "partial", partial }, { "shown", shown } };
 			 }() },
-			{ "steppedFrames", RemoteCell::SteppedFrames() },
+			{ "steppedFrames", Spaces::RemoteCell::SteppedFrames() },
 			{ "actors", actors },
 		};
 	}

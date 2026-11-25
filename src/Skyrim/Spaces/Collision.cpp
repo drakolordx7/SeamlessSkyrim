@@ -2,7 +2,7 @@
 
 #include "Skyrim/Diag/Probe.h"
 
-namespace Portal
+namespace Spaces
 {
 	void RemoteCell::ClearPassage(const RE::NiPoint3& a_center, const RE::NiPoint3& a_inward, float a_halfWidth, float a_halfHeight)
 	{

@@ -37,7 +37,7 @@ namespace
 	// hook sits at its entry.
 	bool KeepHeld(RE::TESObjectCELL* a_cell)
 	{
-		if (!Portal::RemoteCell::Holds(a_cell)) {
+		if (!Spaces::RemoteCell::Holds(a_cell)) {
 			return false;
 		}
 		logger::info("portal: {} kept loaded, not unloaded by the engine (held behind a door)", Probe::DescribeCell(a_cell));
@@ -82,7 +82,7 @@ namespace
 	}
 }
 
-namespace Portal
+namespace Spaces
 {
 	bool RemoteCell::Holds(const RE::TESObjectCELL* a_cell)
 	{

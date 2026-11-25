@@ -13,7 +13,7 @@
 // references, release), Havok.cpp (stepping), Placement.cpp (merging into the world's scene,
 // bounds), Collision.cpp (a gate's passage), EngineHooks.cpp (hooks on the engine's attach and
 // unload). The bridge describes a space from the accessors (Bridge::PortalDiagnostics).
-namespace Portal
+namespace Spaces
 {
 	class RemoteCell
 	{
@@ -23,9 +23,9 @@ namespace Portal
 		// through the portal pass. a_show: its light scene is the one drawn (Show) from the start;
 		// otherwise it is kept attached out of sight until shown.
 		bool Attach(RE::TESObjectCELL* a_cell, bool a_toMerge = false, bool a_show = true);
-		// Main thread: this space's light scene becomes the one drawn and lit (LightScene::Show).
+		// Main thread: this space's light scene becomes the one drawn and lit (Portal::LightScene::Show).
 		void Show();
-		[[nodiscard]] bool Shown() const { return LightScene::Shown(scene.get()); }
+		[[nodiscard]] bool Shown() const { return Portal::LightScene::Shown(scene.get()); }
 		// The light scene this space's lights are in (registered or not).
 		[[nodiscard]] RE::ShadowSceneNode* Scene() const { return scene.get(); }
 		// Merged and not drawn: its cells left out of every cull until shown again (a room merged
@@ -80,9 +80,14 @@ namespace Portal
 
 			[[nodiscard]] bool SamePlace(const Placement& a_other) const { return sourceDoor == a_other.sourceDoor && turn == a_other.turn && shift == a_other.shift; }
 		};
+		struct MergeResult
+		{
+			int         cells;   // moved into the world's scene
+			std::string parent;  // the node they hang under
+		};
 		// Render-merge: hang the remote cells into the world scene, moved so that the far door
 		// coincides with the near one, to be drawn by the game's main pass.
-		json Merge(const Placement& a_placement);
+		MergeResult Merge(const Placement& a_placement);
 		[[nodiscard]] bool Merged() const { return merged; }
 		// Merged: the cells placed anew (a door correction changed while looking at them, or the
 		// space is now seen through another of its doors).

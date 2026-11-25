@@ -170,7 +170,7 @@ namespace Portal::MergedView
 		// cell, or it is drawn tens of thousands of units away until the engine happens to
 		// rebuild it; out on the street they were invisible for a second. It goes into the
 		// actors' node of the cell they are in now. Also while the room is paused: they walk on.
-		void ReturnLeavers(MergedRoom& a_room, const Portal::RemoteCell& a_space)
+		void ReturnLeavers(MergedRoom& a_room, const Spaces::RemoteCell& a_space)
 		{
 			std::erase_if(a_room.actors, [&](auto& a_entry) {
 				auto& [object, holder] = a_entry;
@@ -206,7 +206,7 @@ namespace Portal::MergedView
 		// A cell attached again right after the player left it (walking out through the doorway)
 		// fades its references in over a second, so the room the camera is standing in is see-through.
 		// It has been on screen all along (it was the current cell), so it is shown at full opacity.
-		void SkipFadeIn(const Portal::RemoteCell& a_space)
+		void SkipFadeIn(const Spaces::RemoteCell& a_space)
 		{
 			for (auto* cell : a_space.Cells()) {
 				auto* loaded = cell->GetRuntimeData().loadedData;
@@ -322,7 +322,7 @@ namespace Portal::MergedView
 		}
 
 		// a_street: the street merged into an interior, whose distant land and objects belong to it.
-		MarkPass StartMarkPass(const Portal::RemoteCell& a_space, bool a_street, const RE::NiPoint3& a_near)
+		MarkPass StartMarkPass(const Spaces::RemoteCell& a_space, bool a_street, const RE::NiPoint3& a_near)
 		{
 			MarkPass pass;
 			pass.doorway = a_near;
@@ -342,7 +342,7 @@ namespace Portal::MergedView
 		}
 
 		// True once every root is done; roots are taken until a_budgetMs is spent (one at least).
-		bool StepMarkPass(Portal::RemoteCell& a_space, MarkPass& a_pass, double a_budgetMs)
+		bool StepMarkPass(Spaces::RemoteCell& a_space, MarkPass& a_pass, double a_budgetMs)
 		{
 			const auto started = std::chrono::steady_clock::now();
 			while (a_pass.next < a_pass.roots.size()) {
@@ -427,7 +427,7 @@ namespace Portal::MergedView
 
 		// a_mark false: the merge ended, everything marked goes back. True: listed anew at once, in
 		// this frame.
-		void MarkMergedShapes(int a_slot, Portal::RemoteCell* a_space, bool a_street, bool a_mark, const RE::NiPoint3& a_near = {})
+		void MarkMergedShapes(int a_slot, Spaces::RemoteCell* a_space, bool a_street, bool a_mark, const RE::NiPoint3& a_near = {})
 		{
 			auto& room = *rooms[a_slot];
 			room.markPass.reset();
@@ -490,7 +490,7 @@ namespace Portal::MergedView
 		// the shown room, which alone can be the street merged into an interior and have the camera in
 		// it. a_space: the space it is merged from. a_wanted: its door swings towards open. Its cull is
 		// added to a_culls.
-		void UpdateMerged(int a_slot, Portal::RemoteCell& a_space, const Active& a_portal, bool a_wanted, float a_delta, std::vector<MergedCull::Room>& a_culls)
+		void UpdateMerged(int a_slot, Spaces::RemoteCell& a_space, const Active& a_portal, bool a_wanted, float a_delta, std::vector<MergedCull::Room>& a_culls)
 		{
 			auto& mergedRoom = *rooms[a_slot];
 			const auto found = Doors::TryCompute(a_portal);
@@ -770,7 +770,7 @@ namespace Portal::MergedView
 		// Whether a line of sight from the camera, as it is now, could pass the room's doorway: the
 		// doorway on screen or near it, and the camera in front of the door (beside or behind the
 		// house none does). Walls in between aren't considered.
-		bool DoorwaySeen(const MergedRoom::Beside& a_room, const Portal::RemoteCell& a_space)
+		bool DoorwaySeen(const MergedRoom::Beside& a_room, const Spaces::RemoteCell& a_space)
 		{
 			auto* camera = RE::Main::WorldRootCamera();
 			if (!camera) {
@@ -787,7 +787,7 @@ namespace Portal::MergedView
 		// Paused, the room keeps everything it is drawn with (doors swung, shapes listed, its
 		// doorway and light with the renderer), so it is drawn again the moment it wakes. Its cells
 		// are parked: the engine's cull doesn't walk them.
-		void SetBesidePaused(MergedRoom::Beside& a_room, Portal::RemoteCell& a_space, bool a_paused)
+		void SetBesidePaused(MergedRoom::Beside& a_room, Spaces::RemoteCell& a_space, bool a_paused)
 		{
 			a_room.paused = a_paused;
 			a_space.SetParked(a_paused);
@@ -885,7 +885,7 @@ namespace Portal::MergedView
 		return pauseUnseen && (!slot || rooms[slot]->beside.paused);
 	}
 
-	Portal::RemoteCell::Placement PlacementOf(const Active& a_portal, const Portal::Doors::Mapping& a_mapping)
+	Spaces::RemoteCell::Placement PlacementOf(const Active& a_portal, const Portal::Doors::Mapping& a_mapping)
 	{
 		using RE::TESForm;
 		auto*      source = TESForm::LookupByID<RE::TESObjectREFR>(a_portal.sourceDoor);
@@ -920,7 +920,7 @@ namespace Portal::MergedView
 	{
 		struct Pick
 		{
-			Portal::RemoteCell* space;
+			Spaces::RemoteCell* space;
 			RE::FormID          door;
 			RE::FormID          linked;
 			float               distance;
@@ -985,7 +985,7 @@ namespace Portal::MergedView
 					const auto started = std::chrono::steady_clock::now();
 					const auto result = pick.space->Merge(PlacementOf(portal, Doors::Compute(portal)));
 					pick.space->Update(0.0f);
-					logger::info("portal: merged {} beside the nearest door ({}, {:.1f} ms)", Probe::DescribeCell(cell), result.dump(),
+					logger::info("portal: merged {} beside the nearest door ({} cells under {}, {:.1f} ms)", Probe::DescribeCell(cell), result.cells, result.parent,
 						std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count());
 				} else {
 					pick.space->SetParked(false);
@@ -1078,7 +1078,7 @@ namespace Portal::MergedView
 	{
 		::Render::Backend::Current().SetMergedDoor(0, std::nullopt);
 		::Render::Backend::Current().SetMergedLighting(0, std::nullopt);
-		RemoteCell space;
+		Spaces::RemoteCell space;
 		std::swap(space, Manager::Space());
 		Selection::Kept().push_back(std::move(space));
 		rooms[a_slot] = std::move(rooms[0]);

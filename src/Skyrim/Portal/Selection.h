@@ -98,10 +98,10 @@ namespace Portal::Selection
 
 	// The spaces kept attached out of sight; those whose door is open are also merged beside the
 	// shown room (MergedView).
-	[[nodiscard]] std::vector<RemoteCell>&          Kept();
-	[[nodiscard]] RemoteCell*                       KeptSpace(const RE::TESObjectCELL* a_cell);
-	[[nodiscard]] std::vector<RemoteCell>::iterator FindKept(const RE::TESObjectCELL* a_cell);
+	[[nodiscard]] std::vector<Spaces::RemoteCell>&          Kept();
+	[[nodiscard]] Spaces::RemoteCell*                       KeptSpace(const RE::TESObjectCELL* a_cell);
+	[[nodiscard]] std::vector<Spaces::RemoteCell>::iterator FindKept(const RE::TESObjectCELL* a_cell);
 	// A kept space let go (its room merged beside the shown one is ended first).
-	std::vector<RemoteCell>::iterator LetGoKept(std::vector<RemoteCell>::iterator a_space, std::string_view a_why);
+	std::vector<Spaces::RemoteCell>::iterator LetGoKept(std::vector<Spaces::RemoteCell>::iterator a_space, std::string_view a_why);
 	void                              ReleaseWarm(std::string_view a_reason);
 }

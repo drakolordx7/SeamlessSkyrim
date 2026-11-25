@@ -15,7 +15,7 @@ namespace
 	}
 }
 
-namespace Portal
+namespace Spaces
 {
 	void RemoteCell::StepWorld(RE::bhkWorld* a_world)
 	{

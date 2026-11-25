@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Portal
+namespace Spaces
 {
 	// Bounds that don't follow a subtree moved for a merge. Multibound shapes (BSMultiBoundNode, an
 	// interior's rooms, a city's house blocks) keep theirs in world coordinates, and nodes flagged
