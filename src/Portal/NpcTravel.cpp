@@ -5,6 +5,7 @@
 #include "Portal/PortalManager.h"
 
 #include "Diag/Telemetry.h"
+#include "Engine/Fade.h"
 #include "Engine/Hooks.h"
 
 namespace
@@ -119,16 +120,15 @@ namespace
 				high->fadeAlpha = 1.0f;
 			}
 			actor->SetAlpha(1.0f);
-			RE::BSVisit::TraverseScenegraphObjects(object, [](RE::NiAVObject* a_object) {
-				if (auto* fade = a_object->AsFadeNode()) {
-					fade->GetRuntimeData().currentFade = 1.0f;
-				}
-				return RE::BSVisit::BSVisitControl::kContinue;
-			});
+			Engine::ForceFadeIn(object);
 			return false;
 		});
 	}
-	constexpr float   kWalkSpeed = 90.0f;
+	constexpr float kWalkSpeed = 90.0f;
+
+	// Cells whose references the engine fades in, shown at once until then (ShowAtOnce): the one
+	// the player just walked into, the street just loaded behind a door.
+	std::vector<std::pair<RE::TESObjectCELL*, std::chrono::steady_clock::time_point>> shownCells;
 
 	void EndWalk(Walk& a_walk, RE::Actor* a_actor)
 	{
@@ -313,10 +313,6 @@ namespace Portal::NpcTravel
 		UpdateVisible();
 	}
 
-	// Cells whose references the engine fades in, shown at once until then (ShowAtOnce): the one
-	// the player just walked into, the street just loaded behind a door.
-	std::vector<std::pair<RE::TESObjectCELL*, std::chrono::steady_clock::time_point>> shownCells;
-
 	// No NPC fades at a door, the portal's or any other: with no loading screen anywhere, an NPC
 	// dissolving at a door and forming again behind it looked like a ghost. The fade-out is cut short
 	// (the engine then moves them at once), they stay opaque meanwhile, and the fade-in is skipped.
@@ -344,12 +340,7 @@ namespace Portal::NpcTravel
 		for (auto& [cell, until] : shownCells) {
 			auto* loaded = cell->GetRuntimeData().loadedData;
 			if (auto* cell3D = loaded ? loaded->cell3D.get() : nullptr) {
-				RE::BSVisit::TraverseScenegraphObjects(cell3D, [](RE::NiAVObject* a_object) {
-					if (auto* fade = a_object->AsFadeNode()) {
-						fade->GetRuntimeData().currentFade = 1.0f;
-					}
-					return RE::BSVisit::BSVisitControl::kContinue;
-				});
+				Engine::ForceFadeIn(cell3D);
 			}
 		}
 	}

@@ -13,7 +13,9 @@
 #include "Portal/MergedCull.h"
 #include "Portal/PortalManager.h"
 #include "Render/PortalRender.h"
+#include "Portal/TravelTrace.h"
 #include "Spaces/RemoteCell.h"
+#include "Spaces/Tuning.h"
 #include "Portal/Travel.h"
 #include "Diag/Probe.h"
 
@@ -974,13 +976,13 @@ namespace Bridge
 					 Portal::Manager::SetMergeEnabled(a.at("enabled").get<bool>());
 				 }
 				 if (a.contains("quietLeftCell")) {
-					 Portal::RemoteCell::kQuietSecondsLeftCell = a.at("quietLeftCell").get<float>();
+					 Spaces::tuning.quietSecondsLeftCell = a.at("quietLeftCell").get<float>();
 				 }
 				 if (a.contains("handOver")) {
-					 Portal::RemoteCell::handOverStreet = a.at("handOver").get<bool>();
+					 Spaces::tuning.handOverStreet = a.at("handOver").get<bool>();
 				 }
 				 if (a.contains("stepExterior")) {
-					 Portal::RemoteCell::stepExterior = a.at("stepExterior").get<bool>();
+					 Spaces::tuning.stepExterior = a.at("stepExterior").get<bool>();
 				 }
 				 if (a.contains("streetEye")) {
 					 Portal::Manager::SetStreetEye(a.at("streetEye").get<bool>());
@@ -1452,10 +1454,6 @@ namespace Bridge
 				 return json{ { "shownRooms", status["shownRooms"] }, { "warm", status["warm"] }, { "mergedCull", status["mergedCull"] }, { "frames", FrameHooks::FrameStats() } };
 			 } } },
 			{ "portal_passes", { [](const json& a) { return Portal::Manager::RemoteRenderPasses(a.value("drop", false)); } } },
-			{ "portal_debug", { [](const json& a) {
-				 Portal::RemoteCell::debugSkip = a.value("skip", Portal::RemoteCell::debugSkip);
-				 return json{ { "skip", Portal::RemoteCell::debugSkip } };
-			 } } },
 			// Diagnostics: the directional light of each registered light scene, and the player cell's
 			// directional settings (to check how rotation XY/Z map to a direction).
 			{ "lighting", { [](const json&) {
@@ -1538,7 +1536,6 @@ namespace Bridge
 				 status["travel"] = Portal::Travel::Status();
 				 return status;
 			 } } },
-			{ "travel_options", { Portal::Travel::SetOptions } },
 			// Samples the main thread now, for {seconds} (default 3), into {file}: a steady view, where
 			// travel_profile starts at a crossing.
 			// Off the main thread: it samples the main thread from its own, also when that one hangs.
@@ -1552,7 +1549,7 @@ namespace Bridge
 			 }, false } },
 			{ "travel_profile", { [](const json& a) {
 				 const auto file = a.at("file").get<std::string>();
-				 Portal::Travel::ProfileNext(std::filesystem::path(file));
+				 Portal::TravelTrace::ProfileNext(std::filesystem::path(file));
 				 return json{ { "file", file } };
 			 } } },
 			// Waits for the next rendered frame, like screenshot.
