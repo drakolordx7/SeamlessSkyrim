@@ -1,6 +1,18 @@
 - SE 1.5.97: `coc MarkarthUnderstoneKeep` from Markarth's street, with the keep merged into the
   street (walked in and out just before), hung the game during the load (once; log ends at the
   `coc`). Not tried on AE.
+- AE 1.6.1170: the cause of a fall through the street after a walk-out isn't known; it is worked around
+  (`TransitionStalls` SettleHook). Walking out of Belethor's (Whiterun), in about a third of the
+  launches (the upstream plugin too), the engine's settle step after the arrival
+  (ID 40744 + 0x53B, a loop calling ID 37507 with a 0.16 s step) moved the player 70 units down
+  at the first call and on to the land 146 units under the porch (`WhiterunPLainsDistrict03`,
+  z -3510 instead of -3364). Found in a good and a bad launch alike: every body moved back before the teleport
+  call, the porch's body (ref 0001BF79) in the world and in the player's phantom's list with the same
+  filters, the world not locked, no passage open, rays (static layer and the phantom's own filter)
+  hit it, the controller's state before the step the same. Putting the phantom into the world
+  again before the step didn't help. The settle step is left out on our seamless teleports; not
+  hooked on SE and AE 1.7.99+ (the call site is only known for 1.6.1170, so the bug may stay there).
+
 - AE: `place_go` (`coc RiftenBeggarsRow`) from Riften's street just after walking out of Beggar's
   Row hung the game during the load: no CPU, every thread waiting; the log ends with the room's
   door opened again (`Doors::Open`) after the release. Once.

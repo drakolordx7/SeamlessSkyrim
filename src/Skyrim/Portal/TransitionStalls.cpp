@@ -159,6 +159,28 @@ namespace
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};
 
+	// ID 40744 + 0x4F0..0x571: after the arrival the engine settles the player on the ground, calling
+	// the controller's integration (ID 37507, a step of 0.16 s) until the height stops changing.
+	// In about a third of the launches that first step fell through the porch in front of
+	// Belethor's door (reference 0001BF79) to the land 146 units below, and the player came out of
+	// the shop in the cell under the street. The body stands in the Havok world, is in the player's
+	// phantom's list with the right filters, and rays find it; the step's cast misses it anyway,
+	// in some launches only (the upstream plugin too). The cause isn't known. WORKAROUND: on our
+	// seamless teleports the step is left out. Travel puts the player on the ground where it is
+	// walked to (a few units above it at most), and the normal frames settle them.
+	struct SettleHook
+	{
+		static void Thunk(RE::PlayerCharacter* a_player, float a_step, RE::NiPoint3* a_from)
+		{
+			if (seamlessTeleport) {
+				Portal::TravelTrace::Note("settle step skipped");
+				return;
+			}
+			func(a_player, a_step, a_from);
+		}
+		static inline REL::Relocation<decltype(Thunk)> func;
+	};
+
 	// Every frame (ID 106337, for each registered light scene).
 	struct FrameLightsHook
 	{
@@ -213,6 +235,11 @@ namespace Portal::TransitionStalls
 		if (callsTo(teleportLights.address(), kUpdateLights) && callsTo(frameLights.address(), kUpdateLights)) {
 			TeleportLightsHook::func = SKSE::GetTrampoline().write_call<5>(teleportLights.address(), TeleportLightsHook::Thunk);
 			FrameLightsHook::func = SKSE::GetTrampoline().write_call<5>(frameLights.address(), FrameLightsHook::Thunk);
+		}
+		// The settle's call (AE 1.6.1170: the one in the loop at ID 40744 + 0x53B; other builds: not hooked).
+		REL::Relocation<std::uintptr_t> settle{ REL::RelocationID(39657, 40744), 0x53B };
+		if (REL::Module::IsAE() && callsTo(settle.address(), REL::RelocationID(0, 37507))) {
+			SettleHook::func = SKSE::GetTrampoline().write_call<5>(settle.address(), SettleHook::Thunk);
 		}
 		REL::Relocation<std::uintptr_t> extraFrame{ REL::RelocationID(13171, 13316), REL::Relocate(0x24C, 0x273) };
 		if (callsTo(extraFrame.address(), REL::RelocationID(35556, 36555))) {

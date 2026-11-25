@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Walking out of Belethor's (Whiterun) no longer drops the player through the porch to the land under
+  the street (about a third of the launches, the upstream plugin too): on a seamless crossing the
+  engine's settle step after the arrival is left out (AE 1.6.1170).
 - Settings changed in the in-game menu are kept in `SeamlessSkyrim_User.ini` and survive updates;
   `SeamlessSkyrim.ini` is no longer written. A key in the user file wins over the shipped one.
 - The old `iWarmPortals` key is no longer read (`iShownRooms` replaced it); `bWorldDoors` and
