@@ -397,10 +397,14 @@ def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], l
     first = walk.get("status")
     # "arrived" at the target with the player still in the cell it left from: nothing was crossed (a floor hatch, or a
     # gate whose far side the walk missed): treated like a stuck walk.
+    if first not in ("travelled through a door",):
+        S.wait_in_game(60)  # a vanilla loading-screen trip may still be finishing: the cell name lags behind the position
+        time.sleep(1.0)
     here_cell = S.state()["player"]["cell"]["editorId"]
     if first == "arrived" and here_cell == start_cell:
         first = "arrived-without-crossing"
-    elif first not in crossed and here_cell != start_cell:
+    elif first not in crossed and (here_cell != start_cell or (door_pos and math.hypot(*(a - b for a, b in zip(S.state()["player"]["pos"][:2], door_pos[:2]))) > 20000)):
+        # (a player cannot have walked 20000+ units from the door: the position says the trip happened even when the cell name lags)
         # The walk crossed (a vanilla loading-screen trip does not report "travelled through a door"): the player is already
         # on the other side, and the stuck handling below (use_pick, a teleport to the doorstep) must not run there.
         walk = {**walk, "status": "crossed (cell changed, reported " + str(first) + ")"}
@@ -466,7 +470,8 @@ def judge_arrival(rec: dict[str, Any], label: str, here: dict[str, Any], source_
         else:
             rec["problems"].append(("wrong-cell", f"{label}: ended in {here['cell']} (interior={here['interior']}, worldspace {here['worldspace']})"))
         return
-    if not here["groundHit"] or here["dz"] < -300:
+    # (dz of -300..-700 with ground under the player is a slope or stairs on the 260-unit walk past the door, not a fall)
+    if not here["groundHit"] or here["dz"] < -700:
         rec["problems"].append(("fall-through", f"{label}: z {here['z']} vs marker {here['expectedZ']} (dz {here['dz']}), ground under the player: {here['ground']}"))
     elif here["dz"] > 600:
         rec["problems"].append(("wrong-cell", f"{label}: z {here['z']} is {here['dz']} above the marker"))
