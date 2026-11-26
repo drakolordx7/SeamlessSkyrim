@@ -167,6 +167,11 @@ Found porting the plugin; each was checked in the code of both.
   layer (15): a door made walkable stops the ray, not the player. A ray started on a surface
   misses it. A house's own collision can close its doorway 2 units behind the door's back face
   (Sadri's Used Wares, Windhelm).
+- **The character controller stops about 28 units short of a wall.** A house's entry piece that
+  closes its doorway 14 units in front of the door's centre (Whiterun's Ysolda's, Heimskr's, Olava's
+  houses and the Stables, walking out) holds the player 42 units short of the plane, so a passage
+  opened only from 25 units (`Approach`'s `kPassageOpenDepth`) never opened. A ray ahead of the
+  player (`blockedAhead`) widens the reach to 80.
 - **Line of sight:** ID 37761 (observer, target, mode), called by detection and combat (IDs 39639,
   39640, 41246, among twelve callers). ID 53829 (`HasLineOfSight`) only dispatches to it.
 - **Conditions:** `GetInWorldspace` is ID 21475 and compares exactly. Conditions run through the

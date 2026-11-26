@@ -97,6 +97,21 @@ namespace Core::Crossing
 		return std::abs(offset.x * a_doorway.inward.y - offset.y * a_doorway.inward.x);
 	}
 
+	// A passage (what blocks the way in made non-collidable) is opened from kPassageOpenDepth in
+	// front of the doorway's plane, and closed again once the player is further back than
+	// kPassageCloseDepth.
+	inline constexpr float kPassageOpenDepth = 25.0f;
+	inline constexpr float kPassageCloseDepth = 45.0f;
+	// When a wall closes the doorway from the player's side, the character controller keeps its
+	// distance from it (about 28 units, a capsule's radius and skin): a wall 14 units in front of the
+	// plane (Ysolda's House in Whiterun) stops the player 42 short of it, never within
+	// kPassageOpenDepth, so the passage was never opened. With the player held by such a wall
+	// (Approach::blockedAhead) it is opened from kBlockedReach, and closed again kBlockedCloseMargin
+	// further back. A wall is looked for within kStandOff ahead of the player: the stand-off with room to spare.
+	inline constexpr float kBlockedReach = 80.0f;
+	inline constexpr float kBlockedCloseMargin = 15.0f;
+	inline constexpr float kStandOff = 45.0f;
+
 	// What is measured each frame the portal is ready.
 	struct Approach
 	{
@@ -118,6 +133,10 @@ namespace Core::Crossing
 		bool  gate = false;  // the doorway is a city gate
 		float nearPlane = 0.0f;
 		bool  passageOpen = false;  // the building behind the door has a passage made through it
+		// Something solid stands within the character controller's stand-off ahead of the player,
+		// in the way to the doorway: a wall closing it from this side, which keeps the player from
+		// ever getting within the passage's usual reach (kBlockedReach).
+		bool blockedAhead = false;
 	};
 
 	struct Decision
@@ -145,6 +164,7 @@ namespace Core::Crossing
 
 	private:
 		float         passageCheck = 0.0f;
+		float         passageCloseDepth = kPassageCloseDepth;  // how far in front of the doorway an open passage is closed again
 		std::uint32_t lastDoor = 0;
 		float         lastDepth = 0.0f;
 	};

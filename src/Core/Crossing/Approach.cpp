@@ -51,13 +51,20 @@ namespace Core::Crossing
 		// player set down at the door's marker just in front of it would be held above the floor.
 		// Facing in and moving, not getting nearer: someone already stopped by the wall gets no nearer.
 		const bool walkingIn = a.playerMoving && std::sin(a.playerYaw) * doorway.inward.x + std::cos(a.playerYaw) * doorway.inward.y > 0.5f;
-		if (depth > -25.0f && side <= doorway.halfWidth + 20.0f && (walkingIn || a.passageOpen)) {
+		// (Blocked and not yet opened, or opened because of it and not closed yet: the reach holds
+		// while the passage is open, or it would be shut again as soon as it had taken the wall away.)
+		const bool  blocked = a.blockedAhead || (a.passageOpen && passageCloseDepth > kPassageCloseDepth);
+		const float reach = blocked ? kBlockedReach : kPassageOpenDepth;
+		if (depth > -reach && side <= doorway.halfWidth + 20.0f && (walkingIn || a.passageOpen)) {
 			// Seconds, not frames: counted per frame it looked again twice as often at 120 fps.
 			if (!a.passageOpen || (passageCheck -= a.delta) <= 0.0f) {
 				passageCheck = 1.0f / 6.0f;  // what the per-frame count came to at 60 fps
 				out.openPassage = true;
+				if (!a.passageOpen) {
+					passageCloseDepth = blocked ? kBlockedReach + kBlockedCloseMargin : kPassageCloseDepth;
+				}
 			}
-		} else if (a.passageOpen && depth < -45.0f) {
+		} else if (a.passageOpen && depth < -passageCloseDepth) {
 			out.closePassage = true;
 		}
 

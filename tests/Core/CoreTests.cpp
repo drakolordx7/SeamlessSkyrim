@@ -327,6 +327,26 @@ namespace
 		in.player.x = 500.0f;
 		d = state.Decide(in);
 		CHECK(!d.active && d.closePassage);
+		// A wall closing the doorway 14 units in front of its plane holds the player 42 short: the
+		// passage opens from there only when something blocks the way, and stays until well behind.
+		C::ApproachState held;
+		C::Approach      stuck = in;
+		stuck.passageOpen = false;
+		stuck.player = { 0.0f, -42.0f, 40.0f };
+		stuck.camera = { 0.0f, -60.0f, 100.0f };
+		stuck.playerYaw = 0.0f;
+		stuck.playerMoving = true;
+		CHECK(!held.Decide(stuck).openPassage);
+		stuck.blockedAhead = true;
+		CHECK(held.Decide(stuck).openPassage);
+		stuck.blockedAhead = false;  // the wall is out of the way now
+		stuck.passageOpen = true;
+		d = held.Decide(stuck);
+		CHECK(!d.closePassage);
+		stuck.player.y = -90.0f;
+		CHECK(!held.Decide(stuck).closePassage);
+		stuck.player.y = -96.0f;
+		CHECK(held.Decide(stuck).closePassage);
 		// Merged: crosses only well through the doorway.
 		C::ApproachState merged;
 		C::Approach inMerged = in;

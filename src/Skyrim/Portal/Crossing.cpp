@@ -82,6 +82,23 @@ namespace Portal::Crossing
 			return hit->Ref();
 		}
 
+		// Something of the player's own space (not a person, not the door held open) stands in the
+		// way within a_reach units ahead, towards the doorway, at waist height: a wall closing the
+		// doorway from this side (Core::Crossing::Approach::blockedAhead).
+		bool BlockedAhead(RE::PlayerCharacter* a_player, const Portal::Doors::Mapping& a_mapping, float a_reach)
+		{
+			auto* cell = a_player->GetParentCell();
+			auto* world = cell ? cell->GetbhkWorld() : nullptr;
+			if (!world) {
+				return false;
+			}
+			auto from = a_player->GetPosition();
+			from.z = a_mapping.sourceCenter.z - a_mapping.halfHeight + 70.0f;
+			float fraction = 1.0f;
+			auto* blocker = Blocker(world, from, from + a_mapping.inward * a_reach, fraction);
+			return blocker && blocker != a_player && !blocker->As<RE::Actor>() && !Portal::Doors::IsOpen(blocker->GetFormID());
+		}
+
 		void OpenPassage(RE::PlayerCharacter* a_player, const Portal::Doors::Mapping& a_mapping)
 		{
 			auto* cell = a_player->GetParentCell();
@@ -91,8 +108,11 @@ namespace Portal::Crossing
 			}
 			// Waist and knee height across the doorway, from just in front of it to a room's depth.
 			const float floor = a_mapping.sourceCenter.z - a_mapping.halfHeight;
+			// From the player if they stand further back, held by a wall closer to the doorway than
+			// the stand-off allows them to get (Approach's kBlockedReach): it stands between.
+			const float back = std::max(20.0f, -(a_player->GetPosition() - a_mapping.sourceCenter).Dot(a_mapping.inward));
 			for (const float height : { 70.0f, 30.0f }) {
-				auto from = a_mapping.sourceCenter - a_mapping.inward * 20.0f;
+				auto from = a_mapping.sourceCenter - a_mapping.inward * back;
 				auto to = a_mapping.sourceCenter + a_mapping.inward * 250.0f;
 				from.z = to.z = floor + height;
 				for (int attempt = 0; attempt < 8; ++attempt) {
@@ -328,6 +348,9 @@ namespace Portal::Crossing
 		const auto  cameraPosition = CameraPosition();
 		const auto  yaw = a_player->GetAngleZ();
 		const bool  firstPerson = !merged && playerCamera && playerCamera->IsInFirstPerson();
+		// Only where a held-back player could be: between the passage's usual reach and the blocked one.
+		const float depthNow = Core::Crossing::DepthOf(Doors::DoorwayOf(mapping), ToCore(position));
+		const bool  mayBeBlocked = passage.empty() && depthNow < -Core::Crossing::kPassageOpenDepth && depthNow > -Core::Crossing::kBlockedReach;
 		const auto  decision = approach.Decide({
 			.door = a_portal.sourceDoor,
 			.doorway = Doors::DoorwayOf(mapping),
@@ -342,6 +365,7 @@ namespace Portal::Crossing
 			.gate = firstPerson && Gates::IsGate(a_player->GetParentCell(), a_portal.cell),
 			.nearPlane = firstPerson ? NearPlane() : 0.0f,
 			.passageOpen = !passage.empty(),
+			.blockedAhead = mayBeBlocked && BlockedAhead(a_player, mapping, std::min(Core::Crossing::kStandOff, -depthNow)),
 		});
 		if (decision.closePassage && !passage.empty()) {
 			ClosePassage();
