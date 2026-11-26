@@ -616,6 +616,8 @@ namespace Portal::Schedule
 		out["doorwayFallback"] = scheduler->IsFallback(door.doorway);
 		if (otherKnown) {
 			out["tier"] = Name(scheduler->TierOf(other));
+			out["wanted"] = Name(scheduler->WantedOf(other));
+			out["blockedBy"] = Name(scheduler->BlockOf(other));
 			if (const auto decision = lastDecision.find(otherName); decision != lastDecision.end()) {
 				out["lastDecision"] = decision->second;
 			}
@@ -672,6 +674,11 @@ namespace Portal::Schedule
 			} else if (const auto decision = lastDecision.find(otherName); decision != lastDecision.end()) {
 				cause += ", last decision: " + decision->second;
 			}
+			if (scheduler->WantedOf(other) > tier) {
+				cause += std::format("; wanted {}, held back by: {}", Name(scheduler->WantedOf(other)), Name(scheduler->BlockOf(other)));
+			} else {
+				cause += std::format("; the scheduler wants {} only", Name(scheduler->WantedOf(other)));
+			}
 			if (headroomMs < 3.0f) {
 				cause += std::format("; frame headroom {:.1f} ms (a live room needs 3)", headroomMs);
 			}
@@ -690,8 +697,9 @@ namespace Portal::Schedule
 		json        tiers = json::array();
 		std::size_t fallbacks = 0;
 		for (SpaceIx space = 0; space < graph.SpaceCount(); ++space) {
-			if (space != playerSpace && scheduler->TierOf(space) != Tier::Cold) {
-				tiers.push_back({ { "space", graph.GetSpace(space).id }, { "tier", Name(scheduler->TierOf(space)) } });
+			if (space != playerSpace && (scheduler->TierOf(space) != Tier::Cold || scheduler->WantedOf(space) != Tier::Cold)) {
+				tiers.push_back({ { "space", graph.GetSpace(space).id }, { "tier", Name(scheduler->TierOf(space)) }, { "wanted", Name(scheduler->WantedOf(space)) },
+					{ "blockedBy", Name(scheduler->BlockOf(space)) } });
 			}
 		}
 		for (DoorwayIx way = 0; way < graph.DoorwayCount(); ++way) {

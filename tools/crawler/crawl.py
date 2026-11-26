@@ -330,6 +330,9 @@ def is_mine(status: dict[str, Any], ref: str, linked: str | None = None) -> bool
     return bool(ids & shown)
 
 
+SCAN_CODES_ESC = 0x01  # DirectInput: cancels the menu the bridge's keys reach
+
+
 def use_door(S: Session, rec: dict[str, Any], ref: str, linked: str, label: str) -> bool:
     """Activate `ref` and check at once that the plugin counts it as used (open). Returns True when
     the use blocked the game or a loading screen showed (vanilla loading: nothing seamless about it)."""
@@ -338,8 +341,22 @@ def use_door(S: Session, rec: dict[str, Any], ref: str, linked: str, label: str)
         # The player's use toggles: an open door would be shut by it.
         rec["activate"][label] = {"skipped": "already open", "counted": True}
         return False
+    # A door's lock is state of the game and changes under the crawl (a shop locks for the night): unlocked
+    # now, not from what the visit started with, or the use opens the lockpicking menu and the crawl sits in it.
+    if S.args.unlock and "locked" in (door_state(S, ref).get("reason") or ""):
+        S.call("console", command="unlock", ref=ref)
+        rec["notes"].append(f"{label}: the door was locked again: unlocked with the console")
     result = S.call("activate", ref=ref, open=True)
     rec["activate"][label] = result
+    time.sleep(0.5)
+    if S.state().get("lockpicking"):
+        # Got in anyway (a lock set between the look and the use): out of the menu, unlocked, used again.
+        S.call("key", code=SCAN_CODES_ESC)
+        time.sleep(0.5)
+        S.call("console", command="unlock", ref=ref)
+        rec["notes"].append(f"{label}: the lockpicking menu opened: closed, door unlocked, used again")
+        result = S.call("activate", ref=ref, open=True)
+        rec["activate"][label] = result
     # The plugin registers the use a frame or two later (its own thread): poll for it.
     saw_loading, counted = False, False
     deadline = time.monotonic() + 3.0

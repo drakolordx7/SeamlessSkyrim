@@ -95,6 +95,8 @@ namespace Core::Crossing
 	struct Timeouts
 	{
 		// Seconds a phase may wait on the adapter or the player before the crossing gives up.
+		// Prewarm and open only count once the player waits in the doorway for the way (the wait
+		// before that holds nobody up and is no failure).
 		float prewarm = 6.0f;    // then Fallback
 		float open = 3.0f;       // then Fallback
 		float commit = 15.0f;    // the player lingers at the door: then Idle (not a failure)

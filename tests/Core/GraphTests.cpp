@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "Core/Crossing/Sequence.h"
+#include <sstream>
 #include "Core/Graph/SpaceGraph.h"
 #include "Core/Graph/Tiers.h"
 #include "GraphTests.h"
@@ -789,10 +790,21 @@ namespace
 
 	void CrossingFallbackAndAbort()
 	{
-		// Prewarm does not finish: the engine's own load, with its cover, never a hang.
+		// The space behind the door is slow to come (a big cell, a save just taken) and nobody waits for it:
+		// the preparation goes on, no failure however long it takes.
 		Sequence seq;
 		(void)seq.Handle(Begin());
 		(void)seq.Handle({ EventKind::Near });
+		CHECK(seq.Tick(5.0f).empty() && seq.Tick(60.0f).empty() && seq.GetPhase() == Phase::Prewarm);
+		CHECK(Has(seq.Handle({ EventKind::Prewarmed }), ActionKind::OpenDoor) && seq.Tick(60.0f).empty() && seq.GetPhase() == Phase::Open);
+		(void)seq.Handle({ EventKind::Abort });
+
+		// The player in the doorway waits for it and it does not come: the engine's own load, with its cover,
+		// never a hang. The wait counts from when they got there.
+		(void)seq.Handle(Begin());
+		(void)seq.Handle({ EventKind::Near });
+		CHECK(seq.Tick(30.0f).empty());
+		(void)seq.Handle({ EventKind::AtThreshold });
 		CHECK(seq.Tick(5.0f).empty() && seq.GetPhase() == Phase::Prewarm);
 		const auto fallback = seq.Tick(1.5f);
 		CHECK(seq.GetPhase() == Phase::Fallback && Has(fallback, ActionKind::CancelPrewarm) && Has(fallback, ActionKind::VanillaDoor) && Has(fallback, ActionKind::StartCover));
@@ -882,10 +894,69 @@ namespace
 		CHECK(!NextAttach(none, false, 100.0f, 500.0f, config));
 	}
 
+
+	void ProbeWinterhold()
+	{
+		if (!std::getenv("SEAMLESS_PROBE")) {
+			return;
+		}
+		const auto path = CensusPath();
+		std::ifstream file(path);
+		const auto census = nlohmann::json::parse(file);
+		auto f = FromCensus(census);
+		for (auto& d : f.doors) {
+			d.locked = d.scripted = d.baseScripted = false;
+		}
+		const auto g = SpaceGraph::Build(f.spaces, f.doors);
+		const auto tamriel = g.FindSpace("worldspace:Skyrim.esm:00003C");
+		SchedulerConfig config;
+		config.maxLive = 1;
+		config.maxLoaded = 2;
+		config.liveReach = 450.0f;
+		config.defaultCost = SpaceCost::ForPictures(128, 3);
+		std::stringstream ids(std::getenv("SEAMLESS_PROBE"));
+		std::string       target;
+		while (std::getline(ids, target, ',')) {
+			Walk walk(g, config);
+			walk.in.memoryBudgetMb = 640.0f;
+			walk.in.headroomMs = 28.0f;
+			const auto door = g.FindDoor(target);
+			const auto doorPos = g.GetDoor(door).pos;
+			const auto dir = Vec3{ std::cos(g.GetDoor(door).rot.z), std::sin(g.GetDoor(door).rot.z), 0 };
+			const auto space = g.GetSpace(g.GetDoor(door).space).id;
+			walk.in.playerSpace = g.FindSpace(space);
+			std::printf("== %s in %s\n", target.c_str(), space.c_str());
+			const auto dump = [&](const char* a_label) {
+				std::printf("  %s", a_label);
+				for (SpaceIx sp = 0; sp < g.SpaceCount(); ++sp) {
+					if (sp != walk.in.playerSpace && (walk.scheduler.TierOf(sp) != Tier::Cold || walk.scheduler.WantedOf(sp) != Tier::Cold)) {
+						std::printf(" [%s %s>%s %s]", g.GetSpace(sp).id.substr(g.GetSpace(sp).id.size() - 6).c_str(), Name(walk.scheduler.TierOf(sp)), Name(walk.scheduler.WantedOf(sp)), Name(walk.scheduler.BlockOf(sp)));
+					}
+				}
+				std::printf(" mem=%.0f\n", walk.scheduler.MemoryMb());
+			};
+			// the crawler: 6 m in front, door shut, 10 s; then 150 units, the door open, 8 s
+			walk.in.position = doorPos + dir * 446.0f;
+			for (int sec = 0; sec < 10; ++sec) {
+				walk.Stand(1.0f);
+				if (sec == 0 || sec == 9) {
+					dump(sec == 0 ? "6m t=1 " : "6m t=10");
+				}
+			}
+			walk.in.position = doorPos + dir * 150.0f;
+			walk.Open(target);
+			for (int sec = 0; sec < 8; ++sec) {
+				walk.Stand(1.0f);
+				dump(("150 t=" + std::to_string(sec + 1)).c_str());
+			}
+		}
+	}
+
 int RunGraphTests()
 {
 	Run("graph from a fixture: doorways, neighbours, paths, radius", GraphFixture);
 	Run("graph from the door census (skipped without the file)", CensusGraph);
+	Run("probe", ProbeWinterhold);
 	Run("scheduler: walking up promotes one tier at a time", SchedulerApproach);
 	Run("scheduler: a shut door is not live", SchedulerCloseDoorNotLive);
 	Run("scheduler: walking away demotes past the hysteresis", SchedulerWalkAway);

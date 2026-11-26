@@ -27,6 +27,7 @@ namespace
             { "mainMenu", ui && ui->IsMenuOpen(RE::MainMenu::MENU_NAME) },
             { "loading", ui && ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME) },
             { "console", ui && ui->IsMenuOpen(RE::Console::MENU_NAME) },
+            { "lockpicking", ui && ui->IsMenuOpen(RE::LockpickingMenu::MENU_NAME) },
             { "paused", ui && ui->GameIsPaused() },
             { "walk", FrameHooks::WalkStatus() },
 		};

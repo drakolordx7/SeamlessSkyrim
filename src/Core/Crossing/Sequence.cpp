@@ -56,8 +56,10 @@ namespace Core::Crossing
 			if (phase == Phase::Commit) {
 				BeginCross(out);
 			} else if (phase == Phase::Approach || phase == Phase::Prewarm || phase == Phase::Open) {
-				// Walked up faster than the way was made ready: crosses as soon as it is.
+				// Walked up faster than the way was made ready: crosses as soon as it is. The wait the
+				// timeouts guard starts now, not when the space was first asked for.
 				pendingCross = true;
+				elapsed = 0.0f;
 			}
 			break;
 		case EventKind::Crossed:
@@ -103,13 +105,16 @@ namespace Core::Crossing
 		std::vector<Action> out;
 		elapsed += a_delta;
 		switch (phase) {
+		// Preparing the way holds nobody up: a player standing at a door whose space is still loading
+		// (a big cell, a save just taken) can use it the engine's way, and the way is ready for the
+		// next one. Only a player waiting in the doorway for it (pendingCross) is given up on.
 		case Phase::Prewarm:
-			if (elapsed >= timeouts.prewarm) {
+			if (pendingCross && elapsed >= timeouts.prewarm) {
 				FallBack(out);
 			}
 			break;
 		case Phase::Open:
-			if (elapsed >= timeouts.open) {
+			if (pendingCross && elapsed >= timeouts.open) {
 				FallBack(out);
 			}
 			break;

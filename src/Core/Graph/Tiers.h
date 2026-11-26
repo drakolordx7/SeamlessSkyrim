@@ -142,6 +142,23 @@ namespace Core::Graph
 		Headroom,       // no frame time to spare for a live space
 	};
 
+	// What kept a space from the tier the last tick wanted for it.
+	enum class Block : std::uint8_t
+	{
+		None,
+		Retry,     // an attach failed a few seconds ago
+		Reattach,  // let go a few seconds ago
+		Memory,    // the next tier does not fit the budget
+		Headroom,  // no frame time for an attach
+		AttachRate,  // another space was attached this moment
+	};
+
+	[[nodiscard]] constexpr const char* Name(Block a_block)
+	{
+		constexpr const char* names[] = { "none", "retry cooldown", "let go a moment ago", "memory budget", "no frame time to attach", "another attach just ran" };
+		return names[static_cast<int>(a_block)];
+	}
+
 	struct TierChange
 	{
 		SpaceIx   space = kNoSpace;
@@ -167,6 +184,10 @@ namespace Core::Graph
 		// How likely the player is to take a space's door as of the last tick (lower is likelier,
 		// Selection::Rank of the predicted reach); FLT_MAX for a space no door of the player's leads to.
 		// The order anything done ahead of the player goes in.
+		// The tier the last tick wanted for a space and what kept it from getting there (Tier::Cold, None for a space no door
+		// of the player's leads to).
+		[[nodiscard]] Tier  WantedOf(SpaceIx a_space) const { return wanted[a_space]; }
+		[[nodiscard]] Block BlockOf(SpaceIx a_space) const { return blocks[a_space]; }
 		[[nodiscard]] float RankOf(SpaceIx a_space) const { return a_space < ranks.size() ? ranks[a_space] : 3.4e38f; }
 
 		// The adapter could not get a space to a tier: it holds a_reached instead (lower than put), and
@@ -204,6 +225,8 @@ namespace Core::Graph
 		std::vector<bool>      blocked;         // by door, set during a tick
 		std::vector<int>       candidateOf;     // by space, -1 outside a tick
 		std::vector<float>     ranks;           // by space, as of the last tick
+		std::vector<Tier>      wanted;          // by space, as of the last tick
+		std::vector<Block>     blocks;          // by space, as of the last tick
 		float                  attachTimer = 0.0f;
 		float                  memoryMb = 0.0f;
 	};

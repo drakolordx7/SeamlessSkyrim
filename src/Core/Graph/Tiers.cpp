@@ -73,7 +73,9 @@ namespace Core::Graph
 		doorUsed(a_graph.DoorCount(), false),
 		blocked(a_graph.DoorCount(), false),
 		candidateOf(a_graph.SpaceCount(), -1),
-		ranks(a_graph.SpaceCount(), FLT_MAX)
+		ranks(a_graph.SpaceCount(), FLT_MAX),
+		wanted(a_graph.SpaceCount(), Tier::Cold),
+		blocks(a_graph.SpaceCount(), Block::None)
 	{}
 
 	Tier TierScheduler::CapOf(DoorwayIx a_doorway) const
@@ -156,6 +158,8 @@ namespace Core::Graph
 		blocked.assign(a_new.DoorCount(), false);
 		candidateOf.assign(a_new.SpaceCount(), -1);
 		ranks.assign(a_new.SpaceCount(), FLT_MAX);
+		wanted.assign(a_new.SpaceCount(), Tier::Cold);
+		blocks.assign(a_new.SpaceCount(), Block::None);
 	}
 
 	std::vector<TierChange> TierScheduler::Tick(const Inputs& a_in)
@@ -250,6 +254,8 @@ namespace Core::Graph
 		}
 
 		std::ranges::fill(ranks, FLT_MAX);
+		std::ranges::fill(wanted, Tier::Cold);
+		std::ranges::fill(blocks, Block::None);
 		for (const auto& c : candidates) {
 			ranks[c.space] = c.rank;
 		}
@@ -343,6 +349,10 @@ namespace Core::Graph
 			worst->limit = Reason::Budget;
 		}
 
+		for (const auto& c : candidates) {
+			wanted[c.space] = c.want;
+		}
+
 		// ---- carry it out: the player's space, then what lets go, then what is promoted one tier at a time
 		const auto change = [&](SpaceIx a_space, Tier a_to, Reason a_reason, DoorwayIx a_via, float a_rank) {
 			changes.push_back({ a_space, tiers[a_space], a_to, a_reason, a_via, a_rank });
@@ -388,21 +398,33 @@ namespace Core::Graph
 		for (const int i : order) {
 			const auto& c = candidates[i];
 			const auto  at = tiers[c.space];
-			if (c.want <= at || retryCooldown[c.space] > 0.0f) {
+			if (c.want <= at) {
+				continue;
+			}
+			auto& block = blocks[c.space];
+			if (retryCooldown[c.space] > 0.0f) {
+				block = Block::Retry;
 				continue;
 			}
 			const auto  next = Next(at);
 			if (next == Tier::LoadedPaused && releasedFor[c.space] < config.reattachSeconds) {
+				block = Block::Reattach;
 				continue;
 			}
 			const auto& cost = CostOf(a_in, c.space);
 			const float delta = cost.Mb(next) - cost.Mb(at);
 			if (used + delta > a_in.memoryBudgetMb) {
+				block = Block::Memory;
 				continue;
 			}
 			if (next == Tier::LoadedPaused) {
 				// One attach at a time, and only with frame time to spare for it.
-				if (attachTimer > 0.0f || a_in.headroomMs < cost.attachMs) {
+				if (a_in.headroomMs < cost.attachMs) {
+					block = Block::Headroom;
+					continue;
+				}
+				if (attachTimer > 0.0f) {
+					block = Block::AttachRate;
 					continue;
 				}
 				attachTimer = config.attachSeconds;
