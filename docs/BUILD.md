@@ -344,3 +344,9 @@ A door a use opened swings shut after 5 s with nobody in it, so open it right be
 teleport, not a walk: the plugin ignores steps faster than anyone can move (`kMaxSpeed`). A crawl that is
 `--keep-game` and then re-run in another process with `--attach` does not remember MO2's selected profile: check
 `ModOrganizer.ini` (`selected_profile`) afterwards.
+A door switched off in `[DoorPortal]` whose destination is an interior is taken by the engine with a loading screen;
+the crawler then walks towards the exterior door's coordinates inside the interior and the player falls (`fall-through`,
+z about -70000, no ground) after the `tier-low` that the config explains. That is the crawler, not the plugin: read
+the `in-first` walk (`distanceToTarget` in the 100000s) and the plugin log. A palace's pictures are only taken again (the
+`ahead:` attaches that push the player's room out of the interior buffer) when `SeamlessSkyrim_Doorways\*` of its doors
+are deleted from the MO2 overwrite folder.
