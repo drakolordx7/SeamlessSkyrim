@@ -518,11 +518,22 @@ namespace Spaces
 	int RemoteCell::HangOrphans(RE::TESObjectCELL* a_cell)
 	{
 		REL::Relocation<void (*)(RE::TESObjectCELL*, RE::TESObjectREFR*, bool, bool)> attachRef3D{ REL::RelocationID(18683, 19165) };
+		// The player's own cell is the engine's (UnhangAlwaysRender gives its pieces back unparented).
+		if (a_cell == RE::PlayerCharacter::GetSingleton()->GetParentCell()) {
+			return 0;
+		}
+		// What the graph keeps unparented on purpose: HangAlwaysRender's, or left alone in a cell it isn't called for.
+		auto*       loaded = a_cell->GetRuntimeData().loadedData;
+		const auto* graph = loaded ? loaded->portalGraph.get() : nullptr;
+		const auto  kept = [&](const RE::NiAVObject* a_object) {
+			const auto listed = [&](const auto& a_list) { return std::ranges::any_of(a_list, [&](const auto& a_child) { return a_child.get() == a_object; }); };
+			return graph && (listed(graph->alwaysRenderChildren) || listed(graph->pendingAlwaysRenderAdds) || listed(graph->pendingAlwaysRenderRemoves));
+		};
 		int hung = 0;
 		a_cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
 			// People are hung by the engine's own hook (EngineHooks.cpp).
 			auto* object = a_ref && !a_ref->As<RE::Actor>() ? a_ref->Get3D() : nullptr;
-			if (object && !object->parent) {
+			if (object && !object->parent && !kept(object)) {
 				attachRef3D(a_cell, a_ref, true, false);
 				++hung;
 			}
