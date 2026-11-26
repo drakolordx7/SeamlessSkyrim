@@ -232,6 +232,13 @@ Found porting the plugin; each was checked in the code of both.
   houses and the Stables, walking out) holds the player 42 units short of the plane, so a passage
   opened only from 25 units (`Approach`'s `kPassageOpenDepth`) never opened. A ray ahead of the
   player (`blockedAhead`) widens the reach to 80.
+- **A body on the non-collidable layer (15) can still hold the player.** A house's shell behind a Riften
+  door (000430A6's Bee and Barb, 042278's Haelga's Bunkhouse, ref 0003C5A1 / 0004FA54, a fixed body under a
+  `BSMultiBoundNode` root) kept the player 25 units short of it after `SetCollisionLayer(kNonCollidable)`: the
+  body's layer read 15 (ray hit, `hkpCollidable::GetCollisionLayer`), the player still stopped and slid along it. Taking
+  the body out of the Havok world (`Doors::Open` with `passable`, `RemoveFromCurrentWorld`) let them through. Why
+  the layer change worked for Whiterun's houses and not for these is not known. Riften's doors are recessed in a plank facade whose house shell stands
+  ~25-35 units behind the door's centre, so the player stops at depth -5..+10, short of the merged crossing's 15.
 - **NPCs shove a standing player.** An NPC (and its dog) walking through a doorway the player stands
   in moves them along its path, 17 units in under a second, with `PlayerCharacter::IsMoving()` false
   throughout (Whiterun, House of Clan Battle-Born's door: Lars and his puppy walking home just after

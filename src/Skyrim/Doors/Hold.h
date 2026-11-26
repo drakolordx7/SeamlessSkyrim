@@ -8,7 +8,8 @@ namespace Portal::Doors
 	// What an opener asks of the door.
 	//   hide: its panel not drawn (the leaves' shapes culled).
 	//   passable: its bodies out of the Havok world as well. The layer change leaves a city gate
-	//     solid, which is right only while there is nothing to walk through to.
+	//     and Riften's house shells solid for the player, which is right only while there is nothing
+	//     to walk through to.
 	//   solid: its collision kept (a doorway shown open before the space behind it is there).
 	struct OpenOptions
 	{

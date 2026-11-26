@@ -143,7 +143,10 @@ namespace Portal::Crossing
 						break;
 					}
 					logger::info("portal: doorway passage through {:08X} '{}'", blocker->GetFormID(), blocker->GetBaseObject() ? blocker->GetBaseObject()->GetName() : "");
-					Portal::Doors::Open(blocker, passage.emplace_back());
+					// Out of the Havok world, not just on the non-collidable layer: Riften's building
+					// shells (the Bee and Barb, Haelga's Bunkhouse) kept the player 25 units short of
+					// them after the layer change, the doorway never crossed.
+					Portal::Doors::Open(blocker, passage.emplace_back(), { .passable = true });
 				}
 			}
 		}
