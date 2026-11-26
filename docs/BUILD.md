@@ -297,3 +297,21 @@ before 1.7.99 differs):
   launch, then bridge `renderdoc_capture`. FSR frame generation breaks afterwards; relaunch.
 - Analysis scripts are in `tools/renderdoc/` and run in RenderDoc's own Python:
   `qrenderdoc --python script.py`, with `RDC_CAPTURE` and `RDC_OUT` set.
+
+## Door crawler classes (tools/crawler)
+
+`tools/crawler/crawl.py` judges each load door by the tier scheduler's design: nothing runs behind a shut door,
+so no portal at 6 m with the door shut is correct. Per door it records `door_status` and `portal_status.schedule`
+at 6 m (door shut), once opened, and the crossing both ways (`checks.front.tierReached`, `checks.open.tierReached`).
+Classes, worst first: `hang`, `setup-failed`, `wrong-cell`, `fall-through`, `timeout`,
+`fallback-loading-screen` (the crossing was the engine's door trip: a door that fell back, or a load that blocked
+the game), `not-live` (opened and near, the space never went live), `tier-low` (shut at 6 m, the space was held
+below loaded-and-paused), `scene-problem`, `visual-suspect`, `ok`. Marker doors are skipped.
+
+Traps: a door's lock is state of the saved game (the same door is locked in one launch and not in the next); the
+crawler unlocks a locked door with the console after looking at it (`--no-unlock` keeps it shut). The bridge's
+`activate` toggles like the player's use (an open door is shut by it): pass `{open: true}` to only ever open.
+A door a use opened swings shut after 5 s with nobody in it, so open it right before the walk. `move_to` is a
+teleport, not a walk: the plugin ignores steps faster than anyone can move (`kMaxSpeed`). A crawl that is
+`--keep-game` and then re-run in another process with `--attach` does not remember MO2's selected profile: check
+`ModOrganizer.ini` (`selected_profile`) afterwards.

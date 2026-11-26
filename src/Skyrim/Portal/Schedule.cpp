@@ -52,6 +52,7 @@ namespace Portal::Schedule
 		float                stateTimer = 0.0f;
 		SpaceIx              stateSpace = kNoSpace;
 		std::vector<DoorIx>  openDoors;
+		std::vector<DoorIx>  usedDoors;
 		std::vector<DoorIx>  blockedDoors;
 
 		// The main thread's work in a frame from the player update to Present, smoothed (FrameEnded).
@@ -102,6 +103,7 @@ namespace Portal::Schedule
 		void RefreshDoorStates(const Core::Vec3& a_position)
 		{
 			openDoors.clear();
+			usedDoors.clear();
 			blockedDoors.clear();
 			const auto& graph = Graph::Get();
 			const float openReach = Selection::DoorOpenDistance() * 4.0f;  // a gate counts a quarter
@@ -122,6 +124,9 @@ namespace Portal::Schedule
 						// Set to stand open always: open for the scheduler before its space is shown, which Wanted waits for.
 						(forceNone && Portal::Doors::AlwaysOpen(Portal::Doors::CorrectionDoor(ref, linked)->GetFormID())))) {
 					openDoors.push_back(hit.door);
+					if (Portal::DoorUse::Used(form)) {
+						usedDoors.push_back(hit.door);
+					}
 				}
 			}
 		}
@@ -400,6 +405,7 @@ namespace Portal::Schedule
 				.heading = Selection::Heading(),
 				.velocity = velocity,
 				.openDoors = openDoors,
+				.usedDoors = usedDoors,
 				.blockedDoors = blockedDoors,
 				.headroomMs = headroomMs,
 				.memoryBudgetMb = static_cast<float>(memoryBudgetMb),

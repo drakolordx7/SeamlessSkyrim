@@ -153,3 +153,6 @@
   place, not moved to the doorway (`scene_check`): loaded inside The Drunken Huntsman
   (`SeamlessTestDrunkenHuntsmanInside`, 3 of 9 cells), walked into Warmaiden's
   (`warmaidens-back-door-walk-in`). Not looked at on screen.
+- Whiterun, Dragonsreach (`01A704` front door, `09A160` Jarl's Quarters): the crawler's straight walk from 6 m is stopped by the stairs and rails below the door and a teleport to the door's step doesn't end in the doorway either; not a scheduler fault (the old crawl timed out on both). Not looked into further: needs a real route to the door (`route_save`).
+- A room released while the engine's job threads update its actors crashed the game once (`bhkCharProxyController` null vtable in `Actor::UpdateMovement`, Jorrvaskr's NPCs, right after a different room was let go). Not reproduced since rooms are held 8 s and not let go and re-attached within 4 s (`kMinHoldSeconds`, `kReattachSeconds`), but a release while actors update is still unguarded.
+- Whiterun, the Underforge (`01A701`): `scene_check` reports "door 0006767E: 5 shape(s) hidden by no opener" inside.

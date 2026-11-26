@@ -112,6 +112,9 @@ namespace Core::Graph
 		Vec3    velocity;  // units per second
 		// Doors that are open now, in either space (the two ends of a doorway open together).
 		std::span<const DoorIx> openDoors;
+		// Of the open doors, the ones someone used (as against standing open: a city gate, a door set to open
+		// always): the door the player has just opened is shown ahead of a gate standing open nearer by reach.
+		std::span<const DoorIx> usedDoors;
 		// Doors that are only doors right now (locked shut, disabled, switched off by the player): a
 		// doorway with such an end is no way through, so nothing is held for it. Not a fact of the
 		// graph, which is built once: whether a door is locked changes.
@@ -188,6 +191,7 @@ namespace Core::Graph
 		std::vector<float>     releasedFor;     // by space: seconds since it was let go from T3 or above
 		std::vector<bool>      forced;          // by doorway
 		std::vector<bool>      open;            // by door, set during a tick
+		std::vector<bool>      doorUsed;           // by door, set during a tick
 		std::vector<bool>      blocked;         // by door, set during a tick
 		std::vector<int>       candidateOf;     // by space, -1 outside a tick
 		float                  attachTimer = 0.0f;

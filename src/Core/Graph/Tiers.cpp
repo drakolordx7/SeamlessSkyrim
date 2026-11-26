@@ -28,6 +28,7 @@ namespace Core::Graph
 			Tier      want = Tier::Cold;
 			Reason    limit = Reason::Approach;
 			bool      limited = false;
+			bool      used = false;       // an open door into it was used
 			float     liveRank = 0.0f;    // the rank as the choice of the live space sees it
 			float     loadedRank = 0.0f;  // and as the choice of the loaded ones does
 		};
@@ -69,6 +70,7 @@ namespace Core::Graph
 		releasedFor(a_graph.SpaceCount(), FLT_MAX),
 		forced(a_graph.DoorwayCount(), false),
 		open(a_graph.DoorCount(), false),
+		doorUsed(a_graph.DoorCount(), false),
 		blocked(a_graph.DoorCount(), false),
 		candidateOf(a_graph.SpaceCount(), -1)
 	{}
@@ -148,6 +150,7 @@ namespace Core::Graph
 		releasedFor = std::move(newReleased);
 		forced = std::move(newForced);
 		open.assign(a_new.DoorCount(), false);
+		doorUsed.assign(a_new.DoorCount(), false);
 		blocked.assign(a_new.DoorCount(), false);
 		candidateOf.assign(a_new.SpaceCount(), -1);
 	}
@@ -168,6 +171,9 @@ namespace Core::Graph
 		}
 		for (const auto door : a_in.openDoors) {
 			open[door] = true;
+		}
+		for (const auto door : a_in.usedDoors) {
+			doorUsed[door] = true;
 		}
 		for (const auto door : a_in.blockedDoors) {
 			blocked[door] = true;
@@ -234,6 +240,7 @@ namespace Core::Graph
 				c.predicted = std::min(c.predicted, predicted);
 				if (isOpen && cap == Tier::Live) {
 					c.openReach = std::min(c.openReach, reach);
+					c.used = c.used || doorUsed[doorIx] || (otherEnd != kNoDoor && doorUsed[otherEnd]);
 				}
 				c.cap = std::max(c.cap, cap);
 			}
@@ -260,7 +267,7 @@ namespace Core::Graph
 			}
 			c.want = std::min(t, c.cap);
 			// A space that holds the tier already is kept over a newcomer unless the newcomer is clearly likelier.
-			c.liveRank = c.rank - (c.current == Tier::Live ? Selection::kSwitchMargin : 0.0f);
+			c.liveRank = c.rank - (c.current == Tier::Live ? Selection::kSwitchMargin : 0.0f) - (c.used ? Selection::kUsedBonus : 0.0f);
 			c.loadedRank = c.rank - (c.current >= Tier::LoadedPaused ? Selection::kSwitchMargin : 0.0f);
 			if (c.want == Tier::Live) {
 				liveEligible.push_back(i);
@@ -402,6 +409,9 @@ namespace Core::Graph
 		}
 		for (const auto door : a_in.openDoors) {
 			open[door] = false;
+		}
+		for (const auto door : a_in.usedDoors) {
+			doorUsed[door] = false;
 		}
 		for (const auto door : a_in.blockedDoors) {
 			blocked[door] = false;

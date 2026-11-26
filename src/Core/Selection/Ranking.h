@@ -43,6 +43,9 @@ namespace Core::Selection
 	inline constexpr float kMaxSpeed = 1200.0f;
 	// A cell that failed to attach isn't tried again for this long.
 	inline constexpr float kRetryCooldown = 5.0f;
+	// A door someone used counts this much nearer for which space goes live: the door just opened wins over any
+	// other open door in reach, a city gate standing open included (which counts a quarter of its distance).
+	inline constexpr float kUsedBonus = 2000.0f;
 	// Half the switch margin: turning round between two doors equally far changes their order by
 	// twice this, which by itself must not swap what is loaded.
 	inline constexpr float kHeadingNudge = kSwitchMargin / 2.0f;

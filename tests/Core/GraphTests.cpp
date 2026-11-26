@@ -625,6 +625,20 @@ namespace
 		walk.in.heading = { 0, -1, 0 };
 		CHECK(walk.Stand(1.0f).empty() && walk.scheduler.TierOf(b) == Tier::Live);
 
+		// The door a player used wins over an open door that ranks nearer (a gate standing open): A is the nearer here,
+		// B was used.
+		Walk used(g);
+		used.in.playerSpace = g.FindSpace("street");
+		used.in.position = { 850, 150, 0 };
+		used.in.heading = { 0, -1, 0 };  // towards A
+		for (const auto* name : { "doorA", "doorB" }) {
+			used.Open(name);
+		}
+		const std::vector<DoorIx> usedB{ g.FindDoor("doorB") };
+		used.in.usedDoors = usedB;
+		used.Stand(6.0f);
+		CHECK(used.scheduler.TierOf(b) == Tier::Live && used.scheduler.TierOf(a) == Tier::LoadedPaused);
+
 		// maxLive 2: two
 		SchedulerConfig two;
 		two.maxLive = 2;
