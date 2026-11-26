@@ -162,7 +162,7 @@ void ExposureBudgetAndFiles()
 		CHECK(P::Files::Valid(layered, 7, 1024, 1024) && P::Files::TexelBytes(layered) == P::Compress::PictureBytes(668, 512) * 3);
 		layered.layers = 4;
 		CHECK(!P::Files::Valid(layered, 7, 1024, 1024));
-		CHECK(P::kVersion == 7);
+		CHECK(P::kVersion == 8);
 	}
 
 	// The image tier's size: the doorway at the size set, no extra density.

@@ -1176,7 +1176,16 @@ namespace Render::PortalPass
 		if (background) {
 			DrawBackground(*background);
 		}
-		ClipAtFarDoor(mapping, linked);
+		// A capture is cut at the door by its near plane (SetNearPlane) and needs no clip: the clip's
+		// geometry-shader draws of the lighting shader came out flat grey (0.5, depth written) in a
+		// capture, for every shape the plane's bounding-sphere test called crossing, which is all of
+		// a room's shell within a couple of hundred units of the door: the picture had no walls, floor
+		// or ceiling beside the doorway, and a door seen at an angle shows exactly those.
+		if (capturing) {
+			farDoorClip.reset();
+		} else {
+			ClipAtFarDoor(mapping, linked);
+		}
 		Native::SetPortalPass(true);
 
 		portalFrame += 1;

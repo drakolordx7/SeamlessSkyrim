@@ -195,7 +195,7 @@ namespace Bridge
 					 out.push_back(std::move(door));
 				 }
 				 return json{ { "doors", out }, { "files", Pictures::Cache::Count().inMemory + Pictures::Cache::Count().layered }, { "bytesOnDisk", total }, { "ahead", Portal::Ahead::Status() },
-					 { "format", "BC6H colour with mips + R16F distance, version 7" } };
+					 { "format", "BC6H colour with mips + R16F distance, version 8" } };
 			 } } },
 			// Takes the pictures of one of the player's space's doors from its space held out of sight, as the
 			// scheduler's tiers ask for them: {ref} or {plugin, id}; {retake: true} drops what the door has for
