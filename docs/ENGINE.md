@@ -421,3 +421,19 @@ Found porting the plugin; each was checked in the code of both.
   - The low 12 bits of `nodeState` hold one nibble per layer: terrain 0x00F, objects 0x0F0,
     trees 0xF00. The values are 2 none, 4 shown, 8 split into the children.
   - Object layers live on the level 16, 8 and 4 nodes, so a level-32 node without one is normal.
+
+## Doorway pictures: compression and capture from a space out of sight
+
+- **BC6H on the GPU:** the colour is compressed by a compute shader (`Pictures/Gpu.cpp`, `kCompressCode`; BC6H mode 11,
+  `Core/Pictures/Bc6h.cpp` is the same maths) into a `R32G32B32A32_UINT` texture one texel a block, then
+  `CopySubresourceRegion` with a box in blocks into the BC6H texture's mip (the sizes are whole blocks: `SizeFor` and
+  `SizeOf` round up). Checked on WARP: the hardware decode of the blocks agrees with the source (mean error ~1%), and the
+  GPU's blocks equal the Core encoder's byte for byte. The distance behind the doorway is a separate `R16_FLOAT` texture
+  written by the capture pass's second render target; the march `Load`s it, a BC texture would blur a wall into a chair.
+- **A pass for a space nobody looks at:** `PortalPass::DrawAhead` draws a kept (or briefly attached) space with the picture's
+  capture camera into the hidden target set. It registers that space's light scene in slot 3 for the draw and puts the shown
+  one back, swaps in an accumulator of its own (a new generation made a fresh one and kept the old for good), and passes the
+  space's own cells (actors hidden for the capture). `LightOcclusion::SetWorld` is set to that space's world for the pass.
+- **Nothing runs in a space attached for a picture:** `RemoteCell::AttachForPicture` skips `MoveToHigh` (the high process is what
+  runs an NPC's AI), never steps the Havok world, skips `AnimateReferences` and `CheckLooseItems`. A kept (T3) space still gets
+  its NPCs raised at the attach (existing behaviour, see KNOWN-ISSUES).

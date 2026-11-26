@@ -159,10 +159,10 @@ void ExposureBudgetAndFiles()
 		layered.height = 512;
 		layered.layers = 3;
 		layered.loadOrder = 7;
-		CHECK(P::Files::Valid(layered, 7, 1024, 1024) && P::Files::TexelBytes(layered) == 668ull * 512 * 8 * 3);
+		CHECK(P::Files::Valid(layered, 7, 1024, 1024) && P::Files::TexelBytes(layered) == P::Compress::PictureBytes(668, 512) * 3);
 		layered.layers = 4;
 		CHECK(!P::Files::Valid(layered, 7, 1024, 1024));
-		CHECK(P::kVersion == 6);
+		CHECK(P::kVersion == 7);
 	}
 
 	// The image tier's size: the doorway at the size set, no extra density.
@@ -170,5 +170,79 @@ void ExposureBudgetAndFiles()
 		namespace C = P::Camera;
 		const auto [width, height] = C::SizeFor(C::kRoomCamera.extent, 512, C::kNarrowest);
 		CHECK(height == 896 && width == 1344);
+	}
+}
+
+// Block compression: the sizes it takes, and the colour compressor against the format's own decode.
+void CompressedPictures()
+{
+	namespace P = Core::Pictures;
+	namespace Z = Core::Pictures::Compress;
+	namespace B = Core::Pictures::Bc6h;
+
+	// BC6H is a byte a texel; the chain adds a third; the distances are two bytes a texel.
+	CHECK(Z::ColourLevelBytes(1344, 896, 0) == 336ull * 224 * 16);
+	CHECK(Z::MipCount(1344, 896) == 11 && Z::MipCount(668, 512) == 10 && Z::MipCount(1, 1) == 1);
+	CHECK(Z::ColourLevelBytes(1344, 896, 10) == 16);  // 1 x 1 is a block
+	CHECK(Z::ColourBytes(1344, 896) > 1344ull * 896 && Z::ColourBytes(1344, 896) < 1344ull * 896 * 4 / 3 + 4096);
+	CHECK(Z::DepthBytes(1344, 896) == 1344ull * 896 * 2);
+	// against the half-float RGBA with mips it replaced: under a third
+	CHECK(Z::PictureBytes(1344, 896) * 3 < 1344ull * 896 * 8 * 4 / 3);
+	CHECK(Z::PictureBytes(668, 512) * 3 < 668ull * 512 * 8 * 4 / 3);
+	// sizes are whole blocks
+	{
+		namespace C = P::Camera;
+		for (const int height : { 32, 100, 128, 516, 1024 }) {
+			const auto [w, h] = C::SizeFor(C::kRoomCamera.extent, height, C::kNarrowest);
+			const auto [lw, lh] = P::Layers::SizeOf(height);
+			const auto [dw, dh] = C::SizeFor(C::kDoorwayOnly, height, 1.3125f);
+			CHECK(w % 4 == 0 && h % 4 == 0 && lw % 4 == 0 && lh % 4 == 0 && dw % 4 == 0 && dh % 4 == 0);
+		}
+	}
+
+	// Half floats.
+	CHECK(B::HalfBits(1.0f) == 0x3C00 && B::HalfBits(0.5f) == 0x3800 && B::HalfBits(-3.0f) == 0 && B::HalfBits(1e9f) == 0x7BFF);
+	CHECK(B::HalfValue(0x3C00) == 1.0f && Near(B::HalfValue(B::HalfBits(0.1234f)), 0.1234f, 1e-4f));
+
+	// A block: a ramp of brightness and hue, a lamp among dim wall, and a flat colour. The decode is the
+	// format's (mode 11); it stays within a few percent of the half float, and no more.
+	const auto relative = [](const B::Texels& a_in, const B::Texels& a_out) {
+		float worst = 0.0f;
+		for (std::size_t t = 0; t < 16; ++t) {
+			for (std::size_t c = 0; c < 3; ++c) {
+				worst = std::max(worst, std::abs(a_out[t][c] - a_in[t][c]) / std::max(a_in[t][c], 0.02f));
+			}
+		}
+		return worst;
+	};
+	{
+		B::Texels ramp{};
+		for (std::size_t t = 0; t < 16; ++t) {
+			const float s = static_cast<float>(t) / 15.0f;
+			ramp[t] = { 0.2f + 3.0f * s, 0.15f + 1.8f * s, 0.1f + 0.7f * s };
+		}
+		const auto block = B::Encode(ramp);
+		CHECK((block.bytes[0] & 31) == 3);
+		// a straight ramp in linear light is a curve in the half float's bits, which the 16 steps follow within a few percent
+		CHECK(relative(ramp, B::Decode(block)) < 0.15f);
+	}
+	{
+		B::Texels lamp{};
+		for (std::size_t t = 0; t < 16; ++t) {
+			lamp[t] = { 0.30f, 0.22f, 0.15f };
+		}
+		lamp[5] = { 40.0f, 30.0f, 12.0f };
+		const auto out = B::Decode(B::Encode(lamp));
+		CHECK(Near(out[5][0] / 40.0f, 1.0f, 0.06f));
+		CHECK(Near(out[0][0], 0.30f, 0.30f * 0.35f));  // the format has 16 steps between the two: the wall is somewhere near
+	}
+	{
+		B::Texels flat{};
+		for (auto& t : flat) {
+			t = { 0.5f, 0.25f, 0.125f };
+		}
+		CHECK(relative(flat, B::Decode(B::Encode(flat))) < 0.04f);
+		B::Texels black{};
+		CHECK(B::Decode(B::Encode(black))[7][1] < 1e-3f);
 	}
 }

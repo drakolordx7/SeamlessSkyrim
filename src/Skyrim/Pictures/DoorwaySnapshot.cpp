@@ -177,19 +177,16 @@ namespace Pictures
 			constants.portal[3] = withCamera ? shape.back : 0.0f;
 			Gpu::Capture(context, constants, sceneView, static_cast<ID3D11ShaderResourceView*>(a_source.depth), width, height);
 		}
-		context->CopySubresourceRegion(picture.texture, 0, 0, 0, 0, Gpu::Target(), 0, nullptr);
-		context->GenerateMips(picture.view);
+		Gpu::Compress(context, picture.texture, picture.distance, 0);
 		picture.taken = now;
 		picture.diskTried = true;
 		picture.takenFrom = withCamera ? cameraPlace : frame.PlaceOf(eye);
 		picture.extent = extent;
 		picture.lightScale = std::max(a_source.lightScale, 0.01f);
-		D3D11_TEXTURE2D_DESC staging{ width, height, 1, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, { 1, 0 }, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0 };
-		ID3D11Texture2D*     copy = nullptr;
-		if (SUCCEEDED(device->CreateTexture2D(&staging, nullptr, &copy))) {
-			context->CopyResource(copy, Gpu::Target());
-			Cache::Queue({ .key = key, .staging = copy, .width = width, .height = height, .takenFrom = picture.takenFrom, .extent = extent, .lightScale = picture.lightScale, .taken = picture.taken });
-		}
+		picture.source = a_source.ahead ? Cache::Source::kAhead : Cache::Source::kVisit;
+		picture.takenAt = static_cast<std::uint32_t>(std::time(nullptr));
+		Cache::Queue(device, context, picture.texture, picture.distance,
+			{ .key = key, .source = picture.source, .takenAt = picture.takenAt, .width = width, .height = height, .takenFrom = picture.takenFrom, .extent = extent, .lightScale = picture.lightScale, .taken = picture.taken });
 		logger::info("doorway snapshot: {} taken ({}x{}, {})", key, width, height, withCamera ? "capture camera" : "the player's view");
 	}
 
@@ -256,25 +253,18 @@ namespace Pictures
 			constants.portal[3] = camera.toDoorway;
 			Gpu::Capture(context, constants, sceneView, static_cast<ID3D11ShaderResourceView*>(a_source.depth), width, height);
 		}
-		D3D11_TEXTURE2D_DESC made{};
-		entry.texture->GetDesc(&made);
-		context->CopySubresourceRegion(entry.texture, D3D11CalcSubresource(0, a_layer, made.MipLevels), 0, 0, 0, Gpu::Target(), 0, nullptr);
+		Gpu::Compress(context, entry.texture, entry.distance, static_cast<UINT>(a_layer));
 		entry.captured |= 1u << a_layer;
-		logger::info("doorway snapshot: {} depth image layer {}/{} taken ({}x{})", key, a_layer + 1, count, width, height);
+		logger::info("doorway snapshot: {} depth image layer {}/{} taken ({}x{}{})", key, a_layer + 1, count, width, height, a_source.ahead ? ", ahead" : "");
 		if (!entry.Complete()) {
 			return;
 		}
-		context->GenerateMips(entry.view);
 		entry.taken = std::chrono::steady_clock::now();
 		entry.lightScale = std::max(a_source.lightScale, 0.01f);
-		D3D11_TEXTURE2D_DESC staging{ width, height, 1, static_cast<UINT>(count), DXGI_FORMAT_R16G16B16A16_FLOAT, { 1, 0 }, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0 };
-		ID3D11Texture2D*     copy = nullptr;
-		if (SUCCEEDED(device->CreateTexture2D(&staging, nullptr, &copy))) {
-			for (int layer = 0; layer < count; ++layer) {
-				context->CopySubresourceRegion(copy, D3D11CalcSubresource(0, layer, 1), 0, 0, 0, entry.texture, D3D11CalcSubresource(0, layer, made.MipLevels), nullptr);
-			}
-			Cache::Queue({ .key = key, .staging = copy, .width = width, .height = height, .lightScale = entry.lightScale, .layers = count, .places = places, .taken = entry.taken });
-		}
+		entry.source = a_source.ahead ? Cache::Source::kAhead : Cache::Source::kVisit;
+		entry.takenAt = static_cast<std::uint32_t>(std::time(nullptr));
+		Cache::Queue(device, context, entry.texture, entry.distance,
+			{ .key = key, .source = entry.source, .takenAt = entry.takenAt, .width = width, .height = height, .lightScale = entry.lightScale, .layers = count, .places = places, .taken = entry.taken });
 	}
 
 	void Draw(const View& a_view, RE::FormID a_door, bool a_outdoors, bool a_gate, const Corners& a_corners, float a_alpha, const RE::NiColor& a_plain, const Adaptation& a_adaptation,
@@ -351,8 +341,8 @@ namespace Pictures
 				PutCorner(constants.layerPos[i], Layers::ViewAt(layers->places[i], axes.width, axes.height).position, 0.0f);
 			}
 		}
-		Gpu::Draw(context, constants, vertices, { sceneTarget, motionTarget, depthView, a_view.width, a_view.height }, picture ? picture->view : nullptr, layers ? layers->view : nullptr,
-			a_alpha >= 0.999f);
+		Gpu::Draw(context, constants, vertices, { sceneTarget, motionTarget, depthView, a_view.width, a_view.height },
+			{ picture ? picture->view : nullptr, picture ? picture->distanceView : nullptr, layers ? layers->view : nullptr, layers ? layers->distanceView : nullptr }, a_alpha >= 0.999f);
 	}
 
 	void Flush()

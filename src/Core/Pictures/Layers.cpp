@@ -1,5 +1,7 @@
 #include "Core/Pictures/Layers.h"
 
+#include "Core/Pictures/Compress.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -27,7 +29,7 @@ namespace Core::Pictures::Layers
 	{
 		const float aspect = (kS1 - kS0) / (kT1 - kT0);
 		const auto  width = static_cast<std::uint32_t>(std::lround(a_height * aspect / 4.0f)) * 4u;
-		return { width, static_cast<std::uint32_t>(a_height) };
+		return { width, Compress::RoundUp(static_cast<std::uint32_t>(a_height)) };
 	}
 
 	Axes::Axes(const Camera::Frame& a_frame) :

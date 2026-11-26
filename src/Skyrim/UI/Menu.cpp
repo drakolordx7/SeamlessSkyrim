@@ -37,14 +37,14 @@ namespace
 	double RoomPictureBytes(int a_height)
 	{
 		const auto [width, height] = Pictures::Camera::SizeFor(Pictures::Camera::kRoomCamera.extent, a_height, Pictures::Camera::kNarrowest);
-		return static_cast<double>(width) * height * Pictures::Camera::kBytesPerTexel;
+		return static_cast<double>(Core::Pictures::Compress::PictureBytes(width, height));
 	}
 
 	// What one view of a door's depth image takes on disk at this doorway height.
 	double DepthViewBytes(int a_height)
 	{
 		const auto [width, height] = Pictures::Layers::SizeOf(a_height);
-		return static_cast<double>(width) * height * Pictures::Camera::kBytesPerTexel;
+		return static_cast<double>(Core::Pictures::Compress::PictureBytes(width, height));
 	}
 
 	// How many times fewer texels a doorway-only picture (a door to the outdoors) has than a room's.

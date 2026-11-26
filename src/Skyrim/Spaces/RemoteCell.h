@@ -23,6 +23,14 @@ namespace Spaces
 		// through the portal pass. a_show: its light scene is the one drawn (Show) from the start;
 		// otherwise it is kept attached out of sight until shown.
 		bool Attach(RE::TESObjectCELL* a_cell, bool a_toMerge = false, bool a_show = true);
+		// Main thread: attached out of sight for its doorway pictures alone (Portal/Ahead), and let go
+		// when they are taken. Vanilla behaviour: nothing in it runs. Its people stay in the process the
+		// engine put them in (not raised to the high process, which is what runs their AI), its Havok
+		// world is never stepped (not even while it loads), its references' animation graphs are not
+		// run, and no loose item is touched. Only what a picture needs happens: the engine's own load of
+		// the cells' 3D, the lights taken in, the references faded in. Interiors only.
+		bool AttachForPicture(RE::TESObjectCELL* a_cell);
+		[[nodiscard]] bool ForPicture() const { return forPicture; }
 		// Main thread: this space's light scene becomes the one drawn and lit (Portal::LightScene::Show).
 		void Show();
 		[[nodiscard]] bool Shown() const { return Portal::LightScene::Shown(scene.get()); }
@@ -175,6 +183,7 @@ namespace Spaces
 		std::uint32_t                              generation = 0;
 		float                                      quietRequired = kQuietSecondsRequired;
 		bool                                       paused = false;
+		bool                                       forPicture = false;  // AttachForPicture
 
 		// Readiness, per attach.
 		int   adoptedLights = 0;

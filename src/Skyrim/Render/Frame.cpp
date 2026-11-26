@@ -4,6 +4,7 @@
 #include "Skyrim/Engine/Hooks.h"
 #include "Skyrim/Pictures/Composite.h"
 #include "Skyrim/Pictures/DoorwayPictures.h"
+#include "Skyrim/Portal/Ahead.h"
 #include "Skyrim/Portal/CameraLimit.h"
 #include "Skyrim/Portal/LightScene.h"
 #include "Skyrim/Portal/MergedCull.h"
@@ -340,8 +341,12 @@ namespace Render::Frame
 				}
 				if (!a_menuOpen) {
 					// Merged, the real space is drawn with the world itself. A pass that still met freed
-					// render passes has parts of the view missing.
-					Pictures::UpdateDoorwayPictures(Portal::Manager::Merged() || (composited && PortalPass::FreedPassesThisSubmit() == 0));
+					// render passes has parts of the view missing. Said before the pass for a picture of
+					// a space out of sight, which counts its own.
+					const bool realShown = Portal::Manager::Merged() || (composited && PortalPass::FreedPassesThisSubmit() == 0);
+					// After the shown portal's pass and before what was drawn with a capture camera is taken.
+					Portal::Ahead::DrawPass();
+					Pictures::UpdateDoorwayPictures(realShown);
 				}
 				if (portal) {
 					std::scoped_lock lock(stateLock);

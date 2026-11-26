@@ -292,9 +292,10 @@ namespace Spaces
 		held.push_back(a_cell);
 
 		// High process so the engine runs full AI, animation and movement for its NPCs; it does
-		// not demote them again while the cell stays attached.
+		// not demote them again while the cell stays attached. Not for a space held for its pictures:
+		// nothing of it runs.
 		for (auto* actor : ActorsIn(a_cell)) {
-			if (!actor->IsDead()) {
+			if (!forPicture && !actor->IsDead()) {
 				actor->MoveToHigh();
 			}
 		}
@@ -306,6 +307,16 @@ namespace Spaces
 		REL::Relocation<void (*)(RE::TESObjectCELL*, bool)> attachRefLights{ REL::RelocationID(18590, 19059) };
 		attachRefLights(a_cell, true);
 		adoptedLights += Portal::LightScene::Adopt(scene.get(), Cell3D(a_cell));
+	}
+
+	bool RemoteCell::AttachForPicture(RE::TESObjectCELL* a_cell)
+	{
+		forPicture = a_cell->IsInteriorCell();
+		if (!forPicture || !Attach(a_cell, false, false)) {
+			forPicture = false;
+			return false;
+		}
+		return true;
 	}
 
 	bool RemoteCell::Attach(RE::TESObjectCELL* a_cell, bool a_toMerge, bool a_show)
@@ -616,6 +627,7 @@ namespace Spaces
 		}
 		logger::info("portal: released {} (+{} neighbouring cells, {} handed over attached)", Probe::DescribeCell(cells.front()), cells.size() - 1, Spaces::WalkOut::HandedOver().size());
 		cells.clear();
+		forPicture = false;
 		roundNext = 0;
 		roundPersistent.clear();
 		fadeForced = false;
@@ -693,7 +705,7 @@ namespace Spaces
 			ready = true;
 			logger::info("portal: remote cell ready");
 		}
-		if (ready && (readySeconds += a_delta) > 2.0f && !std::exchange(itemsChecked, true)) {
+		if (ready && (readySeconds += a_delta) > 2.0f && !forPicture && !std::exchange(itemsChecked, true)) {
 			CheckLooseItems();
 		}
 		int late = 0;
@@ -736,7 +748,9 @@ namespace Spaces
 					ShowLand(cell);
 				}
 			}
-			AnimateReferences(cell);
+			if (!forPicture) {
+				AnimateReferences(cell);
+			}
 			// A street merged into an interior hangs in the world scene, and its lights were adopted
 			// before the merge. There the light update queues a new light in the world's light scene
 			// every frame; adopted here, the world scene's queued removal of the one before crashed
@@ -778,7 +792,7 @@ namespace Spaces
 		if (ready && readySeconds > 1.0f && (prewarmModel || prewarmLand || !prewarmCells.empty())) {
 			Prewarm();
 		}
-		StepWorld(stepEnabled && (primary->IsInteriorCell() || (Spaces::tuning.stepExterior && groundFound)) ? primary->GetbhkWorld() : nullptr);
+		StepWorld(stepEnabled && !forPicture && (primary->IsInteriorCell() || (Spaces::tuning.stepExterior && groundFound)) ? primary->GetbhkWorld() : nullptr);
 	}
 
 	void RemoteCell::Prewarm()

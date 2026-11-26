@@ -10,6 +10,7 @@
 #include "Skyrim/Pictures/PictureSize.h"
 #include "Skyrim/Pictures/Tiers.h"
 #include "Skyrim/Plugin/Settings.h"
+#include "Skyrim/Portal/Ahead.h"
 #include "Skyrim/Portal/Crossing.h"
 #include "Skyrim/Doors/Hold.h"
 #include "Skyrim/Portal/MergedView.h"
@@ -199,6 +200,8 @@ namespace Portal::Schedule
 			bool               attached = false;
 			{
 				const Diag::Scope scope("attach kept");
+				// A space attached only for its pictures is let go first: the cell is the scheduler's now.
+				Ahead::LetGo(cell, "the scheduler keeps it");
 				attached = space.Attach(cell, MergedView::Mergeable(a_here, cell), false);
 			}
 			if (attached) {
@@ -412,6 +415,9 @@ namespace Portal::Schedule
 			};
 			Apply(scheduler->Tick(inputs), a_here);
 		}
+		if (!frozen) {
+			Ahead::Update(a_here, a_delta);
+		}
 		FindLive(a_player);
 		FindApproached(here);
 	}
@@ -481,6 +487,7 @@ namespace Portal::Schedule
 		while (!pictureDoors.empty()) {
 			CancelPictures(pictureDoors.back());
 		}
+		Ahead::ReleaseAll(a_reason);
 		scheduler->Reset();
 		live.reset();
 	}
@@ -511,6 +518,57 @@ namespace Portal::Schedule
 		if (const auto it = FindKept(a_cell); it != kept.end()) {
 			LetGo(it, a_why);
 		}
+	}
+
+	std::optional<AheadTarget> AheadTargetOf(RE::FormID a_door)
+	{
+		const auto& graph = Graph::Get();
+		const auto  ix = Graph::DoorOf(a_door);
+		if (ix == kNoDoor || ix >= graph.DoorCount()) {
+			return std::nullopt;
+		}
+		const auto& door = graph.GetDoor(ix);
+		if (door.space != playerSpace) {
+			return std::nullopt;
+		}
+		const auto& way = graph.GetDoorway(door.doorway);
+		const auto  other = way.Other(door.space);
+		if (other == kNoSpace || other == door.space || other >= graph.SpaceCount() || scheduler->IsFallback(door.doorway)) {
+			return std::nullopt;
+		}
+		const auto linkedIx = way.DoorIn(other);
+		if (linkedIx == kNoDoor) {
+			return std::nullopt;
+		}
+		AheadTarget target{ { a_door, Graph::IsWorld(other), way.kind == DoorKind::Gate }, Graph::DoorForm(linkedIx), other, scheduler->TierOf(other), scheduler->RankOf(other), nullptr, nullptr };
+		target.interior = Graph::IsWorld(other) ? nullptr : RE::TESForm::LookupByID<RE::TESObjectCELL>(Graph::SpaceForm(other));
+		for (auto& space : kept) {
+			if (Graph::FindSpaceOf(space.Cell()) == other) {
+				target.kept = &space;
+				break;
+			}
+		}
+		return target;
+	}
+
+	AheadConfig AheadBudget()
+	{
+		return MakeConfig().ahead;
+	}
+
+	float HeadroomMs()
+	{
+		return headroomMs;
+	}
+
+	bool Frozen()
+	{
+		return frozen;
+	}
+
+	float FreeMb()
+	{
+		return static_cast<float>(memoryBudgetMb) - scheduler->MemoryMb();
 	}
 
 	void FrameEnded()
@@ -643,6 +701,7 @@ namespace Portal::Schedule
 			{ "openDoors", openDoors.size() },
 			{ "blockedDoors", blockedDoors.size() },
 			{ "fallbackDoorways", fallbacks },
+			{ "ahead", Ahead::Status() },
 		};
 	}
 }

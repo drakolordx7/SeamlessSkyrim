@@ -1,5 +1,7 @@
 #include "Core/Pictures/FileFormat.h"
 
+#include "Core/Pictures/Compress.h"
+
 namespace Core::Pictures::Files
 {
 	bool Valid(const ImageHeader& a_header, std::uint64_t a_loadOrder, std::uint32_t a_widest, std::uint32_t a_highest)
@@ -16,11 +18,11 @@ namespace Core::Pictures::Files
 
 	std::uint64_t TexelBytes(const ImageHeader& a_header)
 	{
-		return std::uint64_t{ a_header.width } * a_header.height * Camera::kBytesPerTexel;
+		return Compress::PictureBytes(a_header.width, a_header.height);
 	}
 
 	std::uint64_t TexelBytes(const LayeredHeader& a_header)
 	{
-		return std::uint64_t{ a_header.width } * a_header.height * Camera::kBytesPerTexel * a_header.layers;
+		return Compress::PictureBytes(a_header.width, a_header.height) * a_header.layers;
 	}
 }

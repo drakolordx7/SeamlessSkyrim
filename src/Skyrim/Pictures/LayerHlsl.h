@@ -24,7 +24,8 @@ namespace Pictures::Hlsl
 	}
 
 	inline constexpr char kLayerMarch[] = R"(
-		Texture2DArray<float4> Layers : register(t1);
+		Texture2DArray<float4> Layers : register(t1);         // BC6H colour with its mips
+		Texture2DArray<float>  LayerDistance : register(t3);  // how far behind the doorway, R16_FLOAT
 
 		// 0: not in the layer's picture, 1: it sees past this point, 2: its surface is here, 3: hidden
 		// from it by a nearer surface (Layers::VoteOf).
@@ -39,7 +40,7 @@ namespace Pictures::Hlsl
 				return 0;
 			uv = float2((st.x - kS0) / (kS1 - kS0), 1 - (st.y - kT0) / (kT1 - kT0));
 			int2  texel = int2(min(uv * LayerInfo.yz, LayerInfo.yz - 1));
-			float stored = Layers.Load(int4(texel, layer, 0)).a;
+			float stored = LayerDistance.Load(int4(texel, layer, 0));
 			if (stored >= kNoSurface)
 				return 1;
 			float residual = rel.z - (stored - LayerPos[layer].z);
@@ -50,7 +51,7 @@ namespace Pictures::Hlsl
 		{
 			float3 rel = x - LayerPos[layer].xyz;
 			int2   texel = int2(min(uv * LayerInfo.yz, LayerInfo.yz - 1));
-			return abs(rel.z - (Layers.Load(int4(texel, layer, 0)).a - LayerPos[layer].z));
+			return abs(rel.z - (LayerDistance.Load(int4(texel, layer, 0)) - LayerPos[layer].z));
 		}
 		struct LayerLook { bool covered; bool solid; int layer; float2 uv; };
 		LayerLook LookAt(float3 x, bool exact)

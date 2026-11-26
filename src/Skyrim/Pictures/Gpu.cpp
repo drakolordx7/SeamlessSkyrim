@@ -1,5 +1,6 @@
 #include "Skyrim/Pictures/Gpu.h"
 
+#include "Core/Pictures/Compress.h"
 #include "Skyrim/Pictures/LayerHlsl.h"
 #include "Skyrim/Render/D3D.h"
 
@@ -12,8 +13,16 @@ namespace Pictures::Gpu
 			ID3D11VertexShader*      captureVS = nullptr;
 			ID3D11PixelShader*       capturePS = nullptr;
 			ID3D11Buffer*            captureConstants = nullptr;
-			ID3D11Texture2D*         target = nullptr;  // at the size pictures are taken at now (EnsureTarget)
+			ID3D11Texture2D*         target = nullptr;  // at the size pictures are taken at now (EnsureTarget): RGBA16F with mips
 			ID3D11RenderTargetView*  targetView = nullptr;
+			ID3D11ShaderResourceView* targetMips = nullptr;  // all its mips, for GenerateMips
+			std::vector<ID3D11ShaderResourceView*> targetLevels;  // one per mip, what the compression reads
+			ID3D11Texture2D*         distance = nullptr;  // R16_FLOAT: how far behind the doorway, as the capture writes it beside the colour
+			ID3D11RenderTargetView*  distanceView = nullptr;
+			ID3D11Texture2D*         blocks = nullptr;  // R32G32B32A32_UINT, a texel a BC6H block: what the compression writes, copied into the picture
+			ID3D11UnorderedAccessView* blocksView = nullptr;
+			ID3D11ComputeShader*     compressCS = nullptr;
+			ID3D11Buffer*            compressConstants = nullptr;
 			UINT                     targetWidth = 0;
 			UINT                     targetHeight = 0;
 			ID3D11VertexShader*      drawVS = nullptr;
@@ -30,6 +39,23 @@ namespace Pictures::Gpu
 			ID3D11RasterizerState*   raster = nullptr;
 			bool                     failed = false;
 		} pipeline;
+
+		// The capture's targets and what the compression works in.
+		void ReleaseTarget()
+		{
+			for (auto*& level : pipeline.targetLevels) {
+				Render::D3D::Release(level);
+			}
+			pipeline.targetLevels.clear();
+			Render::D3D::Release(pipeline.blocksView);
+			Render::D3D::Release(pipeline.blocks);
+			Render::D3D::Release(pipeline.distanceView);
+			Render::D3D::Release(pipeline.distance);
+			Render::D3D::Release(pipeline.targetMips);
+			Render::D3D::Release(pipeline.targetView);
+			Render::D3D::Release(pipeline.target);
+			pipeline.targetWidth = pipeline.targetHeight = 0;
+		}
 
 		// Capture: each texel of the picture is the doorway's rectangle at that place (a depth image's
 		// layer: the view's own image), as the frame shows it, averaged over 4x4 points (a texel
@@ -67,6 +93,7 @@ namespace Pictures::Gpu
 				float2 p = float2((id << 1) & 2, id & 2);
 				return float4(p * float2(2, -2) + float2(-1, 1), 0, 1);
 			}
+			struct Captured { float4 color : SV_Target0; float distance : SV_Target1; };
 			float Behind(float2 ndc, float2 pixel)
 			{
 				float2 size;
@@ -93,8 +120,14 @@ namespace Pictures::Gpu
 				// In front of the doorway (its frame, a leaf swung towards the eye): at it.
 				return clamp(dot(world - Origin.xyz, Inward.xyz), 1, kFar);
 			}
-			float4 PS(float4 position : SV_Position) : SV_Target
+			struct Captured
 			{
+				float4 color : SV_Target0;     // rgb, and the distance in alpha (the brightness read)
+				float  distance : SV_Target1;  // the same distance, for the picture's R16_FLOAT
+			};
+			Captured PS(float4 position : SV_Position)
+			{
+				Captured o;
 				float3 sum = 0;
 				float3 nearSum = 0;
 				float  nearest = kFar;
@@ -114,14 +147,155 @@ namespace Pictures::Gpu
 						++count;
 					}
 				}
-				if (count == 0)
-					return float4(max(sum / 16, 0), kFar);
+				if (count == 0) {
+					o.color = float4(max(sum / 16, 0), kFar);
+					o.distance = kFar;
+					return o;
+				}
 				// The sky left out where anything else is: through a gate the real sky is shown where
 				// the picture has none (Draw), and a roof's edge averaged with the portal pass's flat
 				// sky colour stood in it as a blue fringe. The nearest of a texel's surfaces is its depth,
 				// not their mean: an edge's texel is the thing in front, as the sharp picture has it, and
 				// a lamp in front of a wall far behind it isn't pulled away to the wall.
-				return float4(max(nearSum / count, 0), nearest);
+				o.color = float4(max(nearSum / count, 0), nearest);
+				o.distance = nearest;
+				return o;
+			}
+)";
+
+		// Compress: one thread a 4x4 block of the capture's colour into BC6H mode 11 (one subset, two 10-bit
+		// endpoints, 4-bit indices), Core::Pictures::Bc6h::Encode step for step: the endpoints from the
+		// block's principal axis in half-float bit patterns (the numbers the format interpolates), fitted
+		// twice by least squares, then each texel takes the index whose decoded colour is nearest. A level
+		// of the capture's mips at a time; the blocks go to a uint texture the picture's BC6H texture is
+		// copied from.
+		constexpr char kCompressCode[] = R"(
+			Texture2D<float4>   Source : register(t0);
+			RWTexture2D<uint4>  Blocks : register(u0);
+			cbuffer Compress : register(b0)
+			{
+				uint4 Size;  // xy: the level's size in texels; zw: in blocks
+			};
+			static const uint kWeights[16] = { 0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64 };
+			static const float kMaxBits = 31743.0;
+			uint Unquantize(uint q) { return q == 0 ? 0 : (q == 1023 ? 0xFFFF : ((q << 16) + 0x8000) >> 10); }
+			uint Interpolate(uint e0, uint e1, uint w) { uint m = (e0 * (64 - w) + e1 * w + 32) >> 6; return (m * 31) >> 6; }
+			uint Quantize(float bits) { return (uint)clamp(floor((bits - 15.5) / 31.0 + 0.5), 0.0, 1023.0); }
+			float HalfBits(float v) { return (float)f32tof16(!(v > 0.0) ? 0.0 : min(v, 65504.0)); }
+			void Put(inout uint4 block, uint position, uint count, uint value)
+			{
+				uint word = position >> 5, offset = position & 31;
+				value &= (1u << count) - 1;
+				block[word] |= value << offset;
+				if (offset + count > 32)
+					block[word + 1] |= value >> (32 - offset);
+			}
+			[numthreads(8, 8, 1)]
+			void CS(uint3 id : SV_DispatchThreadID)
+			{
+				if (id.x >= Size.z || id.y >= Size.w)
+					return;
+				float3 h[16];
+				float3 mean = 0, low = 1e30, high = -1e30;
+				[unroll] for (uint i = 0; i < 16; ++i) {
+					int2   p = min(int2(id.xy * 4) + int2(i & 3, i >> 2), int2(Size.xy) - 1);
+					float3 c = Source.Load(int3(p, 0)).rgb;
+					h[i] = float3(HalfBits(c.r), HalfBits(c.g), HalfBits(c.b));
+					mean += h[i] / 16.0;
+					low = min(low, h[i]);
+					high = max(high, h[i]);
+				}
+				float3x3 cov = 0;
+				[unroll] for (uint k = 0; k < 16; ++k) {
+					float3 d = h[k] - mean;
+					cov += float3x3(d.x * d, d.y * d, d.z * d);
+				}
+				float3 axis = high - low;
+				[unroll] for (uint iteration = 0; iteration < 4; ++iteration) {
+					float3 next = mul(cov, axis);
+					float  length2 = dot(next, next);
+					if (length2 > 1e-12)
+						axis = next * rsqrt(length2);
+				}
+				float tMin = 1e30, tMax = -1e30;
+				[unroll] for (uint m = 0; m < 16; ++m) {
+					float p = dot(h[m] - mean, axis);
+					tMin = min(tMin, p);
+					tMax = max(tMax, p);
+				}
+				float3 e0 = clamp(mean + axis * tMin, 0, kMaxBits);
+				float3 e1 = clamp(mean + axis * tMax, 0, kMaxBits);
+				bool   fitting = true;
+				[unroll] for (uint fit = 0; fit < 2; ++fit) {
+					float3 d = e1 - e0;
+					float  dd = dot(d, d);
+					if (fitting && dd >= 1e-6) {
+						float  aa = 0, bb = 0, ab = 0;
+						float3 ax = 0, bx = 0;
+						[unroll] for (uint n = 0; n < 16; ++n) {
+							float s = dot(h[n] - e0, d) / dd;
+							int   index = clamp((int)floor(s * 15.0 + 0.5), 0, 15);
+							float w = (float)kWeights[index] / 64.0;
+							float a = 1.0 - w;
+							aa += a * a;
+							bb += w * w;
+							ab += a * w;
+							ax += a * h[n];
+							bx += w * h[n];
+						}
+						float det = aa * bb - ab * ab;
+						if (abs(det) >= 1e-4) {
+							e0 = clamp((ax * bb - bx * ab) / det, 0, kMaxBits);
+							e1 = clamp((bx * aa - ax * ab) / det, 0, kMaxBits);
+						} else {
+							fitting = false;
+						}
+					} else {
+						fitting = false;
+					}
+				}
+				uint3 q0 = uint3(Quantize(e0.x), Quantize(e0.y), Quantize(e0.z));
+				uint3 q1 = uint3(Quantize(e1.x), Quantize(e1.y), Quantize(e1.z));
+				uint3 u0 = uint3(Unquantize(q0.x), Unquantize(q0.y), Unquantize(q0.z));
+				uint3 u1 = uint3(Unquantize(q1.x), Unquantize(q1.y), Unquantize(q1.z));
+				float3 palette[16];
+				[unroll] for (uint r = 0; r < 16; ++r)
+					palette[r] = float3(Interpolate(u0.x, u1.x, kWeights[r]), Interpolate(u0.y, u1.y, kWeights[r]), Interpolate(u0.z, u1.z, kWeights[r]));
+				uint indices[16];
+				[unroll] for (uint t = 0; t < 16; ++t) {
+					float best = 1e30;
+					indices[t] = 0;
+					[unroll] for (uint j = 0; j < 16; ++j) {
+						float3 d = h[t] - palette[j];
+						float  error = dot(d, d);
+						if (error < best) {
+							best = error;
+							indices[t] = j;
+						}
+					}
+				}
+				if (indices[0] >= 8) {
+					uint3 swap = q0;
+					q0 = q1;
+					q1 = swap;
+					[unroll] for (uint z = 0; z < 16; ++z)
+						indices[z] = 15 - indices[z];
+				}
+				uint4 block = 0;
+				Put(block, 0, 5, 3);
+				Put(block, 5, 10, q0.x);
+				Put(block, 15, 10, q0.y);
+				Put(block, 25, 10, q0.z);
+				Put(block, 35, 10, q1.x);
+				Put(block, 45, 10, q1.y);
+				Put(block, 55, 10, q1.z);
+				uint position = 65;
+				[unroll] for (uint w = 0; w < 16; ++w) {
+					uint bits = w == 0 ? 3 : 4;
+					Put(block, position, bits, indices[w]);
+					position += bits;
+				}
+				Blocks[id.xy] = block;
 			}
 )";
 
@@ -131,7 +305,8 @@ namespace Pictures::Gpu
 		// tier's answer stands. The doorway's own depth is kept (written, so what is drawn later is
 		// hidden behind it as by a wall there); the motion is the surface's seen through it.
 		constexpr char kDrawDeclarations[] = R"(
-				Texture2D<float4> Picture : register(t0);
+				Texture2D<float4> Picture : register(t0);          // BC6H colour with its mips
+				Texture2D<float>  PictureDistance : register(t2);  // how far behind the doorway, R16_FLOAT
 				SamplerState      Linear : register(s0);  // anisotropic
 				cbuffer Draw : register(b0)
 				{
@@ -186,7 +361,7 @@ namespace Pictures::Gpu
 				// A picture without depth: everything at the doorway, drawn flat as before.
 				if (Origin.w < 0.5)
 					return 0;
-				return Picture.Load(int3(clamp(uv / Params.yz, 0, 1 / Params.yz - 1), 0)).a;
+				return PictureDistance.Load(int3(clamp(uv / Params.yz, 0, 1 / Params.yz - 1), 0));
 			}
 			// Along the eye's ray past the doorway, the place its points are seen at from where the
 			// picture was taken moves in a straight line across the picture: from where the ray
@@ -330,6 +505,7 @@ namespace Pictures::Gpu
 			}
 			return out;
 		};
+		auto* compressCS = compile(kCompressCode, "CS", "cs_5_0");
 		auto* captureVS = compile(captureSource, "VS", "vs_5_0");
 		auto* capturePS = compile(captureSource, "PS", "ps_5_0");
 		auto* drawVS = compile(drawSource, "VS", "vs_5_0");
@@ -341,6 +517,7 @@ namespace Pictures::Gpu
 			};
 			D3D11_BUFFER_DESC    vertices{ sizeof(float) * 5 * 4, D3D11_USAGE_DYNAMIC, D3D11_BIND_VERTEX_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
 			D3D11_BUFFER_DESC    captureConstants{ sizeof(CaptureConstants), D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
+			D3D11_BUFFER_DESC    compressConstants{ sizeof(float) * 4, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
 			D3D11_BUFFER_DESC    drawConstants{ sizeof(DrawConstants), D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
 			D3D11_SAMPLER_DESC   sampler{};
 			sampler.Filter = D3D11_FILTER_ANISOTROPIC;
@@ -372,6 +549,8 @@ namespace Pictures::Gpu
 			raster.CullMode = D3D11_CULL_NONE;
 			raster.DepthClipEnable = TRUE;
 			pipeline.failed =
+				FAILED(a_device->CreateComputeShader(compressCS->GetBufferPointer(), compressCS->GetBufferSize(), nullptr, &pipeline.compressCS)) ||
+				FAILED(a_device->CreateBuffer(&compressConstants, nullptr, &pipeline.compressConstants)) ||
 				FAILED(a_device->CreateVertexShader(captureVS->GetBufferPointer(), captureVS->GetBufferSize(), nullptr, &pipeline.captureVS)) ||
 				FAILED(a_device->CreatePixelShader(capturePS->GetBufferPointer(), capturePS->GetBufferSize(), nullptr, &pipeline.capturePS)) ||
 				FAILED(a_device->CreateVertexShader(drawVS->GetBufferPointer(), drawVS->GetBufferSize(), nullptr, &pipeline.drawVS)) ||
@@ -402,12 +581,30 @@ namespace Pictures::Gpu
 		if (pipeline.targetView && pipeline.targetWidth == a_width && pipeline.targetHeight == a_height) {
 			return true;
 		}
-		Render::D3D::Release(pipeline.targetView);
-		Render::D3D::Release(pipeline.target);
-		D3D11_TEXTURE2D_DESC target{ a_width, a_height, 1, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0, 0 };
-		if (FAILED(a_device->CreateTexture2D(&target, nullptr, &pipeline.target)) || FAILED(a_device->CreateRenderTargetView(pipeline.target, nullptr, &pipeline.targetView))) {
+		ReleaseTarget();
+		// Sizes are whole blocks (Core::Pictures::Compress::RoundUp).
+		const UINT levels = Core::Pictures::Compress::MipCount(a_width, a_height);
+		const auto blocksAcross = Core::Pictures::Compress::Blocks(a_width), blocksDown = Core::Pictures::Compress::Blocks(a_height);
+		D3D11_TEXTURE2D_DESC target{ a_width, a_height, levels, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, 0,
+			D3D11_RESOURCE_MISC_GENERATE_MIPS };
+		D3D11_TEXTURE2D_DESC distance{ a_width, a_height, 1, 1, DXGI_FORMAT_R16_FLOAT, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET, 0, 0 };
+		D3D11_TEXTURE2D_DESC blocks{ blocksAcross, blocksDown, 1, 1, DXGI_FORMAT_R32G32B32A32_UINT, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_UNORDERED_ACCESS, 0, 0 };
+		bool                 made = SUCCEEDED(a_device->CreateTexture2D(&target, nullptr, &pipeline.target)) && SUCCEEDED(a_device->CreateRenderTargetView(pipeline.target, nullptr, &pipeline.targetView)) &&
+		                            SUCCEEDED(a_device->CreateShaderResourceView(pipeline.target, nullptr, &pipeline.targetMips)) && SUCCEEDED(a_device->CreateTexture2D(&distance, nullptr, &pipeline.distance)) &&
+		                            SUCCEEDED(a_device->CreateRenderTargetView(pipeline.distance, nullptr, &pipeline.distanceView)) && SUCCEEDED(a_device->CreateTexture2D(&blocks, nullptr, &pipeline.blocks)) &&
+		                            SUCCEEDED(a_device->CreateUnorderedAccessView(pipeline.blocks, nullptr, &pipeline.blocksView));
+		for (UINT level = 0; made && level < levels; ++level) {
+			D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+			view.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+			view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			view.Texture2D = { level, 1 };
+			ID3D11ShaderResourceView* levelView = nullptr;
+			made = SUCCEEDED(a_device->CreateShaderResourceView(pipeline.target, &view, &levelView));
+			pipeline.targetLevels.push_back(levelView);
+		}
+		if (!made) {
 			logger::error("doorway snapshot: could not create a {}x{} target", a_width, a_height);
-			Render::D3D::Release(pipeline.target);
+			ReleaseTarget();
 			return false;
 		}
 		pipeline.targetWidth = a_width;
@@ -420,6 +617,35 @@ namespace Pictures::Gpu
 		return pipeline.target;
 	}
 
+	bool Compress(ID3D11DeviceContext* a_context, ID3D11Texture2D* a_colour, ID3D11Texture2D* a_distance, UINT a_slice)
+	{
+		D3D11_TEXTURE2D_DESC colour{};
+		a_colour->GetDesc(&colour);
+		namespace Z = Core::Pictures::Compress;
+		const Render::D3D::SavedState saved(a_context);
+		a_context->GenerateMips(pipeline.targetMips);
+		a_context->CSSetShader(pipeline.compressCS, nullptr, 0);
+		a_context->CSSetConstantBuffers(0, 1, &pipeline.compressConstants);
+		ID3D11ShaderResourceView*  noTexture = nullptr;
+		ID3D11UnorderedAccessView* noTarget = nullptr;
+		for (UINT level = 0; level < colour.MipLevels; ++level) {
+			const UINT width = Z::Level(pipeline.targetWidth, level), height = Z::Level(pipeline.targetHeight, level);
+			const UINT blocksAcross = Z::Blocks(width), blocksDown = Z::Blocks(height);
+			const UINT size[4] = { width, height, blocksAcross, blocksDown };
+			Render::D3D::Upload(a_context, pipeline.compressConstants, size, sizeof(size));
+			a_context->CSSetShaderResources(0, 1, &pipeline.targetLevels[level]);
+			a_context->CSSetUnorderedAccessViews(0, 1, &pipeline.blocksView, nullptr);
+			a_context->Dispatch((blocksAcross + 7) / 8, (blocksDown + 7) / 8, 1);
+			a_context->CSSetUnorderedAccessViews(0, 1, &noTarget, nullptr);
+			a_context->CSSetShaderResources(0, 1, &noTexture);
+			// A block of the texture is a texel of the uint one: copied by blocks.
+			const D3D11_BOX box{ 0, 0, 0, blocksAcross, blocksDown, 1 };
+			a_context->CopySubresourceRegion(a_colour, D3D11CalcSubresource(level, a_slice, colour.MipLevels), 0, 0, 0, pipeline.blocks, 0, &box);
+		}
+		a_context->CopySubresourceRegion(a_distance, a_slice, 0, 0, 0, pipeline.distance, 0, nullptr);
+		return true;
+	}
+
 	void Capture(ID3D11DeviceContext* a_context, const CaptureConstants& a_constants, ID3D11ShaderResourceView* a_scene, ID3D11ShaderResourceView* a_depth, UINT a_width, UINT a_height)
 	{
 		const Render::D3D::SavedState saved(a_context);
@@ -427,7 +653,8 @@ namespace Pictures::Gpu
 		// The scene may still be bound as a target.
 		ID3D11RenderTargetView* noTargets[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
 		a_context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, noTargets, nullptr);
-		a_context->OMSetRenderTargets(1, &pipeline.targetView, nullptr);
+		ID3D11RenderTargetView* captureTargets[2] = { pipeline.targetView, pipeline.distanceView };
+		a_context->OMSetRenderTargets(2, captureTargets, nullptr);
 		a_context->OMSetDepthStencilState(pipeline.noDepth, 0);
 		a_context->OMSetBlendState(pipeline.opaque, nullptr, 0xFFFFFFFF);
 		a_context->RSSetState(pipeline.raster);
@@ -449,8 +676,7 @@ namespace Pictures::Gpu
 		a_context->PSSetShaderResources(0, 2, none);
 	}
 
-	void Draw(ID3D11DeviceContext* a_context, const DrawConstants& a_constants, const float (&a_vertices)[4][5], const DrawTargets& a_targets, ID3D11ShaderResourceView* a_picture,
-		ID3D11ShaderResourceView* a_layers, bool a_opaque)
+	void Draw(ID3D11DeviceContext* a_context, const DrawConstants& a_constants, const float (&a_vertices)[4][5], const DrawTargets& a_targets, const DrawTextures& a_textures, bool a_opaque)
 	{
 		const Render::D3D::SavedState saved(a_context);
 		Render::D3D::Upload(a_context, pipeline.vertices, a_vertices, sizeof(a_vertices));
@@ -475,8 +701,9 @@ namespace Pictures::Gpu
 		a_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 		const UINT stride = sizeof(float) * 5, offset = 0;
 		a_context->IASetVertexBuffers(0, 1, &pipeline.vertices, &stride, &offset);
-		ID3D11ShaderResourceView* sources[2]{ a_picture, a_layers };
-		a_context->PSSetShaderResources(0, 2, sources);
+		// t0 the picture's colour, t1 the depth image's, t2 and t3 their distances.
+		ID3D11ShaderResourceView* sources[4]{ a_textures.picture, a_textures.layers, a_textures.pictureDistance, a_textures.layerDistance };
+		a_context->PSSetShaderResources(0, 4, sources);
 		a_context->PSSetSamplers(0, 1, &pipeline.sampler);
 		a_context->PSSetConstantBuffers(0, 1, &pipeline.drawConstants);
 		a_context->VSSetConstantBuffers(0, 1, &pipeline.drawConstants);

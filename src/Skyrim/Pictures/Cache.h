@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Core/Pictures/CacheRules.h"
+#include "Core/Pictures/Compress.h"
+#include "Core/Pictures/FileFormat.h"
 #include "Core/Pictures/Layers.h"
 #include "Skyrim/Pictures/PictureSize.h"
 
@@ -9,15 +11,23 @@
 // The doorway pictures kept per door: in video memory, on disk (SeamlessSkyrim_Doorways: *.ssdw the
 // image tier's, *.ssdl the depth image tier's layers; only the current version of the current load
 // order is read, and the folder is held to the size budget), and what is waiting to be written there.
+// A picture is BC6H colour with its mips and a half-float distance texture beside it, the same in
+// memory and on disk (Core/Pictures/Compress.h).
 namespace Pictures::Cache
 {
 	inline constexpr std::uint32_t kVersion = Core::Pictures::kVersion;
 	inline constexpr auto          kRetake = Core::Pictures::kRetake;
 
+	using Source = Core::Pictures::Files::Source;
+
 	struct Picture
 	{
-		ID3D11Texture2D*                      texture = nullptr;
+		ID3D11Texture2D*                      texture = nullptr;  // BC6H, with mips
 		ID3D11ShaderResourceView*             view = nullptr;
+		ID3D11Texture2D*                      distance = nullptr;  // R16_FLOAT
+		ID3D11ShaderResourceView*             distanceView = nullptr;
+		Source                                source = Source::kVisit;
+		std::uint32_t                         takenAt = 0;  // seconds since 1970
 		std::chrono::steady_clock::time_point taken{};
 		std::chrono::steady_clock::time_point used{};  // last drawn or taken (ForgetUnused)
 		bool                                  diskTried = false;
@@ -34,8 +44,12 @@ namespace Pictures::Cache
 	// The layers are taken one portal pass at a time; it is drawn once all are there.
 	struct Layered
 	{
-		ID3D11Texture2D*                      texture = nullptr;
+		ID3D11Texture2D*                      texture = nullptr;  // BC6H array, with mips
 		ID3D11ShaderResourceView*             view = nullptr;
+		ID3D11Texture2D*                      distance = nullptr;  // R16_FLOAT array
+		ID3D11ShaderResourceView*             distanceView = nullptr;
+		Source                                source = Source::kVisit;
+		std::uint32_t                         takenAt = 0;
 		std::chrono::steady_clock::time_point taken{};
 		std::chrono::steady_clock::time_point used{};
 		bool                                  diskTried = false;
@@ -51,12 +65,15 @@ namespace Pictures::Cache
 	};
 
 	// Pictures taken a few frames ago, read back and written to disk (the copy is done by then;
-	// asked for at once, the read would wait for the GPU). layers 0: an image tier picture (staging
-	// is a plain texture); else a depth image (staging is an array of that many layers).
+	// asked for at once, the read would wait for the GPU). The staging copies are of the picture's own
+	// textures. layers 0: an image tier picture; else a depth image of that many layers.
 	struct Readback
 	{
 		std::string                                   key;
-		ID3D11Texture2D*                              staging = nullptr;
+		ID3D11Texture2D*                              colour = nullptr;
+		ID3D11Texture2D*                              distance = nullptr;
+		Source                                        source = Source::kVisit;
+		std::uint32_t                                 takenAt = 0;
 		UINT                                          width = 0;
 		UINT                                          height = 0;
 		Camera::DoorwayPlace                          takenFrom{};
@@ -85,19 +102,23 @@ namespace Pictures::Cache
 	// Only this part of the day's.
 	Picture* FindExact(ID3D11Device* a_device, RE::FormID a_door, bool a_outdoors);
 
-	// With mipmaps: the draw reads the level the eye's ray stretches a texel to.
-	bool MakeView(ID3D11Device* a_device, Picture& a_picture, const void* a_texels, UINT a_width, UINT a_height);
+	// The textures of a picture of a_width x a_height (whole blocks): its colour chain and distances as
+	// a file holds them (Files::TexelBytes), or none, to be copied into by Gpu::Compress. The draw
+	// reads the colour's level the eye's ray stretches a texel to.
+	bool MakeView(ID3D11Device* a_device, Picture& a_picture, const void* a_file, UINT a_width, UINT a_height);
 	void ReleaseTexture(Picture& a_picture);
 
 	// The door's depth image for this part of the day (loaded from disk the first time), if it has a
 	// texture; it may be waiting for layers (Layered::Complete).
 	Layered* FindLayered(ID3D11Device* a_device, RE::FormID a_door, bool a_outdoors);
 	Layered& EntryLayered(const std::string& a_key);
-	// An array texture of a_layers layers (a_texels: all of them, one after the other, or none).
-	bool MakeLayeredView(ID3D11Device* a_device, Layered& a_layered, const void* a_texels, UINT a_width, UINT a_height, int a_layers);
+	// The array textures of a_layers layers (a_file: each layer's chain and distances one after the
+	// other, or none).
+	bool MakeLayeredView(ID3D11Device* a_device, Layered& a_layered, const void* a_file, UINT a_width, UINT a_height, int a_layers);
 	void ReleaseLayered(Layered& a_layered);
 
-	void               Queue(Readback a_readback);
+	// a_readback's staging copies made from the picture's textures (a_colour, a_distance), and queued.
+	void               Queue(ID3D11Device* a_device, ID3D11DeviceContext* a_context, ID3D11Texture2D* a_colour, ID3D11Texture2D* a_distance, Readback a_readback);
 	[[nodiscard]] bool HasReadbacks();
 	void               WriteReadbacks(ID3D11DeviceContext* a_context);
 
@@ -109,6 +130,9 @@ namespace Pictures::Cache
 	// measured (yet).
 	[[nodiscard]] float PictureBrightness(RE::FormID a_door, bool a_outdoors, bool a_layered);
 
+	// Main thread: the door's pictures for this part of the day (both tiers) dropped from memory and disk.
+	void Invalidate(RE::FormID a_door, bool a_outdoors);
+
 	// Any thread: every picture deleted from disk (returns how many) and, at the main thread's next
 	// use, from memory.
 	int DeleteAll();
@@ -116,6 +140,21 @@ namespace Pictures::Cache
 	// Main thread: the folder brought within the budget (Settings) if it is over it; at most every
 	// half minute, and a file of the old naming (no load order in it) always goes.
 	void EnforceBudget();
+
+	// What the folder holds for the current load order (the bridge's pictures command): a door's file
+	// of either tier for a part of the day, read from its header.
+	struct Listing
+	{
+		std::string   door;   // "Skyrim.esm|01A6FB"
+		std::string   part;   // "inside", or the part of the day
+		bool          layered = false;
+		int           layers = 0;
+		Source        source = Source::kVisit;
+		std::uint32_t takenAt = 0;
+		std::uint64_t bytes = 0;
+		bool          inMemory = false;
+	};
+	[[nodiscard]] std::vector<Listing> List();
 
 	struct Counts
 	{

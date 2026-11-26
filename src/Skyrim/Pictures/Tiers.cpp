@@ -104,6 +104,21 @@ namespace Pictures
 		return std::ranges::any_of(requests, [&](const Asked& a_asked) { return a_asked.doorway.door == a_doorway.door && a_asked.tier == a_tier; });
 	}
 
+	std::vector<Pending> PendingRequests()
+	{
+		std::erase_if(requests, [](const Asked& a_asked) { return !Wanted(a_asked.doorway, a_asked.tier); });
+		std::vector<Pending> out;
+		for (const auto& asked : requests) {
+			out.push_back({ asked.doorway, asked.tier });
+		}
+		return out;
+	}
+
+	void Retake(RE::FormID a_door, bool a_outdoors)
+	{
+		Cache::Invalidate(a_door, a_outdoors);
+	}
+
 	std::optional<CaptureCamera> NextRequestedCamera(RE::FormID a_portalDoor, const RE::NiPoint3& a_viewer)
 	{
 		// Done ones are dropped (a capture is taken a frame after its camera is asked for).

@@ -5,6 +5,7 @@
 #include <numeric>
 
 #include "Core/Pictures/Camera.h"
+#include "Core/Pictures/Compress.h"
 #include "Core/Pictures/Layers.h"
 
 namespace Core::Graph
@@ -52,12 +53,11 @@ namespace Core::Graph
 	SpaceCost SpaceCost::ForPictures(int a_pictureHeight, int a_depthLayers)
 	{
 		constexpr float kMegabyte = 1024.0f * 1024.0f;
-		constexpr float kMips = 4.0f / 3.0f;
 		const auto [imageWidth, imageHeight] = Pictures::Camera::SizeFor(Pictures::Camera::kRoomCamera.extent, a_pictureHeight, Pictures::Camera::kNarrowest);
 		const auto [layerWidth, layerHeight] = Pictures::Layers::SizeOf(a_pictureHeight);
 		SpaceCost  cost;
-		cost.imageMb = static_cast<float>(imageWidth) * static_cast<float>(imageHeight) * Pictures::Camera::kBytesPerTexel * kMips / kMegabyte;
-		cost.depthMb = cost.imageMb + static_cast<float>(a_depthLayers) * static_cast<float>(layerWidth) * static_cast<float>(layerHeight) * Pictures::Camera::kBytesPerTexel * kMips / kMegabyte;
+		cost.imageMb = static_cast<float>(Pictures::Compress::PictureBytes(imageWidth, imageHeight)) / kMegabyte;
+		cost.depthMb = cost.imageMb + static_cast<float>(a_depthLayers) * static_cast<float>(Pictures::Compress::PictureBytes(layerWidth, layerHeight)) / kMegabyte;
 		return cost;
 	}
 
@@ -72,7 +72,8 @@ namespace Core::Graph
 		open(a_graph.DoorCount(), false),
 		doorUsed(a_graph.DoorCount(), false),
 		blocked(a_graph.DoorCount(), false),
-		candidateOf(a_graph.SpaceCount(), -1)
+		candidateOf(a_graph.SpaceCount(), -1),
+		ranks(a_graph.SpaceCount(), FLT_MAX)
 	{}
 
 	Tier TierScheduler::CapOf(DoorwayIx a_doorway) const
@@ -116,6 +117,7 @@ namespace Core::Graph
 		std::ranges::fill(retryCooldown, 0.0f);
 		std::ranges::fill(heldFor, 0.0f);
 		std::ranges::fill(releasedFor, FLT_MAX);
+		std::ranges::fill(ranks, FLT_MAX);
 		attachTimer = 0.0f;
 		memoryMb = 0.0f;
 	}
@@ -153,6 +155,7 @@ namespace Core::Graph
 		doorUsed.assign(a_new.DoorCount(), false);
 		blocked.assign(a_new.DoorCount(), false);
 		candidateOf.assign(a_new.SpaceCount(), -1);
+		ranks.assign(a_new.SpaceCount(), FLT_MAX);
 	}
 
 	std::vector<TierChange> TierScheduler::Tick(const Inputs& a_in)
@@ -244,6 +247,11 @@ namespace Core::Graph
 				}
 				c.cap = std::max(c.cap, cap);
 			}
+		}
+
+		std::ranges::fill(ranks, FLT_MAX);
+		for (const auto& c : candidates) {
+			ranks[c.space] = c.rank;
 		}
 
 		// ---- the tier each would have by distance and heading alone
