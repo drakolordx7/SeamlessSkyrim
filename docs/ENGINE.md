@@ -386,6 +386,17 @@ Found porting the plugin; each was checked in the code of both.
   again; a loose item of the room (a pot, a coin bag) whose body came late is made visual only as
   `Merge` does, or it is drawn from its body at the cell's own place. Bridge `late_pieces {outOfPlace, settle}` puts a share of a merged room's pieces in that
   state and switches the settling off, for a before/after at one spot.
+- **A room merged into the street loses its walls and roof to the street's occlusion boxes, whatever the
+  cull mode.** Seen through the doorway in sunlit Whiterun (Belethor's, the Bannered Mare), the big
+  pieces of the room (walls, roof planks, counters) were missing and the street's sky and mountains
+  showed through, while small things (pots, a fire) were drawn. The world scene's occluder list
+  (`BSPortalGraph` + 0x10, 44 shapes in the market) is the cause: with the list emptied the room was
+  whole, and the per-object cull told to ignore them (`MergedCull::ProcessHook` with
+  `kIgnoreMultiBounds`, tried with all-pass too) changed nothing, nor did emptying the list only
+  inside the player view (`BeforeView`): it has to be out from the manager's update on, so something
+  before the view reads it. `MergedCull::Set` takes out the occluders within 1500 units of the doorway
+  (their bound against the door) until `AfterView`; the rest keep culling the street. The view costs
+  ~2 ms more there, partly the room's pieces now being drawn.
 - **An auto-load door is five culled `EditorMarker` shapes** (`AutoLoadMarker01.nif`: Whiterun's
   000351EC, the Underforge's 0006767E): culled by the engine, no opener hid them.
 

@@ -35,4 +35,7 @@ namespace Render::DoorwayDaylight
 	// Render thread, after the world is drawn into the scene and before first person.
 	// What it did, for portal_status (empty when nothing was drawn).
 	json Draw();
+
+	// For portal_status: the last pass that drew (its gains), how many views it drew in, and whether a space is set now.
+	json Describe();
 }

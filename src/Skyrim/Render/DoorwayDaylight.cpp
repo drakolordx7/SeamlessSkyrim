@@ -11,6 +11,8 @@ namespace Render::DoorwayDaylight
 	{
 		std::mutex           stateLock;
 		std::optional<State> state;  // under stateLock
+		json                 lastDrawn;  // under stateLock
+		std::uint64_t        draws = 0;  // under stateLock
 
 		// cbuffer Daylight (DaylightHlsl.h).
 		struct Constants
@@ -215,6 +217,16 @@ namespace Render::DoorwayDaylight
 		// Not left bound while the depth view comes back (the saved state puts the old targets back).
 		ID3D11ShaderResourceView* none = nullptr;
 		context->PSSetShaderResources(0, 1, &none);
-		return { { "sunGain", patch ? gains.sun : 0.0f }, { "spillGain", patch ? gains.spill : 0.0f }, { "streetShade", shade ? shadeStrength : 0.0f } };
+		json drawn = { { "sunGain", patch ? gains.sun : 0.0f }, { "spillGain", patch ? gains.spill : 0.0f }, { "streetShade", shade ? shadeStrength : 0.0f } };
+		std::scoped_lock lock(stateLock);
+		lastDrawn = drawn;
+		++draws;
+		return drawn;
+	}
+
+	json Describe()
+	{
+		std::scoped_lock lock(stateLock);
+		return { { "set", state.has_value() }, { "streetMerged", state && state->streetMerged }, { "open", state ? state->open : 0.0f }, { "draws", draws }, { "last", lastDrawn } };
 	}
 }

@@ -12,6 +12,7 @@
 #include "Skyrim/Portal/LightOcclusion.h"
 #include "Skyrim/Portal/LightScene.h"
 #include "Skyrim/Portal/MergedCull.h"
+#include "Skyrim/Render/DoorwayDaylight.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/NpcTravel.h"
 #include "Skyrim/Portal/PortalManager.h"
@@ -317,7 +318,7 @@ namespace Bridge::PortalDiagnostics
 			{ "lightOcclusion", LightOcclusion::Describe() },
 			{ "mergedCull", MergedCull::Describe() },
 			{ "render", json{ { "ready", ::Render::Native::Ready() }, { "enb", ::Render::Enb::Describe() }, { "mask", ::Render::Native::DescribeMask() },
-								{ "lighting", ::Render::Native::DescribeLighting() } } },
+								{ "lighting", ::Render::Native::DescribeLighting() }, { "daylight", ::Render::DoorwayDaylight::Describe() } } },
 			{ "npcTravel", NpcTravel::Status() },
 			// Which Havok world the engine steps (*ID 400440) against the player's and the remote one.
 			{ "havok", [] {
