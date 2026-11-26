@@ -90,3 +90,36 @@ void SunCorrectionLearns()
 	wrap.Observe(12.1f, dir(175.0f, 30.0f), dir(-175.0f, 30.0f));
 	CHECK(Near(wrap.Apply(12.1f, dir(170.0f, 30.0f)), dir(180.0f, 30.0f), 2e-2f));
 }
+
+void StreetShadeMarch()
+{
+	namespace S = Core::StreetShade;
+	using Core::Vec3;
+
+	// What counts as inside something: not the surface itself, yes a little behind it, no far behind (a thin thing).
+	CHECK(S::Hit(2.0f, 0.0f) == 0.0f && S::Hit(-30.0f, 0.0f) == 0.0f);
+	CHECK(S::Hit(20.0f, 10.0f) > 0.99f);
+	CHECK(S::Hit(300.0f, 10.0f) == 0.0f);
+	// A far sample may be deeper behind its surface than a near one: big things cast the long shadows.
+	CHECK(S::Hit(120.0f, 600.0f) > 0.9f && S::Hit(120.0f, 10.0f) == 0.0f);
+
+	// A slab of something (x 100..260) the camera sees the front of: a ray through it is shaded, one beside it isn't.
+	const auto slab = [](const Vec3& a_q) -> std::optional<float> { return a_q.x >= 100.0f && a_q.x <= 260.0f ? 20.0f : -50.0f; };
+	const float through = S::Lit({ 0, 0, 0 }, { 1, 0, 0 }, S::kReach, 0.5f, S::kSteps, slab);
+	CHECK(through < 0.8f && through > 0.0f);
+	CHECK(S::Lit({ 0, 0, 0 }, { 0, 1, 0 }, S::kReach, 0.5f, S::kSteps, slab) == 1.0f);
+	// Nothing seen along it (off screen, behind the camera): lit, as far as anyone can tell.
+	CHECK(S::Lit({ 0, 0, 0 }, { 1, 0, 0 }, S::kReach, 0.5f, S::kSteps, [](const Vec3&) -> std::optional<float> { return std::nullopt; }) == 1.0f);
+	// The samples crowd near the surface and stay within the reach.
+	CHECK(S::SampleAlong(0, 0.0f, S::kSteps, S::kReach) == 0.0f && S::SampleAlong(S::kSteps - 1, 0.99f, S::kSteps, S::kReach) < S::kReach);
+	CHECK(S::SampleAlong(3, 0.5f, S::kSteps, S::kReach) < 0.1f * S::kReach);
+
+	// The sun's share of the light: all of it with no ambient, little under a dim sun, nothing facing away.
+	CHECK(S::SunShare(1.5f, 0.0f, 1.0f) > 0.95f);
+	CHECK(S::SunShare(0.2f, 0.5f, 1.0f) < 0.3f);
+	CHECK(S::SunShare(1.5f, 0.3f, -0.4f) == 0.0f);
+	// Strength: none at night or with the door shut, the most on a clear day; the multiplier never below 1 - most.
+	CHECK(S::Strength(-0.3f, 1.0f) == 0.0f && S::Strength(0.8f, 0.0f) == 0.0f);
+	CHECK(Near(S::Strength(0.8f, 1.0f), S::kMost));
+	CHECK(S::Multiplier(S::kMost, 1.0f, 0.0f) >= 1.0f - S::kMost - 1e-4f && S::Multiplier(S::kMost, 1.0f, 1.0f) == 1.0f && S::Multiplier(S::kMost, 0.0f, 0.0f) == 1.0f);
+}

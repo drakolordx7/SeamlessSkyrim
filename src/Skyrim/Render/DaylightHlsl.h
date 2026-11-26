@@ -16,6 +16,15 @@ namespace Render::DaylightHlsl
 #define SEAMLESS_EDGE_GROWTH 0.02
 #define SEAMLESS_GRAZING_LOW 0.02
 #define SEAMLESS_GRAZING_HIGH 0.12
+#define SEAMLESS_STREET_STEPS 12
+#define SEAMLESS_STREET_REACH 700.0
+#define SEAMLESS_PATCH_STEPS 8
+#define SEAMLESS_PATCH_REACH 500.0
+#define SEAMLESS_OCCLUDER_MIN 6.0
+#define SEAMLESS_THICKNESS_BASE 40.0
+#define SEAMLESS_THICKNESS_PER_UNIT 0.35
+#define SEAMLESS_HIT 0.6
+#define SEAMLESS_AMBIENT_FLOOR 0.05
 #endif
 #define SHADOW_STEPS 8
 
@@ -32,6 +41,7 @@ cbuffer Daylight : register(b0)
 	float4             SunToward;   // xyz: unit vector to the sun; w: sun gain
 	float4             SunTint;     // rgb: the sun's colour at luminance 1; a: spill gain
 	float4             SkyTint;     // rgb: the sky's ambient colour at luminance 1
+	float4             Shade;       // x: the sun's luminance; y: the sky's; z: the street's shadow strength
 };
 
 struct Vertex { float4 position : SV_Position; };
@@ -114,6 +124,50 @@ float RayLit(float3 p, float3 n, float t, float2 pixel)
 	return lit;
 }
 
+// Whether the camera sees something at q's pixel, and how far q lies behind it (above 0: behind
+// the surface seen there). Core::StreetShade's gapAt.
+bool GapAt(float3 q, out float gap)
+{
+	gap = 0;
+	float4 clip = mul(float4(q, 1), ViewProj);
+	if (clip.w <= 0)
+		return false;
+	float2 ndc = clip.xy / clip.w;
+	float2 px = float2((ndc.x * 0.5 + 0.5) * ViewSize.x, (0.5 - ndc.y * 0.5) * ViewSize.y);
+	if (px.x < 0 || px.y < 0 || px.x >= ViewSize.x || px.y >= ViewSize.y)
+		return false;
+	float3 scene = Reconstruct(px, SceneDepth.Load(int3(px, 0)));
+	gap = length(q) - length(scene);
+	return true;
+}
+
+// Core::StreetShade::Hit.
+float OccluderHit(float gap, float along)
+{
+	float thickness = SEAMLESS_THICKNESS_BASE + SEAMLESS_THICKNESS_PER_UNIT * along;
+	return Smooth(SEAMLESS_OCCLUDER_MIN, SEAMLESS_OCCLUDER_MIN * 1.7, gap) * (1 - Smooth(0.7 * thickness, thickness, gap));
+}
+
+// Core::StreetShade::Lit: the share of the sun's light that reaches start along the sun's ray.
+float MarchLit(float3 start, float rayLength, float noise, int steps)
+{
+	float lit = 1;
+	[loop] for (int i = 0; i < steps; ++i)
+	{
+		float x = (i + noise) / steps;
+		float t = rayLength * x * x;
+		float gap;
+		if (GapAt(start + SunToward.xyz * t, gap))
+			lit *= 1 - SEAMLESS_HIT * OccluderHit(gap, t);
+	}
+	return lit;
+}
+
+float PixelNoise(float2 pixel)
+{
+	return frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715))));
+}
+
 float4 PS(Vertex v) : SV_Target
 {
 	float  depth = SceneDepth.Load(int3(v.position.xy, 0));
@@ -137,7 +191,10 @@ float4 PS(Vertex v) : SV_Target
 		{
 			float along = dot(SunToward.xyz, DoorInward.xyz);
 			float cosine = nl > 1e-4 ? saturate(dot(n, SunToward.xyz)) : 0.7;
-			float ray = RayLit(p, n, inside / -along, v.position.xy);
+			float t = inside / -along;
+			float ray = RayLit(p, n, t, v.position.xy);
+			// Past the doorway, the street's own geometry in the sun's way (the eave, the house opposite).
+			ray *= MarchLit(p + SunToward.xyz * t, SEAMLESS_PATCH_REACH, PixelNoise(v.position.xy), SEAMLESS_PATCH_STEPS);
 			gain += SunTint.rgb * (SunToward.w * lit * cosine * ray);
 		}
 	}
@@ -146,6 +203,43 @@ float4 PS(Vertex v) : SV_Target
 	if (!any(gain))
 		discard;
 	return float4(gain, 0);
+}
+
+// The street merged into an interior has no sun shadow of its own: its pixels seen through the doorway
+// are darkened where the march to the sun meets something the camera sees. The result is the factor
+// the target is multiplied by (blend: ZERO, SRC_COLOR). For a camera inside the interior only.
+float4 PSShadow(Vertex v) : SV_Target
+{
+	float  depth = SceneDepth.Load(int3(v.position.xy, 0));
+	float3 p = Reconstruct(v.position.xy, depth);
+	float3 n = cross(ddx(p), ddy(p));
+	float3 rel = p - DoorCenter.xyz;
+	float  side = dot(rel, DoorInward.xyz);
+	if (side >= -2.0 || depth >= 1.0)
+		discard;
+	// Only what is seen through the doorway: the ray from the camera (the origin) to the pixel
+	// crosses the doorway's plane inside the rectangle.
+	float planeAt = dot(DoorCenter.xyz, DoorInward.xyz);
+	float alongRay = dot(p, DoorInward.xyz);
+	if (alongRay >= -1e-3)
+		discard;
+	float3 hit = p * (planeAt / alongRay) - DoorCenter.xyz;
+	if (abs(dot(hit, DoorRight.xyz)) > DoorCenter.w + 3.0 || abs(hit.z) > DoorInward.w + 3.0)
+		discard;
+	float nl = length(n);
+	n = nl > 1e-4 ? n / nl : float3(0, 0, 0);
+	if (dot(n, p) > 0)
+		n = -n;
+	float cosine = nl > 1e-4 ? saturate(dot(n, SunToward.xyz)) : 0.7;
+	float sun = Shade.x * cosine;
+	float share = sun / (sun + Shade.y + SEAMLESS_AMBIENT_FLOOR);
+	if (share <= 0.01)
+		discard;
+	float lit = MarchLit(p + n * 4.0, SEAMLESS_STREET_REACH, PixelNoise(v.position.xy), SEAMLESS_STREET_STEPS);
+	float factor = 1 - Shade.z * share * (1 - lit);
+	if (factor >= 0.999)
+		discard;
+	return float4(factor, factor, factor, 1);
 }
 )";
 }

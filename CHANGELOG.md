@@ -21,6 +21,13 @@
   outdoors in the same hours. Still gone: rooms merged beside the shown one, sun shadows through a
   city gate and on the street seen from an interior, the street's fog in front of a room, skylighting
   settling on walking out (docs/KNOWN-ISSUES.md).
+- The street seen from inside a house through its open door has sun shadows again (made in the scene's
+  depth: houses, eaves and trees on the way to the sun darken what they shade), and the sunlight
+  patch on the floor is dimmed by the eave over the door and the house opposite where they are on
+  screen. The inn across the street, seen from inside a shop at an angle, shows its depth picture
+  (parallax) when one was taken. Still gone: the other worldspace's sun shadows through a city gate,
+  skylighting settling on walking out; the street's fog in front of a room should come from the
+  game's own fog pass (to be looked at in game).
 - Doorway picture files of an older version are no longer read; they are taken again.
 
 - Settings changed in the in-game menu are kept in `SeamlessSkyrim_User.ini` and survive updates;

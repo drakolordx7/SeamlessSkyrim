@@ -21,6 +21,9 @@ namespace Render::DoorwayDaylight
 		Core::Render::Color     sun;          // as the main view is lit with it (the outdoors' sunlight scale in)
 		Core::Render::Color     sky;          // the street's ambient light
 		float                   open = 0.0f;  // how far the door stands open, 0 shut
+		// The street is merged into the interior the camera is in: the street seen through the doorway
+		// has no sun shadow of its own, and the pass makes one in the scene's depth (Core/Lighting/StreetShade.h).
+		bool                    streetMerged = false;
 	};
 
 	// Main thread, every frame a space is merged (nullopt when none is).

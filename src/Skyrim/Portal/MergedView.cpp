@@ -361,6 +361,7 @@ namespace Portal::MergedView
 			state.sun = light->sun;
 			state.sky = light->sky;
 			state.open = a_open;
+			state.streetMerged = a_street;
 			::Render::DoorwayDaylight::Set(state);
 		}
 

@@ -75,8 +75,8 @@ directional ambient at ID 390984. For the length of the engine's call these are 
 - Room merged into the street: its cell's own fog on its shapes. The SSAO composite fogs every
   pixel alike and keeps the street's (it takes the merged fog only with the player indoors).
 
-Not done: the street's sun shadows inside an interior, and the street's fog in front of a room
-seen from across the street (KNOWN-ISSUES.md, "Look features lost with the removed fork").
+Not done: the other worldspace's sun shadows through a city gate. The street's fog in front of a room is the SSAO
+composite's (KNOWN-ISSUES.md, "Look features lost with the removed fork").
 
 ## Rain and snow at the doorway
 
@@ -126,6 +126,26 @@ version) and ENB draw the scene as they do, and ENB's grading comes after.
 - The maths is `Core/Lighting/Daylight.h` (tested in `tests/Core/LookTests.h`); the HLSL repeats it
   and takes its constants from it. Compile it with `tools/check-hlsl.ps1 -Files src/Skyrim/Render/DaylightHlsl.h`
   after any change: the game's compiler reports errors only in the log.
+
+### The street's shade (same pass, `Core/Lighting/StreetShade.h`)
+
+Two uses of one screen-space march toward the sun (12 samples out to 700 units, crowding near the surface; a sample
+counts as inside something when it lies 6 units to a thickness behind the surface the camera sees there, the
+thickness growing with the distance along the ray):
+- The street merged into an interior has no sun shadow (an interior has no sun shadow map), so a second draw of the
+  pass (`PSShadow`, blend `ZERO, SRC_COLOR`: target times the shader's colour) darkens the street pixels seen through
+  the doorway, by the sun's share of their light (sun luminance times cosine against the sky's), at most 0.8. Only
+  with the camera on the interior's side of the doorway (`State::streetMerged`): a street the camera is outside of
+  has the engine's own shadows.
+- The sunlight patch's ray to the sun, once through the doorway, is marched 500 units out into the street (8
+  samples) as well as inside, so the eave over the door, the doorway's jambs and the house opposite shade it where
+  the camera sees them.
+Both need what shades to be on screen; the rest is lit as before.
+
+Side rooms: a doorway of the street merged into the player's interior (the inn across the street seen from inside a
+shop) has no tier of its own to the scheduler; its stand-in draws the depth image if one is ready (taken while the
+player was in the street) and the image tier otherwise (`DoorwayPictures.cpp`). Doors of the player's own space follow
+`Schedule::DoorTier` as before.
 
 ## ENB
 

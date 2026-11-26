@@ -1,5 +1,6 @@
 #include "Skyrim/Render/DoorwayDaylight.h"
 
+#include "Core/Lighting/StreetShade.h"
 #include "Skyrim/Render/D3D.h"
 #include "Skyrim/Render/DaylightHlsl.h"
 #include "Skyrim/Render/MainView.h"
@@ -23,17 +24,20 @@ namespace Render::DoorwayDaylight
 			float sunToward[4];
 			float sunTint[4];
 			float skyTint[4];
+			float shade[4];  // the sun's luminance, the sky's, the street's shadow strength
 		};
-		static_assert(sizeof(Constants) == 60 * sizeof(float));
+		static_assert(sizeof(Constants) == 64 * sizeof(float));
 
 		struct Pipeline
 		{
 			ID3D11VertexShader*      vertexShader = nullptr;
 			ID3D11PixelShader*       pixelShader = nullptr;
+			ID3D11PixelShader*       shadowShader = nullptr;  // PSShadow: the street's sun shadow
 			ID3D11Buffer*            constants = nullptr;
 			ID3D11DepthStencilState* depthState = nullptr;
 			ID3D11RasterizerState*   rasterState = nullptr;
 			ID3D11BlendState*        blendState = nullptr;
+			ID3D11BlendState*        shadowBlend = nullptr;
 		} pipeline;
 
 		void EnsurePipeline(ID3D11Device* a_device)
@@ -42,19 +46,25 @@ namespace Render::DoorwayDaylight
 				return;
 			}
 			namespace D = Core::Daylight;
+			namespace S = Core::StreetShade;
 			const std::string source = std::format(
 										   "#define SEAMLESS_REACH {}\n#define SEAMLESS_DEPTH_FADE {}\n#define SEAMLESS_EDGE_BASE {}\n#define SEAMLESS_EDGE_GROWTH {}\n"
-										   "#define SEAMLESS_GRAZING_LOW {}\n#define SEAMLESS_GRAZING_HIGH {}\n",
-										   D::kReach, D::kDepthFade, D::kEdgeBase, D::kEdgeGrowth, D::kGrazingLow, D::kGrazingHigh) +
+										   "#define SEAMLESS_GRAZING_LOW {}\n#define SEAMLESS_GRAZING_HIGH {}\n"
+										   "#define SEAMLESS_STREET_STEPS {}\n#define SEAMLESS_STREET_REACH {}\n#define SEAMLESS_PATCH_STEPS {}\n#define SEAMLESS_PATCH_REACH {}\n"
+										   "#define SEAMLESS_OCCLUDER_MIN {}\n#define SEAMLESS_THICKNESS_BASE {}\n#define SEAMLESS_THICKNESS_PER_UNIT {}\n#define SEAMLESS_HIT {}\n"
+										   "#define SEAMLESS_AMBIENT_FLOOR {}\n",
+										   D::kReach, D::kDepthFade, D::kEdgeBase, D::kEdgeGrowth, D::kGrazingLow, D::kGrazingHigh, S::kSteps, S::kReach, S::kPatchSteps, S::kPatchReach, S::kOccluderMin,
+										   S::kThicknessBase, S::kThicknessPerUnit, S::kHit, S::kAmbientFloor) +
 			                           DaylightHlsl::kSource;
 			std::string errors;
 			ID3DBlob*   vs = D3D::Compile(source, "SeamlessDoorwayDaylight", "VS", "vs_5_0", 0, &errors);
 			ID3DBlob*   ps = D3D::Compile(source, "SeamlessDoorwayDaylight", "PS", "ps_5_0", 0, &errors);
+			ID3DBlob*   shadow = D3D::Compile(source, "SeamlessDoorwayDaylight", "PSShadow", "ps_5_0", 0, &errors);
 			// Our own shader: one that can't be made is our bug, not a state to draw around.
-			if (!vs || !ps) {
+			if (!vs || !ps || !shadow) {
 				logger::critical("portal: SeamlessDoorwayDaylight failed: {}", errors);
 			}
-			SEAMLESS_ASSERT(vs && ps);
+			SEAMLESS_ASSERT(vs && ps && shadow);
 			D3D11_BUFFER_DESC        buffer{ sizeof(Constants), D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0 };
 			D3D11_DEPTH_STENCIL_DESC depth{};  // no depth test or write: the pass reads the depth itself
 			D3D11_RASTERIZER_DESC    raster{};
@@ -65,13 +75,20 @@ namespace Render::DoorwayDaylight
 			D3D11_BLEND_DESC blend{};
 			blend.RenderTarget[0] = { TRUE, D3D11_BLEND_DEST_COLOR, D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD, D3D11_BLEND_ZERO, D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD,
 				D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE };
+			// target = target * shader colour (the street's shade).
+			D3D11_BLEND_DESC shadowBlend{};
+			shadowBlend.RenderTarget[0] = { TRUE, D3D11_BLEND_ZERO, D3D11_BLEND_SRC_COLOR, D3D11_BLEND_OP_ADD, D3D11_BLEND_ZERO, D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD,
+				D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE };
 			const bool made = SUCCEEDED(a_device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &pipeline.vertexShader)) &&
 			                  SUCCEEDED(a_device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &pipeline.pixelShader)) &&
 			                  SUCCEEDED(a_device->CreateBuffer(&buffer, nullptr, &pipeline.constants)) && SUCCEEDED(a_device->CreateDepthStencilState(&depth, &pipeline.depthState)) &&
-			                  SUCCEEDED(a_device->CreateRasterizerState(&raster, &pipeline.rasterState)) && SUCCEEDED(a_device->CreateBlendState(&blend, &pipeline.blendState));
+			                  SUCCEEDED(a_device->CreateRasterizerState(&raster, &pipeline.rasterState)) && SUCCEEDED(a_device->CreateBlendState(&blend, &pipeline.blendState)) &&
+			                  SUCCEEDED(a_device->CreatePixelShader(shadow->GetBufferPointer(), shadow->GetBufferSize(), nullptr, &pipeline.shadowShader)) &&
+			                  SUCCEEDED(a_device->CreateBlendState(&shadowBlend, &pipeline.shadowBlend));
 			SEAMLESS_ASSERT(made);
 			vs->Release();
 			ps->Release();
+			shadow->Release();
 		}
 
 		// A colour at luminance 1 (its hue), or black for a colour with no light in it.
@@ -117,7 +134,14 @@ namespace Render::DoorwayDaylight
 		namespace D = Core::Daylight;
 		const auto& c = *current;
 		const auto  gains = D::GainsOf(D::Luminance(c.sun.red, c.sun.green, c.sun.blue), D::Luminance(c.sky.red, c.sky.green, c.sky.blue), c.towardSun.z, c.open);
-		if (gains.sun <= 0.0f && gains.spill <= 0.0f) {
+		const float sunLuminance = D::Luminance(c.sun.red, c.sun.green, c.sun.blue);
+		const float shadeStrength = c.streetMerged ? Core::StreetShade::Strength(c.towardSun.z, c.open) : 0.0f;
+		const bool  patch = gains.sun > 0.0f || gains.spill > 0.0f;
+		const auto  eyeAt = CurrentMainView().posAdjust.getEye();
+		// The camera is on the interior's side of the doorway: a street merged in, while the player
+		// isn't through it yet, is the engine's own and has its shadows.
+		const bool shade = shadeStrength > 0.0f && c.opening.inward.Dot(Core::Vec3{ eyeAt.x, eyeAt.y, eyeAt.z } - c.opening.center) > 0.0f;
+		if (!patch && !shade) {
 			return {};
 		}
 
@@ -158,6 +182,9 @@ namespace Render::DoorwayDaylight
 		Tint(c.sun, constants.sunTint);
 		constants.sunTint[3] = gains.spill;
 		Tint(c.sky, constants.skyTint);
+		constants.shade[0] = sunLuminance;
+		constants.shade[1] = D::Luminance(c.sky.red, c.sky.green, c.sky.blue);
+		constants.shade[2] = shadeStrength;
 		D3D::Upload(context, pipeline.constants, &constants, sizeof(constants));
 
 		const D3D::SavedState saved(context);
@@ -166,10 +193,8 @@ namespace Render::DoorwayDaylight
 		const D3D11_VIEWPORT viewport{ 0, 0, constants.viewSize[0], constants.viewSize[1], 0, 1 };
 		context->RSSetViewports(1, &viewport);
 		context->OMSetDepthStencilState(pipeline.depthState, 0);
-		context->OMSetBlendState(pipeline.blendState, nullptr, 0xFFFFFFFF);
 		context->RSSetState(pipeline.rasterState);
 		context->VSSetShader(pipeline.vertexShader, nullptr, 0);
-		context->PSSetShader(pipeline.pixelShader, nullptr, 0);
 		context->GSSetShader(nullptr, nullptr, 0);
 		context->HSSetShader(nullptr, nullptr, 0);
 		context->DSSetShader(nullptr, nullptr, 0);
@@ -177,10 +202,19 @@ namespace Render::DoorwayDaylight
 		context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		context->PSSetConstantBuffers(0, 1, &pipeline.constants);
 		context->PSSetShaderResources(0, 1, &depthSRV);
-		context->Draw(3, 0);
+		if (patch) {
+			context->OMSetBlendState(pipeline.blendState, nullptr, 0xFFFFFFFF);
+			context->PSSetShader(pipeline.pixelShader, nullptr, 0);
+			context->Draw(3, 0);
+		}
+		if (shade) {
+			context->OMSetBlendState(pipeline.shadowBlend, nullptr, 0xFFFFFFFF);
+			context->PSSetShader(pipeline.shadowShader, nullptr, 0);
+			context->Draw(3, 0);
+		}
 		// Not left bound while the depth view comes back (the saved state puts the old targets back).
 		ID3D11ShaderResourceView* none = nullptr;
 		context->PSSetShaderResources(0, 1, &none);
-		return { { "sunGain", gains.sun }, { "spillGain", gains.spill } };
+		return { { "sunGain", patch ? gains.sun : 0.0f }, { "spillGain", patch ? gains.spill : 0.0f }, { "streetShade", shade ? shadeStrength : 0.0f } };
 	}
 }
