@@ -65,6 +65,8 @@ namespace Core::Graph
 		config(a_config),
 		tiers(a_graph.SpaceCount(), Tier::Cold),
 		retryCooldown(a_graph.SpaceCount(), 0.0f),
+		heldFor(a_graph.SpaceCount(), 0.0f),
+		releasedFor(a_graph.SpaceCount(), FLT_MAX),
 		forced(a_graph.DoorwayCount(), false),
 		open(a_graph.DoorCount(), false),
 		blocked(a_graph.DoorCount(), false),
@@ -94,6 +96,9 @@ namespace Core::Graph
 
 	void TierScheduler::Failed(SpaceIx a_space, Tier a_reached)
 	{
+		if (tiers[a_space] >= Tier::LoadedPaused && a_reached < Tier::LoadedPaused) {
+			heldFor[a_space] = 0.0f;
+		}
 		tiers[a_space] = std::min(tiers[a_space], a_reached);
 		retryCooldown[a_space] = config.retrySeconds;
 	}
@@ -107,6 +112,8 @@ namespace Core::Graph
 	{
 		std::ranges::fill(tiers, Tier::Cold);
 		std::ranges::fill(retryCooldown, 0.0f);
+		std::ranges::fill(heldFor, 0.0f);
+		std::ranges::fill(releasedFor, FLT_MAX);
 		attachTimer = 0.0f;
 		memoryMb = 0.0f;
 	}
@@ -115,10 +122,14 @@ namespace Core::Graph
 	{
 		std::vector<Tier>  newTiers(a_new.SpaceCount(), Tier::Cold);
 		std::vector<float> newCooldown(a_new.SpaceCount(), 0.0f);
+		std::vector<float> newHeld(a_new.SpaceCount(), 0.0f);
+		std::vector<float> newReleased(a_new.SpaceCount(), FLT_MAX);
 		for (SpaceIx space = 0; space < a_old.SpaceCount(); ++space) {
 			if (const auto next = a_new.FindSpace(a_old.GetSpace(space).id); next != kNoSpace) {
 				newTiers[next] = tiers[space];
 				newCooldown[next] = retryCooldown[space];
+				newHeld[next] = heldFor[space];
+				newReleased[next] = releasedFor[space];
 			}
 		}
 		std::vector<bool> newForced(a_new.DoorwayCount(), false);
@@ -133,6 +144,8 @@ namespace Core::Graph
 		graph = &a_new;
 		tiers = std::move(newTiers);
 		retryCooldown = std::move(newCooldown);
+		heldFor = std::move(newHeld);
+		releasedFor = std::move(newReleased);
 		forced = std::move(newForced);
 		open.assign(a_new.DoorCount(), false);
 		blocked.assign(a_new.DoorCount(), false);
@@ -146,6 +159,13 @@ namespace Core::Graph
 		for (auto& cooldown : retryCooldown) {
 			cooldown -= a_in.dt;
 		}
+		for (SpaceIx space = 0; space < tiers.size(); ++space) {
+			if (tiers[space] >= Tier::LoadedPaused) {
+				heldFor[space] += a_in.dt;
+			} else if (releasedFor[space] < FLT_MAX) {
+				releasedFor[space] += a_in.dt;
+			}
+		}
 		for (const auto door : a_in.openDoors) {
 			open[door] = true;
 		}
@@ -157,6 +177,9 @@ namespace Core::Graph
 		auto heading = a_in.heading;
 		auto walk = a_in.velocity;
 		walk.z = 0.0f;
+		if (walk.Length() > Selection::kMaxSpeed) {
+			walk = walk / walk.Length() * Selection::kMaxSpeed;
+		}
 		if (heading.SqrLength() == 0.0f && walk.SqrLength() > 0.0f) {
 			heading = walk / walk.Length();
 		}
@@ -308,6 +331,10 @@ namespace Core::Graph
 		// ---- carry it out: the player's space, then what lets go, then what is promoted one tier at a time
 		const auto change = [&](SpaceIx a_space, Tier a_to, Reason a_reason, DoorwayIx a_via, float a_rank) {
 			changes.push_back({ a_space, tiers[a_space], a_to, a_reason, a_via, a_rank });
+			if (tiers[a_space] >= Tier::LoadedPaused && a_to < Tier::LoadedPaused) {
+				heldFor[a_space] = 0.0f;
+				releasedFor[a_space] = 0.0f;
+			}
 			tiers[a_space] = a_to;
 		};
 		if (player != kNoSpace && tiers[player] != Tier::Live) {
@@ -323,9 +350,14 @@ namespace Core::Graph
 				continue;
 			}
 			const auto& c = candidates[slot];
-			if (c.want < tiers[space]) {
+			auto        want = c.want;
+			// Kept loaded for a while whatever the ranking says (the doorway still being a way through).
+			if (tiers[space] >= Tier::LoadedPaused && want < Tier::LoadedPaused && heldFor[space] < config.minHoldSeconds && c.cap >= Tier::LoadedPaused) {
+				want = Tier::LoadedPaused;
+			}
+			if (want < tiers[space]) {
 				const auto reason = c.limited ? c.limit : tiers[space] == Tier::Live && c.openReach == FLT_MAX ? Reason::DoorClosed : Reason::Retreat;
-				change(space, c.want, reason, c.via, c.rank);
+				change(space, want, reason, c.via, c.rank);
 			}
 		}
 
@@ -345,6 +377,9 @@ namespace Core::Graph
 				continue;
 			}
 			const auto  next = Next(at);
+			if (next == Tier::LoadedPaused && releasedFor[c.space] < config.reattachSeconds) {
+				continue;
+			}
 			const auto& cost = CostOf(a_in, c.space);
 			const float delta = cost.Mb(next) - cost.Mb(at);
 			if (used + delta > a_in.memoryBudgetMb) {

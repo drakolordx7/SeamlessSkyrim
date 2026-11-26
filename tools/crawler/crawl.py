@@ -40,7 +40,16 @@ import imaging  # noqa: E402
 import report  # noqa: E402
 
 # Worst first: the class of a door is its most severe problem.
-PRIORITY = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "no-portal", "loading-screen", "scene-problem", "visual-suspect"]
+# Classes (the tier scheduler's design: nothing runs behind a shut door, so no portal at 6 m with the
+# door shut is correct): a door is judged by the tier its space reached when it was approached (loaded
+# and paused, T3, at 6 m), whether it went live once opened (T4), and whether the crossing was seamless
+# or the engine's own loading screen.
+#   tier-low                 approached, but the space was held below loaded-paused at 6 m (reason from door_status)
+#   not-live                 opened and near, but the space never went live (reason from door_status)
+#   fallback-loading-screen  the crossing was the vanilla door trip (a door that fell back, or a load that blocked the game)
+PRIORITY = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "fallback-loading-screen", "not-live", "tier-low", "scene-problem", "visual-suspect"]
+TIERS = ["cold", "image", "depth-image", "loaded-paused", "live"]
+T3, T4 = TIERS.index("loaded-paused"), TIERS.index("live")
 TRANSIENT = ("timed out waiting for the game's main thread", "bridge unreachable")
 
 
@@ -246,6 +255,40 @@ def portal_summary(S: Session) -> dict[str, Any]:
     }
 
 
+def door_state(S: Session, ref: str) -> dict[str, Any]:
+    """The scheduler's view of one door (bridge door_status): tier of the space behind it, whether it is shown,
+    open, its reach, the last decision and the first thing that stops it."""
+    st = S.call("door_status", ref=ref)
+    keep = ("shown", "inGraph", "space", "leadsTo", "link", "gate", "tier", "lastDecision", "open", "reach", "liveReach", "doorwayFallback", "fallback", "reason", "doorUse")
+    return {k: st[k] for k in keep if k in st}
+
+
+def schedule_state(S: Session) -> dict[str, Any]:
+    """The scheduler as a whole (portal_status.schedule) and the crossing sequence's phase."""
+    st = S.call("portal_status")
+    sch = st.get("schedule") or {}
+    return {
+        "playerSpace": sch.get("playerSpace"), "live": (sch.get("live") or {}).get("cell"), "kept": [k["cell"].split("'")[1] if "'" in k["cell"] else k["cell"] for k in sch.get("kept") or []],
+        "tiers": sch.get("tiers"), "approached": sch.get("approached"), "headroomMs": sch.get("headroomMs"), "busyMs": sch.get("busyMs"), "frozen": sch.get("frozen"),
+        "fallbackDoorways": sch.get("fallbackDoorways"), "memoryMb": sch.get("memoryMb"), "crossingPhase": st.get("crossingPhase"), "lastEvent": st.get("lastEvent"),
+    }
+
+
+def wait_tier(S: Session, ref: str, want: int, timeout: float) -> tuple[dict[str, Any], str, float]:
+    """Polls door_status until the space behind the door is at tier `want` (an index into TIERS) or better.
+    Returns the last status, the highest tier seen and the seconds it took (the timeout when never)."""
+    t0 = time.monotonic()
+    best = "cold"
+    while True:
+        status = door_state(S, ref)
+        tier = status.get("tier", "cold")
+        if TIERS.index(tier) > TIERS.index(best):
+            best = tier
+        if TIERS.index(best) >= want or time.monotonic() - t0 >= timeout:
+            return status, best, time.monotonic() - t0
+        time.sleep(0.4)
+
+
 def wait_portal(S: Session, timeout: float, ref: str, linked: str) -> tuple[dict[str, Any], float]:
     """Waits until the plugin shows this door (the manager looks at its doors every few frames)."""
     t0 = time.monotonic()
@@ -289,7 +332,7 @@ def use_door(S: Session, rec: dict[str, Any], ref: str, linked: str, label: str)
     rec["activate"][label] = {**result, "counted": counted}
     blocked = S.blocked - before
     if saw_loading or blocked >= 3:
-        rec["problems"].append(("loading-screen", f"{label}: the door's use blocked the game for {blocked:.1f} s" + (" with a loading screen" if saw_loading else " (loading screen or hitch)")))
+        rec["problems"].append(("fallback-loading-screen", f"{label}: the door's use blocked the game for {blocked:.1f} s" + (" with a loading screen" if saw_loading else " (loading screen or hitch)")))
         return True
     return False
 
@@ -326,8 +369,8 @@ def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], l
                 rec["notes"].append(f"{label}: the walk stopped at the closed door (activate through the bridge had not opened it); the crosshair use (use_pick, target {pick['target']}) opened it")
     blocked = S.blocked - before
     rec["walks"][label] = {"status": walk.get("status"), "blockedS": round(blocked, 1)}
-    if blocked >= 3 and not any(p[0] == "loading-screen" and p[1].startswith(label) for p in rec["problems"]):
-        rec["problems"].append(("loading-screen", f"{label}: walking through blocked the game for {blocked:.1f} s (loading screen or hitch)"))
+    if blocked >= 3 and not any(p[0] == "fallback-loading-screen" and p[1].startswith(label) for p in rec["problems"]):
+        rec["problems"].append(("fallback-loading-screen", f"{label}: walking through blocked the game for {blocked:.1f} s (loading screen or hitch)"))
     S.wait_in_game(200)
     time.sleep(2.5)
     return walk
@@ -389,7 +432,12 @@ def test_door(S: Session, door: dict[str, Any], index: int) -> dict[str, Any]:
 
     with S.server.LogWatcher() as log:
         visit(S, rec, door, partner, front, dest_kind, src_edid, dest_edid)
-    rec["log"] = S.server.filter_log(log.lines, r"(?i)fallback|vanilla|assert|exception|fail|error", limit=8, width=300)
+    rec["log"] = S.server.filter_log(log.lines, r"(?i)fallback|vanilla|assert|exception|fail|error|engine's own", limit=8, width=300)
+    ends = (rec["runtime"], c.hex_id(dest["doorId"]))
+    for line in log.lines:
+        if "keeps the engine's own behaviour" in line and any(f"door {e}" in line.upper() for e in ends):
+            rec["problems"].append(("fallback-loading-screen", "the door fell back to the engine's own door: " + line.split("from now on: ")[-1].strip()))
+            break
     rec["secs"] = round(time.monotonic() - started, 1)
     return rec
 
@@ -414,14 +462,18 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     rec["locked"] = bool(mine.get("locked"))
 
     heading = face(S, -front["dir"][0], -front["dir"][1])
-    status, settled = wait_portal(S, S.args.portal_wait, ref, linked)
-    rec["checks"]["front"] = {"settleS": round(settled, 1), "portal": status}
+    # Approached with the door shut: nothing runs behind it (by design), but the space should be held loaded
+    # and paused (T3) by 6 m; a locked door keeps its picture (T2). No portal drawn here is correct.
+    need = TIERS.index("depth-image") if rec["locked"] else T3
+    ds, best, settled = wait_tier(S, ref, need, S.args.portal_wait)
+    status = portal_summary(S)
+    rec["checks"]["front"] = {"settleS": round(settled, 1), "portal": status, "door": ds, "tierReached": best, "schedule": schedule_state(S)}
     eye = S.call("camera")["camera"]
     front_img = S.snap(rec, "front")
     rec["checks"]["front"]["frame"] = S.call("frame_stats")
     rec["checks"]["front"]["scene"] = S.call("scene_check", radius=3000)
-    if not is_mine(status, ref, linked):
-        rec["problems"].append(("no-portal", f"no portal for this door after {settled:.0f} s at 6 m from it (shown: {sorted({x['door'] for x in status['standIns']} | {x['door'] for x in status['rooms']})}, merged portal {(status['active'] or {}).get('sourceDoor')})"))
+    if TIERS.index(best) < need:
+        rec["problems"].append(("tier-low", f"at 6 m with the door shut the space behind it reached only {best} in {settled:.0f} s (wanted {TIERS[need]}): {ds.get('reason') or ds.get('lastDecision')}"))
     if not rec["checks"]["front"]["scene"].get("ok", True):
         rec["problems"].append(("scene-problem", "scene_check at the door: " + "; ".join(scene_problems(rec["checks"]["front"]["scene"])[:3])))
 
@@ -435,20 +487,30 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
             rec["flags"] += [f"front:{f}" for f in rec["checks"]["front"]["doorway"]["flags"]]
 
     if rec["locked"]:
-        rec["notes"].append("locked: looked at, not entered")
-        return
+        if not S.args.unlock:
+            rec["notes"].append("locked: looked at, not entered")
+            return
+        # A lock is state of the saved game (and of the clock); the way through is tested all the same.
+        S.call("console", command="unlock", ref=ref)
+        rec["notes"].append("locked at the start: unlocked with the console to test the crossing")
+        rec["locked"] = False
 
-    # Open it.
+    # Open it: the space should go live (T4) within a few seconds, with the door open and the player near.
     vanilla = use_door(S, rec, ref, linked, "open")
-    time.sleep(1.5)
-    status, settled = wait_portal(S, S.args.portal_wait, ref, linked)
+    ds, best, took = ({}, "cold", 0.0) if vanilla else wait_tier(S, ref, T4, S.args.live_wait)
+    time.sleep(0.8 if best == "live" else 0.0)
+    status = portal_summary(S)
     open_img = S.snap(rec, "open")
-    rec["checks"]["open"] = {"settleS": round(settled, 1), "portal": status, "frame": S.call("frame_stats")}
+    rec["checks"]["open"] = {"liveS": round(took, 1), "portal": status, "door": ds, "tierReached": best, "schedule": schedule_state(S), "frame": S.call("frame_stats")}
     if not vanilla:
-        if not is_mine(status, ref, linked):
-            rec["problems"].append(("no-portal", "the plugin no longer shows the door after opening it"))
+        if best != "live":
+            rec["problems"].append(("not-live", f"opened at 6 m: the space reached only {best} in {took:.0f} s: {ds.get('reason') or ds.get('lastDecision')}"))
         elif not rec["activate"]["open"]["counted"]:
             rec["notes"].append("activate was not counted as a use of the door by the plugin (doorUse empty)")
+        if not door_state(S, ref).get("doorUse") and not ds.get("fallback"):
+            # The plugin shuts a door a use opened after a few seconds with nobody in it.
+            rec["notes"].append("the door had swung shut again before the walk: used again")
+            use_door(S, rec, ref, linked, "open-again")
     if open_img is not None and box:
         rec["checks"]["open"]["doorway"] = imaging.region_flags(open_img, box)
         rec["flags"] += [f"open:{f}" for f in rec["checks"]["open"]["doorway"]["flags"]]
@@ -524,6 +586,23 @@ def classify(rec: dict[str, Any]) -> str:
     return "ok"
 
 
+def reclassify_legacy(rec: dict[str, Any]) -> None:
+    """Results written before the tier scheduler's classes (no tier data in them): "no portal at 6 m with the door
+    shut" is not a problem any more, a use that blocked the game is the vanilla loading screen. What the old crawl
+    never recorded (the tier reached, whether the space went live) stays unjudged."""
+    if rec.get("result") in ("skipped", "hang", "setup-failed") or "tierReached" in (rec.get("checks", {}).get("front") or {}):
+        return
+    kept = []
+    for cls, text in rec["problems"]:
+        if cls == "no-portal":
+            if text.startswith("no portal for this door"):
+                continue
+            cls = "not-live"
+        kept.append(("fallback-loading-screen" if cls == "loading-screen" else cls, text))
+    rec["problems"] = kept
+    rec["result"] = classify(rec)
+
+
 # ---- run ----------------------------------------------------------------------------------------
 
 
@@ -579,7 +658,9 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="print the visit plan and stop")
     ap.add_argument("--report-only", action="store_true")
     ap.add_argument("--keep-game", action="store_true", help="leave the game running at the end")
-    ap.add_argument("--portal-wait", type=float, default=10.0, help="seconds to wait for the plugin to show the door")
+    ap.add_argument("--portal-wait", type=float, default=10.0, help="seconds to wait for the space behind a shut door to be held loaded (T3) at 6 m")
+    ap.add_argument("--live-wait", type=float, default=8.0, help="seconds to wait for the space behind an opened door to go live (T4)")
+    ap.add_argument("--no-unlock", dest="unlock", action="store_false", help="leave locked doors locked (looked at, not entered)")
     ap.add_argument("--hang-seconds", type=float, default=180.0, help="bridge silence after which the game counts as hung")
     ap.add_argument("--vfov", type=float, default=65.0, help="assumed vertical field of view for the doorway box")
     args = ap.parse_args()
@@ -591,6 +672,8 @@ def main() -> int:
     if (out / "results.json").exists():
         results = json.loads((out / "results.json").read_text("utf-8"))["doors"]
     if args.report_only:
+        for rec in results:
+            reclassify_legacy(rec)
         report.write(out, config, results, census)
         print(f"report: {out / 'report.md'}")
         return 0

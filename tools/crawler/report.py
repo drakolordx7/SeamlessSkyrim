@@ -8,7 +8,7 @@ from typing import Any
 
 import imaging
 
-ORDER = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "no-portal", "loading-screen", "scene-problem", "visual-suspect", "ok", "skipped"]
+ORDER = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "fallback-loading-screen", "not-live", "tier-low", "scene-problem", "visual-suspect", "ok", "skipped"]
 STAGES = ["front", "open", "in", "in-back", "back-open", "out"]
 
 
@@ -22,6 +22,14 @@ def worst_frame(rec: dict[str, Any]) -> float:
 
 def links(rec: dict[str, Any]) -> str:
     return " ".join(f"[{name}]({path})" for name, path in rec.get("shots", {}).items())
+
+
+def tiers(rec: dict[str, Any]) -> str:
+    checks = rec.get("checks", {})
+    front, opened = checks.get("front") or {}, checks.get("open") or {}
+    if "tierReached" not in front:
+        return "n/a (old crawl)"
+    return f"{front['tierReached']} / {opened.get('tierReached', '-')}" + (f" in {opened['liveS']} s" if opened.get("tierReached") == "live" else "")
 
 
 def write(out: Path, config: dict[str, Any], results: list[dict[str, Any]], census: Any) -> None:
@@ -43,10 +51,15 @@ def write(out: Path, config: dict[str, Any], results: list[dict[str, Any]], cens
         lines += ["## Slowest frames (max ms over the visit)", ""]
         lines += [f"- {r['id']} {r['base']} ({r['place']}): max {worst_frame(r):.0f} ms, p95 {frame_p95(r):.0f} ms" for r in slow]
         lines.append("")
-    lines += ["## All doors", "", "| # | door | place | result | notes | pictures |", "|--:|---|---|---|---|---|"]
+    reached = collections.Counter((r.get("checks", {}).get("front") or {}).get("tierReached", "?") for r in results if r["result"] != "skipped")
+    lines.append("Tier of the space behind the door when approached with it shut (6 m): " + ", ".join(f"{n} {t}" for t, n in reached.most_common()) + ".")
+    live = collections.Counter((r.get("checks", {}).get("open") or {}).get("tierReached", "?") for r in results if "open" in r.get("checks", {}))
+    lines.append("Tier once opened: " + ", ".join(f"{n} {t}" for t, n in live.most_common()) + ".")
+    lines.append("")
+    lines += ["## All doors", "", "| # | door | place | result | tier 6 m / opened | notes | pictures |", "|--:|---|---|---|---|---|---|"]
     for r in results:
         notes = "; ".join([p[1] for p in r["problems"]] + [f"flag {f}" for f in r["flags"]] + r["notes"] + ["log: " + x[:120] for x in r.get("log", [])[:2]])
-        lines.append(f"| {r['index']} | {r['id']} `{r['base']}` ({r['runtime']}) | {r['place']} -> {r['dest']} | {r['result']} | {notes.replace('|', '/')} | {links(r)} |")
+        lines.append(f"| {r['index']} | {r['id']} `{r['base']}` ({r['runtime']}) | {r['place']} -> {r['dest']} | {r['result']} | {tiers(r)} | {notes.replace('|', '/')} | {links(r)} |")
     lines.append("")
 
     # Contact sheets of everything that is not ok: six doors per sheet, one row per door.

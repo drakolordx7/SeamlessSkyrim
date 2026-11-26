@@ -450,7 +450,9 @@ namespace
 		const auto f = Village();
 		const auto g = SpaceGraph::Build(f.spaces, f.doors);
 		const auto house = g.FindSpace("house");
-		Walk       walk(g);
+		SchedulerConfig noHold;  // the reaches alone: the hold is tested by SchedulerHoldsLoaded
+		noHold.minHoldSeconds = 0.0f;
+		Walk       walk(g, noHold);
 		walk.in.playerSpace = g.FindSpace("tamriel");
 		walk.in.heading = { -1, 0, 0 };
 		walk.in.position = { 900, 0, 0 };
@@ -507,6 +509,34 @@ namespace
 		CHECK(changes == 0 && walk.scheduler.TierOf(g.FindSpace("house")) == Tier::LoadedPaused);
 	}
 
+		void SchedulerHoldsLoaded()
+	{
+		const auto f = Village();
+		const auto g = SpaceGraph::Build(f.spaces, f.doors);
+		const auto house = g.FindSpace("house");
+		Walk       walk(g);
+		walk.in.playerSpace = g.FindSpace("tamriel");
+		walk.in.position = { 400, 0, 0 };  // 600 from the door: loaded and paused
+		walk.Stand(2.0f);
+		CHECK(walk.scheduler.TierOf(house) == Tier::LoadedPaused);
+		// Far out of its reach at once (a teleport): let go only after the hold, not the moment the ranking says so.
+		walk.in.position = { -3000, 0, 0 };
+		CHECK(walk.Stand(5.0f).empty() && walk.scheduler.TierOf(house) == Tier::LoadedPaused);
+		// Until the hold runs out, then at once back at the door: not attached again for a few seconds.
+		std::vector<TierChange> released;
+		for (int i = 0; i < 60 * 8 && released.empty(); ++i) {
+			released = walk.Step();
+		}
+		CHECK(released.size() == 1 && released[0].from == Tier::LoadedPaused && released[0].to < Tier::LoadedPaused);
+		walk.in.position = { 400, 0, 0 };
+		bool again = false;
+		for (const auto& c : walk.Stand(2.0f)) {
+			again = again || (c.space == house && c.to == Tier::LoadedPaused);
+		}
+		CHECK(!again);
+		CHECK(!walk.Stand(5.0f).empty() && walk.scheduler.TierOf(house) == Tier::LoadedPaused);
+	}
+
 	void SchedulerBudget()
 	{
 		const auto f = Street();
@@ -514,7 +544,9 @@ namespace
 		const auto a = g.FindSpace("a");
 		const auto b = g.FindSpace("b");
 		const auto c = g.FindSpace("c");
-		Walk       walk(g);
+		SchedulerConfig noHold;
+		noHold.minHoldSeconds = 0.0f;
+		Walk       walk(g, noHold);
 		walk.in.playerSpace = g.FindSpace("street");
 		walk.in.position = { 500, 150, 0 };
 		walk.in.heading = Vec3{ 500, 150, 0 } / Vec3{ 500, 150, 0 }.Length();  // towards door B
@@ -815,6 +847,7 @@ int RunGraphTests()
 	Run("scheduler: walking up promotes one tier at a time", SchedulerApproach);
 	Run("scheduler: a shut door is not live", SchedulerCloseDoorNotLive);
 	Run("scheduler: walking away demotes past the hysteresis", SchedulerWalkAway);
+	Run("scheduler: a loaded space is held, not let go and attached again at once", SchedulerHoldsLoaded);
 	Run("scheduler: no flapping at a boundary", SchedulerNoFlapping);
 	Run("scheduler: memory budget demotes the least likely", SchedulerBudget);
 	Run("scheduler: picture costs follow the picture settings", PictureCosts);

@@ -276,9 +276,15 @@ namespace
 						// loads are done (Update), and the view back isn't attached before.
 						purgeDeadline = Clock::now() + kPurgeWaitMax;
 						Portal::Crossing::EndHoldoff(std::chrono::duration<float>(kPurgeWaitMax).count() + 1.0f);
+						Portal::Crossing::Arrived();
 					} else {
 						Portal::Manager::OnArrival();
 					}
+				} else {
+					// Into a room: the crossing is over all the same. Not told, the sequence waited for its arrival
+					// until the cross timeout and sent the player through the door the engine's way (loading screen,
+					// the doorway an ordinary door for the rest of the session).
+					Portal::Crossing::Arrived();
 				}
 				// The player's 3D at the place of arrival before the camera is placed from its head: left
 				// where the teleport put it until the frame's scene update, the first frame in the new

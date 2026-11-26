@@ -88,6 +88,14 @@ namespace Core::Graph
 		// reported a failure none of that space for this long.
 		float attachSeconds = Selection::kWarmAttachSeconds;
 		float retrySeconds = Selection::kRetryCooldown;
+		// A heavy space (loaded, T3 and up) is never let go this soon after it was attached, nor attached
+		// again this soon after it was let go, whatever the ranking says in between: an attach costs
+		// milliseconds and a release tears a cell's actors and physics down while the engine's job threads
+		// may be updating them (the game died in an actor's character proxy when a room was released a
+		// third of a second after its attach). Only the doorway no longer being a way through (locked,
+		// switched off, no longer reachable from the player's space) lets one go earlier.
+		float minHoldSeconds = Selection::kMinHoldSeconds;
+		float reattachSeconds = Selection::kReattachSeconds;
 		// The highest tier a doorway's space may reach by what the door is: a scripted door keeps the
 		// engine's own behaviour (nothing here), a locked one can't be opened, so never live or loaded.
 		Tier      scriptedCap = Tier::Cold;
@@ -176,6 +184,8 @@ namespace Core::Graph
 		SchedulerConfig        config;
 		std::vector<Tier>      tiers;           // by space
 		std::vector<float>     retryCooldown;   // by space
+		std::vector<float>     heldFor;         // by space: seconds at T3 or above, 0 below
+		std::vector<float>     releasedFor;     // by space: seconds since it was let go from T3 or above
 		std::vector<bool>      forced;          // by doorway
 		std::vector<bool>      open;            // by door, set during a tick
 		std::vector<bool>      blocked;         // by door, set during a tick

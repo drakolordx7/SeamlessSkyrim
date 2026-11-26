@@ -32,6 +32,15 @@ namespace Core::Selection
 	// One attach at a time, a few times a second at most: each makes a long frame (3-10 ms, more
 	// for a room whose 3D has to be loaded).
 	inline constexpr float kWarmAttachSeconds = 0.5f;
+	// A loaded space is held at least this long before it may be let go, and a space let go is not
+	// attached again for kReattachSeconds: churn on a heavy space (its actors, physics, lights) is what
+	// crashed the game; a ranking that flips is not a reason to do it.
+	inline constexpr float kMinHoldSeconds = 8.0f;
+	inline constexpr float kReattachSeconds = 4.0f;
+	// The fastest the player can really move (a galloping horse, units per second). A step quicker than
+	// this is a teleport (the harness's move_to, a crossing, fast travel), not a speed to lead the loads
+	// by: counted as one, a short teleport towards a door made it look like running at it.
+	inline constexpr float kMaxSpeed = 1200.0f;
 	// A cell that failed to attach isn't tried again for this long.
 	inline constexpr float kRetryCooldown = 5.0f;
 	// Half the switch margin: turning round between two doors equally far changes their order by

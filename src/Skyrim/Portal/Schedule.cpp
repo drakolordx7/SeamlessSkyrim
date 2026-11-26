@@ -363,9 +363,13 @@ namespace Portal::Schedule
 		const auto position = a_player->GetPosition();
 		if (lastPosition && a_delta > 0.0f) {
 			const auto step = position - *lastPosition;
-			// A jump is a teleport or a crossing, no speed.
-			const auto raw = step.Length() > 500.0f ? Core::Vec3() : ToCore(step) / a_delta;
-			velocity = velocity + (raw - velocity) * std::min(1.0f, 6.0f * a_delta);
+			// A step quicker than anyone can move is a teleport or a crossing, no speed (a short teleport, like
+			// the crawler's move_to, looked like running at the door and loaded rooms for it).
+			if (step.Length() > 500.0f || step.Length() > Core::Selection::kMaxSpeed * a_delta) {
+				velocity = Core::Vec3();
+			} else {
+				velocity = velocity + (ToCore(step) / a_delta - velocity) * std::min(1.0f, 6.0f * a_delta);
+			}
 		}
 		lastPosition = position;
 		const auto here = ToCore(position);
