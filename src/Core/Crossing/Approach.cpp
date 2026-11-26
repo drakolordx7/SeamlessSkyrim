@@ -89,7 +89,10 @@ namespace Core::Crossing
 			const float pictureDepth = PictureDepth(doorway.halfDepth, a.gate);
 			cameraAtPicture = out.cameraDepth + a.nearPlane + 2.0f >= pictureDepth && SideOf(doorway, a.camera) <= doorway.halfWidth + 20.0f && inDoorway && approaching;
 		}
-		out.cross = a.merged ? (depth >= 15.0f && out.cameraDepth >= 2.0f) || depth >= kMergedCrossDepth :
+		// Merged, only a player walking into the doorway is carried in: one who has just come out of this
+		// door stands in its doorway 17 units short of the threshold, and a dog or a man walking in
+		// through it (Whiterun's House of Clan Battle-Born) shoved them over it and into the house.
+		out.cross = a.merged ? (a.playerMoving && depth >= 15.0f && out.cameraDepth >= 2.0f) || depth >= kMergedCrossDepth :
 		                       (depth >= -lead && inDoorway && (approaching || depth >= 0.0f)) || cameraAtPicture;
 		out.limitCamera = a.pullIn || a.merged;
 		out.cameraFloor = a.merged ? kMergedCameraMin : 0.0f;

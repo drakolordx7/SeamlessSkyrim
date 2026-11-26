@@ -363,6 +363,13 @@ namespace
 		CHECK(!merged.Decide(inMerged).cross);
 		inMerged.player.y = 61.0f;
 		CHECK(merged.Decide(inMerged).cross);
+		// Shoved over the threshold while standing still (an NPC walking through the doorway): not carried in.
+		inMerged.player.y = 20.0f;
+		inMerged.camera.y = 3.0f;
+		inMerged.playerMoving = false;
+		CHECK(!merged.Decide(inMerged).cross);
+		inMerged.playerMoving = true;
+		CHECK(merged.Decide(inMerged).cross);
 		// Picture depth: behind the panel for a door, in front for a gate.
 		CHECK(C::PictureDepth(4.0f, false) == 6.0f && C::PictureDepth(4.0f, true) == -6.0f);
 	}

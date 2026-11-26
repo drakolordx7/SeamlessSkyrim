@@ -232,6 +232,11 @@ Found porting the plugin; each was checked in the code of both.
   houses and the Stables, walking out) holds the player 42 units short of the plane, so a passage
   opened only from 25 units (`Approach`'s `kPassageOpenDepth`) never opened. A ray ahead of the
   player (`blockedAhead`) widens the reach to 80.
+- **NPCs shove a standing player.** An NPC (and its dog) walking through a doorway the player stands
+  in moves them along its path, 17 units in under a second, with `PlayerCharacter::IsMoving()` false
+  throughout (Whiterun, House of Clan Battle-Born's door: Lars and his puppy walking home just after
+  the player came out of it). A walk of the player's own reads `IsMoving()` true, so the merged
+  crossing (`Approach`) asks for it: a position past the threshold alone is no walk in.
 - **Line of sight:** ID 37761 (observer, target, mode), called by detection and combat (IDs 39639,
   39640, 41246, among twelve callers). ID 53829 (`HasLineOfSight`) only dispatches to it.
 - **Conditions:** `GetInWorldspace` is ID 21475 and compares exactly. Conditions run through the
