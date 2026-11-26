@@ -182,6 +182,18 @@ namespace
 		Apply(Core::Doorway::CutAt(Core::Doorway::KeptSide(*clip), ToCore(bound.center), bound.radius));
 	}
 
+	// The cube emitter of the weather's rain or snow when a_shape is its shape (Sky::precip).
+	const RE::BSParticleShaderCubeEmitter* PrecipitationEmitter(const RE::BSGeometry* a_shape)
+	{
+		const auto* precipitation = RE::Sky::GetSingleton()->precip;
+		if (a_shape != precipitation->currentPrecip.get() && a_shape != precipitation->lastPrecip.get()) {
+			return nullptr;
+		}
+		const auto* property = netimmerse_cast<RE::BSParticleShaderProperty*>(a_shape->GetGeometryRuntimeData().shaderProperty.get());
+		SEAMLESS_ASSERT(property && property->particleEmitter);
+		return static_cast<const RE::BSParticleShaderCubeEmitter*>(property->particleEmitter);
+	}
+
 	void PlanMerged(const RE::BSRenderPass* a_pass)
 	{
 		std::optional<Door> d;
@@ -194,8 +206,19 @@ namespace
 		if (!d || !Pass::InMainWorldPass() || Render::Scene().IsPlayerShape(a_pass->geometry)) {
 			return;
 		}
-		const auto& bound = a_pass->geometry->worldBound;
-		Apply(Core::Doorway::CutThroughDoorway(*d, ToCore(Eye()), passage, Render::Scene().IsMergedShape(a_pass->geometry), ToCore(bound.center), bound.radius));
+		const auto* shape = a_pass->geometry;
+		auto        center = ToCore(shape->worldBound.center);
+		float       radius = shape->worldBound.radius;
+		if (const auto* emitter = PrecipitationEmitter(shape)) {
+			// The weather's rain and snow: the shape's bound is that of its static vertices, not of
+			// where the shader puts the particles (around the camera, in a cube of the emitter's size;
+			// Belethor's: the bound's centre 1275 units off, radius 705, wholly beyond the doorway's
+			// planes, so seen from indoors the rain was left out whole). The shape's origin follows the
+			// camera; the cube's half-diagonal plus the streaks' length stays within its size.
+			center = ToCore(shape->world.translate);
+			radius = emitter->cubeSize;
+		}
+		Apply(Core::Doorway::CutThroughDoorway(*d, ToCore(Eye()), passage, Render::Scene().IsMergedShape(shape), center, radius));
 	}
 
 	void BeginPass(const RE::BSRenderPass* a_pass)
