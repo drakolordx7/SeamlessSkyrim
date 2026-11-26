@@ -8,6 +8,7 @@
 #include "Skyrim/Portal/LightOcclusion.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
+#include "Skyrim/Portal/Schedule.h"
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Render/D3D.h"
 #include "Skyrim/Render/MainView.h"
@@ -183,6 +184,15 @@ namespace Pictures
 			Guarded([&] {
 				// Shown: an always-open door of the street merged into a room is drawn moved with it.
 				const auto corners = Portal::Doors::ShownQuad(Portal::Doors::Door(standIn.door), viewer, { .behindPanel = !standIn.gate, .wholeMesh = standIn.gate });
+				// The best picture that is ready, no better than the scheduler holds the space behind the door at
+				// (Schedule::DoorTier): the depth image from T2, else the image from T1.
+				const Pictures::Doorway doorway{ standIn.door, standIn.outdoors, standIn.gate };
+				const auto              tier = Portal::Schedule::DoorTier(standIn.door);
+				if ((tier >= Core::Graph::Tier::DepthImage && Pictures::Draw(doorway, Pictures::Tier::kDepthImage, view, corners, standIn.alpha)) ||
+					(tier >= Core::Graph::Tier::Image && Pictures::Draw(doorway, Pictures::Tier::kImage, view, corners, standIn.alpha))) {
+					return;
+				}
+				// A door never seen open: the plain colour, so the doorway isn't the void behind the door.
 				using Kind = Pictures::Adaptation::Kind;
 				Pictures::Adaptation adaptation{ Kind::kNone, look.daylight };
 				if (standIn.outdoors && hereIndoors) {

@@ -7,6 +7,8 @@
 #include "Skyrim/Doors/Settings.h"
 #include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Graph/DoorScan.h"
+#include "Skyrim/Pictures/PictureSize.h"
+#include "Skyrim/Pictures/Tiers.h"
 #include "Skyrim/Plugin/Settings.h"
 #include "Skyrim/Portal/Crossing.h"
 #include "Skyrim/Doors/Hold.h"
@@ -28,6 +30,8 @@ namespace Portal::Schedule
 		int targetFrameRate = Plugin::Settings::Of(Id::kTargetFrameRate).def;
 
 		std::vector<Spaces::RemoteCell> kept;
+		// The doors (in the player's space) whose pictures the scheduler has asked Pictures for.
+		std::vector<RE::FormID> pictureDoors;
 		// The last thing decided about a space (by id) and why a door fell back: for DescribeDoor.
 		std::unordered_map<std::string, std::string> lastDecision;
 		std::unordered_map<RE::FormID, std::string>  fallbackWhy;
@@ -62,6 +66,7 @@ namespace Portal::Schedule
 			config.maxLive = 1;  // the manager shows one portal
 			config.maxLoaded = static_cast<std::uint32_t>(loadedRooms);
 			config.liveReach = Selection::DoorOpenDistance();
+			config.defaultCost = SpaceCost::ForPictures(Pictures::PictureHeight(), Pictures::DepthLayers());
 			return config;
 		}
 
@@ -121,6 +126,47 @@ namespace Portal::Schedule
 			}
 		}
 
+		void CancelPictures(RE::FormID a_door)
+		{
+			Pictures::Cancel(a_door);
+			std::erase(pictureDoors, a_door);
+		}
+
+		// A space's tier changed: the pictures of the doorways leading to it follow. T1 asks for the
+		// image, T2 and up for the depth image too; below T1 nothing is asked for. A door whose space is
+		// not the player's (it was let go as the player moved on) only has its requests dropped.
+		void DrivePictures(const TierChange& a_change)
+		{
+			const auto& graph = Graph::Get();
+			for (const auto wayIx : graph.DoorwaysOf(a_change.space)) {
+				const auto& way = graph.GetDoorway(wayIx);
+				if (a_change.to < Tier::Image) {
+					for (const auto end : { way.a, way.b }) {
+						if (end != kNoDoor) {
+							CancelPictures(Graph::DoorForm(end));
+						}
+					}
+					continue;
+				}
+				const auto doorIx = way.Other(a_change.space) == playerSpace ? way.DoorIn(playerSpace) : kNoDoor;
+				if (doorIx == kNoDoor) {
+					continue;
+				}
+				const Pictures::Doorway doorway{ Graph::DoorForm(doorIx), Graph::IsWorld(a_change.space), way.kind == DoorKind::Gate };
+				if (a_change.to < Tier::DepthImage && a_change.from >= Tier::DepthImage) {
+					// Back to the image alone: the depth image's views are no longer wanted.
+					CancelPictures(doorway.door);
+				}
+				if (!std::ranges::contains(pictureDoors, doorway.door)) {
+					pictureDoors.push_back(doorway.door);
+				}
+				Pictures::Request(doorway, Pictures::Tier::kImage);
+				if (a_change.to >= Tier::DepthImage) {
+					Pictures::Request(doorway, Pictures::Tier::kDepthImage);
+				}
+			}
+		}
+
 		void LetGo(std::vector<Spaces::RemoteCell>::iterator a_space, std::string_view a_why)
 		{
 			logger::info("schedule: let go of {}, kept loaded ({})", Probe::DescribeCell(a_space->Cell()), a_why);
@@ -167,13 +213,14 @@ namespace Portal::Schedule
 			static constexpr const char* reasons[] = { "entered", "approach", "retreat", "door closed", "left reach", "budget", "headroom" };
 			for (const auto& change : a_changes) {
 				lastDecision[graph.GetSpace(change.space).id] = std::format("{} -> {} ({})", Name(change.from), Name(change.to), reasons[static_cast<int>(change.reason)]);
-				// Pictures come and go with the tier (ShowsPicture); only the ones that hold a cell are logged.
+				// Pictures come and go with the tier (DrivePictures); only the ones that hold a cell are logged.
 				if (change.from >= Tier::LoadedPaused || change.to >= Tier::LoadedPaused) {
 					logger::info("schedule: {} {} -> {} ({})", graph.GetSpace(change.space).id, Name(change.from), Name(change.to), reasons[static_cast<int>(change.reason)]);
 				}
 				if (change.space == playerSpace) {
 					continue;
 				}
+				DrivePictures(change);
 				if (change.to < Tier::LoadedPaused) {
 					// The shown portal's space is let go by the manager, once its door has shut.
 					for (auto it = kept.begin(); it != kept.end(); ++it) {
@@ -372,23 +419,20 @@ namespace Portal::Schedule
 		return approached;
 	}
 
-	bool ShowsPicture(RE::FormID a_door)
+	Tier DoorTier(RE::FormID a_door)
 	{
 		const auto ix = Graph::DoorOf(a_door);
-		if (ix == kNoDoor) {
-			return true;
+		if (ix == kNoDoor || ix >= Graph::Get().DoorCount()) {
+			return Tier::Image;
 		}
 		const auto& graph = Graph::Get();
-		if (ix >= graph.DoorCount()) {
-			return true;
-		}
 		const auto& door = graph.GetDoor(ix);
-		// A door of a space merged into the player's, seen through another: the scheduler holds its picture's space already.
+		// A door of a space merged into the player's, seen through another: no tier of its own here.
 		if (door.space != playerSpace) {
-			return true;
+			return Tier::Image;
 		}
 		const auto other = graph.GetDoorway(door.doorway).Other(door.space);
-		return other != kNoSpace && scheduler->TierOf(other) >= Tier::Image;
+		return other != kNoSpace ? scheduler->TierOf(other) : Tier::Cold;
 	}
 
 	void Fallback(RE::FormID a_door, std::string_view a_reason)
@@ -420,6 +464,9 @@ namespace Portal::Schedule
 	{
 		while (!kept.empty()) {
 			LetGo(kept.begin(), a_reason);
+		}
+		while (!pictureDoors.empty()) {
+			CancelPictures(pictureDoors.back());
 		}
 		scheduler->Reset();
 		live.reset();

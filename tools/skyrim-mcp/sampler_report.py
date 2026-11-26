@@ -3,7 +3,7 @@
     python sampler_report.py <file> [from_ms] [to_ms] [--top N] [--chain "ID 75708"]
 
 Prints inclusive and exclusive sample counts per function (SkyrimSE frames resolved to Address
-Library IDs, SeamlessSkyrim and the Community Shaders fork to functions from their PDBs, other
+Library IDs, SeamlessSkyrim to functions from its PDB, other
 modules by name) for the samples in the time window. With --chain, prints the most common call
 chains around the given function instead (frames as "ID n+0xoffset").
 """
@@ -28,11 +28,10 @@ args = parser.parse_args()
 d = server.disassembler()
 cache: dict[tuple[str, bool], str] = {}
 
-# Named from the builds' PDBs: the DLLs in the game must be these builds, or the names are wrong.
+# Named from the build's PDB: the DLL in the game must be this build, or the names are wrong.
 # The system's dbghelp found no symbols in them; Visual Studio's llvm-symbolizer does.
 OWN_MODULES = {
     "SeamlessSkyrim": Path(__file__).parents[2] / "build/RelWithDebInfo/SeamlessSkyrim.dll",
-    "CommunityShaders": Path("E:/projects/CommunityShaders-Seamless/build/ALL/Release/CommunityShaders.dll"),
 }
 SYMBOLIZER = next(iter(sorted(glob.glob("C:/Program Files/Microsoft Visual Studio/*/*/VC/Tools/MSVC/*/bin/Hostx64/x64/llvm-symbolizer.exe"))), None)
 symbols: dict[tuple[str, int], str] = {}

@@ -18,12 +18,16 @@ namespace Core::Selection
 	inline constexpr float kReleaseBeyond = 400.0f;
 	// A different door must be this much closer before we switch portals.
 	inline constexpr float kSwitchMargin = 200.0f;
-	// Out to this reach a doorway holds a depth picture (Graph::SchedulerConfig::depthReach).
+	// Out to this reach a doorway holds a depth image (Graph::SchedulerConfig::depthReach). Its parallax
+	// shows within a few doorway heights of the door; further out the image tier looks the same and
+	// costs half as much.
+	inline constexpr float kDepthReach = 1000.0f;
+	// A doorway holds a picture (the image tier) out to this reach, kWarmDistance times kSparseReach.
 	inline constexpr float kWarmDistance = 2000.0f;
 	// A room kept loaded is let go only this much further out, so walking along that boundary
 	// doesn't attach and let go of the same room over and over.
 	inline constexpr float kWarmMargin = 400.0f;
-	// A doorway holds a picture out to this many times as far as that.
+	// Out to this many times kWarmDistance.
 	inline constexpr float kSparseReach = 2.0f;
 	// One attach at a time, a few times a second at most: each makes a long frame (3-10 ms, more
 	// for a room whose 3D has to be loaded).

@@ -9,12 +9,16 @@
 // with the machinery the portals already have.
 //
 //   T0 cold          nothing held
-//   T1 / T2 picture  the doorway may show its picture (StandIns asks ShowsPicture); Pictures keeps
-//                    one kind of picture per door today, so a depth picture is the same one
+//   T1 image         the doorway may show its image (Pictures::Tier::kImage), asked for here
+//   T2 depth image   or its depth image (kDepthImage, which falls back to the image where its views
+//                    don't reach); asked for here. StandIns draws the best of them that is ready, no
+//                    better than the door's tier (DoorTier)
 //   T3 loaded        the space is attached and paused (RemoteCell, a "kept" space), ready to be shown
 //   T4 live          the manager's portal (PortalManager): shown, simulated, merged when close
 //
-// The kept spaces are carried out here, as events (a promotion to T3 attaches, a demotion lets go).
+// The pictures are carried out here too, as events: a space promoted to T1 or T2 has its doorway's
+// pictures requested (Pictures::Request), one demoted below T1 has them cancelled. The kept spaces
+// are the same (a promotion to T3 attaches, a demotion lets go).
 // The live space is level-triggered: LiveCandidate is the doorway of the space the scheduler holds
 // live, and the manager brings it up (from the kept space if there is one) and takes it down.
 namespace Portal::Schedule
@@ -58,9 +62,10 @@ namespace Portal::Schedule
 	};
 	[[nodiscard]] const std::optional<Approached>& ApproachedDoorway();
 
-	// The doorway of a_door (in the player's space) may show its picture: its space is held at T1 or
-	// more. A door the graph doesn't know yet may.
-	[[nodiscard]] bool ShowsPicture(RE::FormID a_door);
+	// The tier of the space behind a_door (in the player's space): which pictures its doorway may show,
+	// T1 the image, T2 and up the depth image. A door the graph doesn't know, or of a space merged
+	// into the player's and seen through another, counts as T1: its image if there is one.
+	[[nodiscard]] Core::Graph::Tier DoorTier(RE::FormID a_door);
 	// Why a door shows no portal, or that it does (bridge door_status): the scheduler's tier for the
 	// space behind it, its last decision, the door's state and the first thing that stops it.
 	[[nodiscard]] json DescribeDoor(RE::FormID a_door);

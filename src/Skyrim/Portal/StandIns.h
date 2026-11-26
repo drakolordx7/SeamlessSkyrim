@@ -6,9 +6,10 @@
 
 // The doorway before the space behind it is there. A door used to stay shut until the space behind
 // it had loaded: on a slow computer, walked up to and stood at, shut. A door that is to open
-// (Doors::Wanted) now swings open whatever the load, and its doorway shows a blurred picture of
-// what was last seen through it (Pictures, DoorwaySnapshot.h), or a plain colour, until the real space takes
-// over and the picture fades out. The door's collision stays: there is nothing to walk into yet. A
+// (Doors::Wanted) now swings open whatever the load, and its doorway shows a picture of what was
+// last seen through it (Pictures, Tiers.h: the depth image where the scheduler holds the space at T2
+// and the picture is ready, else the image), or a plain colour, until the real space takes over and
+// the picture fades out. The door's collision stays: there is nothing to walk into yet. A
 // city gate shows its picture too, if set to (Gates).
 namespace Portal::StandIns
 {

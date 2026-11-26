@@ -36,12 +36,20 @@ namespace Core::Graph
 	// What holding a space at a tier costs. Estimates the adapter measures or guesses; the defaults are guesses.
 	struct SpaceCost
 	{
-		float imageMb = 1.5f;
-		float depthMb = 6.0f;
+		// What holding the doorway's pictures takes, in video memory, at the default size (512 texels,
+		// 3 views; ForPictures works it out for another): a room's image is 1344 x 896 half-float texels
+		// with its mips, ~12 MB. The depth tier keeps the image too (the depth image falls back to it
+		// where its views don't reach), so it is the image and the views' ~10 MB.
+		float imageMb = 12.3f;
+		float depthMb = 22.7f;
 		float loadedMb = 120.0f;  // loaded and paused
 		float liveMb = 20.0f;     // more, once live
 		float attachMs = 1.5f;    // frame time a slice of attaching takes
 		float liveMs = 2.0f;      // frame time per frame while live, the player's own space excepted
+
+		// The picture costs of a room door's pictures at a_pictureHeight texels across the doorway's
+		// height and a_depthLayers views (Settings iDoorwayPictureHeight, iDoorwayDepthLayers).
+		[[nodiscard]] static SpaceCost ForPictures(int a_pictureHeight, int a_depthLayers);
 
 		[[nodiscard]] constexpr float Mb(Tier a_tier) const
 		{
@@ -69,7 +77,7 @@ namespace Core::Graph
 		// A door within this reach (gates count nearer, Selection::Reach) can make its space live when it is open.
 		float liveReach = 450.0f;
 		// Out to here the doorway holds a depth picture, and a picture beyond that out to imageReach.
-		float depthReach = Selection::kWarmDistance;
+		float depthReach = Selection::kDepthReach;
 		float imageReach = Selection::kWarmDistance * Selection::kSparseReach;
 		// Spaces are loaded for where the player will be this many seconds ahead, at the speed they
 		// close in on the door: a run towards a door starts the load earlier than a stroll.

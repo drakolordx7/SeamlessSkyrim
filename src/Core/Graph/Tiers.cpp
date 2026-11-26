@@ -4,6 +4,9 @@
 #include <cfloat>
 #include <numeric>
 
+#include "Core/Pictures/Camera.h"
+#include "Core/Pictures/Layers.h"
+
 namespace Core::Graph
 {
 	namespace
@@ -43,6 +46,18 @@ namespace Core::Graph
 				return Tier::Cold;
 			}
 		}
+	}
+
+	SpaceCost SpaceCost::ForPictures(int a_pictureHeight, int a_depthLayers)
+	{
+		constexpr float kMegabyte = 1024.0f * 1024.0f;
+		constexpr float kMips = 4.0f / 3.0f;
+		const auto [imageWidth, imageHeight] = Pictures::Camera::SizeFor(Pictures::Camera::kRoomCamera.extent, a_pictureHeight, Pictures::Camera::kNarrowest);
+		const auto [layerWidth, layerHeight] = Pictures::Layers::SizeOf(a_pictureHeight);
+		SpaceCost  cost;
+		cost.imageMb = static_cast<float>(imageWidth) * static_cast<float>(imageHeight) * Pictures::Camera::kBytesPerTexel * kMips / kMegabyte;
+		cost.depthMb = cost.imageMb + static_cast<float>(a_depthLayers) * static_cast<float>(layerWidth) * static_cast<float>(layerHeight) * Pictures::Camera::kBytesPerTexel * kMips / kMegabyte;
+		return cost;
 	}
 
 	TierScheduler::TierScheduler(const SpaceGraph& a_graph, const SchedulerConfig& a_config) :

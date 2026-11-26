@@ -36,7 +36,7 @@ import retools
 # Override with environment variables, or with a harness.json next to this file (not in git:
 # {"game_dir": "...", "mo2_dir": ...}; keys are the lower-case names below without SKYRIM_);
 # the environment wins over the file. For the original Vortex/Steam setup:
-#   SKYRIM_LAUNCH=skse SKYRIM_GAME_DIR="E:\SteamLibrary\steamapps\common\Skyrim Special Edition"
+#   SKYRIM_LAUNCH=skse SKYRIM_GAME_DIR="<steam library>\steamapps\common\Skyrim Special Edition"
 #   SKYRIM_SAVES_DIR="" (empty: derived from Skyrim.ini's sLocalSavePath in SKYRIM_DOCS_DIR)
 #
 #   SKYRIM_LAUNCH       "mo2" (default: ModOrganizer.exe moshortcut://:<SKYRIM_MO2_EXE>, so the mods

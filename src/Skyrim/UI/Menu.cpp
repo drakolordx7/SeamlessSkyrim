@@ -40,6 +40,13 @@ namespace
 		return static_cast<double>(width) * height * Pictures::Camera::kBytesPerTexel;
 	}
 
+	// What one view of a door's depth image takes on disk at this doorway height.
+	double DepthViewBytes(int a_height)
+	{
+		const auto [width, height] = Pictures::Layers::SizeOf(a_height);
+		return static_cast<double>(width) * height * Pictures::Camera::kBytesPerTexel;
+	}
+
 	// How many times fewer texels a doorway-only picture (a door to the outdoors) has than a room's.
 	long DoorwayOnlyShare(int a_height)
 	{
@@ -133,7 +140,8 @@ namespace
 				Portal::Schedule::SetMemoryBudgetMb(memory);
 			}
 			SaveWhenReleased(Id::kMemoryBudgetMb, memory);
-			ImGui::TextWrapped("What the rooms kept loaded and their pictures may take together; the least likely room gives way first.");
+			ImGui::TextWrapped("What the rooms kept loaded and the doorway pictures held for the doors around you may take together. "
+							   "When it runs out, the door you are least likely to use next gives up its room, then its picture.");
 
 			ImGui::NewLine();
 
@@ -143,8 +151,8 @@ namespace
 				Portal::Schedule::SetTargetFrameRate(rate);
 			}
 			SaveWhenReleased(Id::kTargetFrameRate, rate);
-			ImGui::TextWrapped("A room is made live only while the game has frame time to spare at this rate. Below it, doors keep to "
-							   "pictures and the game's own loading.");
+			ImGui::TextWrapped("A room behind a door is shown live only while the game has frame time to spare at this rate. "
+							   "Below it, that door keeps to its picture and the game's own loading screen.");
 		}
 
 		ImGui::NewLine();
@@ -184,9 +192,9 @@ namespace
 		{
 			// Presets rather than a slider: each size is a texture and a file per door, so a few
 			// steps that double are all that's worth offering.
-			constexpr int         heights[]{ 64, 128, 192, 256, 384, 512 };
-			// The sizes on disk are a door into a room's: its picture reaches past the doorway at
-			// twice the density (Pictures::Camera).
+			constexpr int         heights[]{ 64, 128, 192, 256, 384, 512, 768, 1024 };
+			// The sizes on disk are a door into a room's: its picture reaches past the doorway
+			// (Pictures::Camera).
 			static const std::vector<std::string> labels = [&] {
 				std::vector<std::string> texts;
 				for (const int height : heights) {
@@ -211,10 +219,41 @@ namespace
 				Pictures::SetPictureHeight(heights[index]);
 				Plugin::Settings::SaveUser(Id::kDoorwayPictureHeight, heights[index]);
 			}
-			ImGui::TextWrapped("The blurred picture a doorway shows while the space behind it loads, in texels across the doorway. "
-							   "Larger is sharper; each door is taken again at the new size when next seen open (doors to the outdoors "
-							   "keep one per part of the day, of the doorway only: a %ldth of the size).",
+			ImGui::TextWrapped("The picture of the room behind a doorway, shown from a distance and while the room loads, in texels "
+							   "across the doorway's height. Larger is sharper and takes more disk and video memory; on a 1080p screen "
+							   "512 is about as sharp as it gets. A door is taken again at the new size when next seen open. A door to "
+							   "the outdoors keeps one picture per time of day, of the doorway only (about %ld times smaller).",
 				DoorwayOnlyShare(Plugin::Settings::Of(Id::kDoorwayPictureHeight).def));
+
+			ImGui::NewLine();
+
+			{
+				constexpr const char* layerLabels[]{ "Off (the picture only)", "1 view", "2 views", "3 views" };
+				const auto&           layersRange = Plugin::Settings::Of(Id::kDoorwayDepthLayers);
+				int                   layers = std::clamp(Pictures::DepthLayers(), layersRange.min, layersRange.max);
+				if (ImGui::Combo("Doorway depth views", &layers, layerLabels, static_cast<int>(std::size(layerLabels)))) {
+					Plugin::Settings::SaveUser(Id::kDoorwayDepthLayers, layers);
+				}
+				ImGui::TextWrapped("Extra views of the room from just inside the doorway, used for doors closer than about a thousand "
+								   "units: walking past, you see furniture shift against the wall behind it instead of a flat picture. "
+								   "Each view is about %s MB per door at the picture size above. Not for city gates. Doors are taken "
+								   "again when next seen open.",
+					MegabytesText(DepthViewBytes(Pictures::PictureHeight())).c_str());
+			}
+
+			ImGui::NewLine();
+
+			{
+				const auto& cacheRange = Plugin::Settings::Of(Id::kDoorwayCacheMegabytes);
+				int         cache = Plugin::Settings::Int(Id::kDoorwayCacheMegabytes);
+				ImGui::SliderInt("Picture folder size (MB)", &cache, cacheRange.min, cacheRange.max, "%d", ImGuiSliderFlags_Logarithmic);
+				SaveWhenReleased(Id::kDoorwayCacheMegabytes, cache);
+				ImGui::TextWrapped("The most disk the doorway pictures may take in the SeamlessSkyrim_Doorways folder. Past it, the ones "
+								   "you saw longest ago are deleted.");
+			}
+
+			ImGui::NewLine();
+
 			// Until another click: the result of this one, so the click visibly did something.
 			static std::optional<int> deleted;
 			if (ImGui::Button("Delete all doorway pictures")) {
@@ -224,7 +263,7 @@ namespace
 				ImGui::SameLine();
 				ImGui::Text("%d deleted", *deleted);
 			}
-			ImGui::TextWrapped("Each door shows the plain colour until it is next seen open, and is taken again then.");
+			ImGui::TextWrapped("Each door shows a plain colour until it is next seen open, and is taken again then.");
 		}
 	}
 

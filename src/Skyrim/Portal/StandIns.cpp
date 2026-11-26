@@ -187,9 +187,9 @@ namespace Portal::StandIns
 		for (const auto& candidate : standInDoors) {
 			auto* door = RE::TESForm::LookupByID<RE::TESObjectREFR>(candidate.door);
 			// Not a door the portal holds open itself (swinging shut after its space was let go).
-			// Only a doorway whose space the scheduler holds at a picture or better (Schedule::ShowsPicture).
+			// Only a doorway whose space the scheduler holds at a picture or better (Schedule::DoorTier).
 			if (standIns.contains(candidate.door) || !door || !door->Get3D() || real(candidate.door) || (PortalDoor::Holds(candidate.door) && !PortalDoor::Shut()) ||
-				!Schedule::ShowsPicture(candidate.door) || !Portal::Doors::Wanted(door, { candidate.linked, candidate.outdoors })) {
+				Schedule::DoorTier(candidate.door) < Core::Graph::Tier::Image || !Portal::Doors::Wanted(door, { candidate.linked, candidate.outdoors })) {
 				continue;
 			}
 			auto& standIn = standIns[candidate.door];
@@ -229,7 +229,7 @@ namespace Portal::StandIns
 					continue;
 				}
 			}
-			if (!door || !door->Get3D() || !InView(door, a_here) || !Schedule::ShowsPicture(id)) {
+			if (!door || !door->Get3D() || !InView(door, a_here) || Schedule::DoorTier(id) < Core::Graph::Tier::Image) {
 				UnswingStandIn(id, standIn);
 				Portal::Doors::Close(standIn.open);
 				it = standIns.erase(it);

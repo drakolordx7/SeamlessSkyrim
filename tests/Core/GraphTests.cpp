@@ -2,6 +2,7 @@
 // The census test reads the door census JSON (tools/census) if it is there and skips otherwise.
 #define _CRT_SECURE_NO_WARNINGS  // getenv
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -458,7 +459,7 @@ namespace
 		CHECK(walk.scheduler.TierOf(house) == Tier::Live);
 
 		// Walking away at 300 units a second: each tier is let go only past its own reach plus the
-		// margin (live 450 + 100, loaded 750 + 400, picture 2000 + 400, 4000 + 400), the door's distance being 1000 - x.
+		// margin (live 450 + 100, loaded 750 + 400, depth image 1000 + 400, picture 4000 + 400), the door's distance being 1000 - x.
 		std::vector<std::pair<Tier, float>> seen;
 		for (float x = 900.0f; x > -3600.0f; x -= 5.0f) {
 			walk.in.position = { x, 0, 0 };
@@ -473,7 +474,7 @@ namespace
 		if (seen.size() == 4) {
 			CHECK(seen[0].first == Tier::LoadedPaused && seen[0].second > 550.0f && seen[0].second < 565.0f);
 			CHECK(seen[1].first == Tier::DepthImage && seen[1].second > 1150.0f && seen[1].second < 1165.0f);
-			CHECK(seen[2].first == Tier::Image && seen[2].second > 2400.0f && seen[2].second < 2415.0f);
+			CHECK(seen[2].first == Tier::Image && seen[2].second > 1400.0f && seen[2].second < 1415.0f);
 			CHECK(seen[3].first == Tier::Cold && seen[3].second > 4400.0f && seen[3].second < 4415.0f);
 		}
 	}
@@ -522,9 +523,9 @@ namespace
 		CHECK(walk.scheduler.TierOf(a) == Tier::LoadedPaused && walk.scheduler.TierOf(b) == Tier::LoadedPaused && walk.scheduler.TierOf(c) == Tier::LoadedPaused);
 		CHECK(walk.scheduler.MemoryMb() > 359.0f && walk.scheduler.MemoryMb() < 361.0f);
 
-		// The budget shrinks to about one loaded room: the least likely (C) gives way entirely, then A
-		// as far as it must, and B, the likeliest, stays.
-		walk.in.memoryBudgetMb = 135.0f;
+		// The budget shrinks to about one loaded room and a depth image: the least likely (C) gives way
+		// entirely, then A as far as it must, and B, the likeliest, stays.
+		walk.in.memoryBudgetMb = 150.0f;
 		const auto changes = walk.Step();
 		CHECK(changes.size() == 2);
 		CHECK(walk.scheduler.TierOf(b) == Tier::LoadedPaused && walk.scheduler.TierOf(a) == Tier::DepthImage && walk.scheduler.TierOf(c) == Tier::Cold);
@@ -533,13 +534,38 @@ namespace
 		}
 		CHECK(walk.Stand(3.0f).empty());
 		// and it stays that way: no promotion past the budget
-		CHECK(walk.scheduler.MemoryMb() <= 135.0f);
+		CHECK(walk.scheduler.MemoryMb() <= 150.0f);
 
 		// a tighter one still: B alone
 		walk.in.memoryBudgetMb = 121.0f;
 		walk.Stand(1.0f);
 		CHECK(walk.scheduler.TierOf(b) == Tier::LoadedPaused && walk.scheduler.TierOf(a) == Tier::Cold && walk.scheduler.TierOf(c) == Tier::Cold);
 		CHECK(walk.scheduler.MemoryMb() <= 121.0f);
+	}
+
+	// What the pictures of a room door cost the scheduler follows the picture settings (Pictures'
+	// numbers: a room image at 512 is 1344 x 896 texels of 8 bytes, with its mips ~12 MiB; a depth
+	// view 668 x 512).
+	void PictureCosts()
+	{
+		const auto fallback = SpaceCost{};
+		const auto defaults = SpaceCost::ForPictures(512, 3);
+		CHECK(std::abs(defaults.imageMb - 12.3f) < 0.1f && std::abs(defaults.depthMb - 22.7f) < 0.2f);
+		CHECK(std::abs(fallback.imageMb - defaults.imageMb) < 0.1f && std::abs(fallback.depthMb - defaults.depthMb) < 0.2f);
+		// the depth tier holds the image as well, and each view adds the same
+		const auto one = SpaceCost::ForPictures(512, 1);
+		const auto two = SpaceCost::ForPictures(512, 2);
+		CHECK(one.depthMb > one.imageMb && std::abs((two.depthMb - one.depthMb) - (one.depthMb - one.imageMb)) < 0.01f);
+		CHECK(SpaceCost::ForPictures(512, 0).depthMb == SpaceCost::ForPictures(512, 0).imageMb);
+		// a quarter of the height is a sixteenth of the memory; double is four times
+		CHECK(std::abs(SpaceCost::ForPictures(128, 3).imageMb * 16.0f - defaults.imageMb) < 0.5f);
+		CHECK(SpaceCost::ForPictures(1024, 3).imageMb > 3.9f * defaults.imageMb);
+		// a street full of doors: at the default budget a few score pictures at most, and a depth image
+		// stays within the ladder (more than the image, less than a loaded room)
+		CHECK(defaults.Mb(Tier::Image) < defaults.Mb(Tier::DepthImage) && defaults.Mb(Tier::DepthImage) < defaults.Mb(Tier::LoadedPaused));
+		// the depth tier ends where the room's parallax stops being worth its memory, within the picture reach
+		const SchedulerConfig config;
+		CHECK(config.depthReach < config.imageReach && config.depthReach > Selection::NearRadius(config.liveReach));
 	}
 
 	void SchedulerOnlyN()
@@ -791,6 +817,7 @@ int RunGraphTests()
 	Run("scheduler: walking away demotes past the hysteresis", SchedulerWalkAway);
 	Run("scheduler: no flapping at a boundary", SchedulerNoFlapping);
 	Run("scheduler: memory budget demotes the least likely", SchedulerBudget);
+	Run("scheduler: picture costs follow the picture settings", PictureCosts);
 	Run("scheduler: only N live, headroom", SchedulerOnlyN);
 	Run("scheduler: fallback, failure, player entering", SchedulerPolicy);
 	Run("scheduler: blocked doors, reset, rebind", SchedulerBlockedResetRebind);
