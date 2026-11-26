@@ -532,6 +532,19 @@ Found porting the plugin; each was checked in the code of both.
   origin); its multibound (`QPointWithin`) is the one to test points with.
 - **Objects outside the rooms** (`BSPortalGraph::alwaysRenderChildren`) hang nowhere in the scene.
   The scene's cull with the graph (ID 106322) culls them one by one.
+  - **Rooms hang under the graph's own node.** In a space with a portal graph (an interior with
+    rooms, or a cave/ruin worldspace: Alftand, Fallowstone Cave) the pieces stand in
+    `BSMultiBoundRoom`s whose root is a parentless `NiNode 'MultiBoundNode Node'` held by the
+    graph (`BSPortalGraph::rooms`; a worldspace's graph is `TESWorldSpace::portalGraph`, also the
+    world scene's), not under `WorldRootNode`. Attached as a remote cell, the rooms hang under the
+    portal scene's root instead. Walking up a piece's parents to the world's root finds nothing
+    for most of such a space; `scene_check` accepts a room of any of those graphs.
+  - A remote cell attached cold (never visited this session): the attach hangs only the 3D it
+    loads itself, and part of the cell's pieces (eight of Castle Dour's `SBannerlong01`
+    banners, eight in the Emperor's Tower) finish loading around it, a few every few frames,
+    with no parent: loaded, never drawn, in the merged room and after walking in.
+    `RemoteCell::HangOrphans` hangs them with ID 19165 (see persistent references). A cell the
+    player had visited before has them all hung, so the bug shows only on a first visit.
   - 3D finished after the cell's attach waits in `pendingAlwaysRenderAdds`. It is taken in only
     while the graph is the scene's, so in a cell attached behind a door it never is: most of
     Riften's jail, Mistveil Keep's dais steps.

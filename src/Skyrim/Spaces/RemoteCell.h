@@ -177,6 +177,12 @@ namespace Spaces
 		// graph, which a remote cell's scene doesn't have. They are hung under a node of their cell's
 		// 3D here, as long as the cell is ours (see Release).
 		void HangAlwaysRender(RE::TESObjectCELL* a_cell);
+		// References of the cell whose 3D exists and hangs nowhere, not even in the cell's always-drawn
+		// list (a castle's banners, an alcove's facade pieces): the engine's attach hangs only the 3D
+		// it loads itself, and what finished loading around it (before the cell was attached, or
+		// while the attach ran) stayed unparented, drawn in no frame. Hung under their cell with
+		// ID 19165, as the attach does. Returns how many.
+		int HangOrphans(RE::TESObjectCELL* a_cell);
 		void UnhangAlwaysRender();
 		// An exterior space: what the engine's change into it (the grid around the arrival cell) would
 		// read from the plugin files, read beforehand, one piece a frame once the space is ready, kept

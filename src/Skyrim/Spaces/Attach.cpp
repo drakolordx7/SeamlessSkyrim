@@ -515,6 +515,25 @@ namespace Spaces
 		}
 	}
 
+	int RemoteCell::HangOrphans(RE::TESObjectCELL* a_cell)
+	{
+		REL::Relocation<void (*)(RE::TESObjectCELL*, RE::TESObjectREFR*, bool, bool)> attachRef3D{ REL::RelocationID(18683, 19165) };
+		int hung = 0;
+		a_cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
+			// People are hung by the engine's own hook (EngineHooks.cpp).
+			auto* object = a_ref && !a_ref->As<RE::Actor>() ? a_ref->Get3D() : nullptr;
+			if (object && !object->parent) {
+				attachRef3D(a_cell, a_ref, true, false);
+				++hung;
+			}
+			return RE::BSContainer::ForEachResult::kContinue;
+		});
+		if (hung) {
+			logger::info("portal: {} unhung 3D piece(s) of {} hung into its 3D", hung, Probe::DescribeCell(a_cell));
+		}
+		return hung;
+	}
+
 	void RemoteCell::UnhangAlwaysRender()
 	{
 		// Back as the engine keeps them, unparented, where they stand in their cell.
@@ -753,6 +772,7 @@ namespace Spaces
 				if (cell->IsInteriorCell() && cell != RE::PlayerCharacter::GetSingleton()->GetParentCell()) {
 					HangAlwaysRender(cell);
 				}
+				HangOrphans(cell);
 				if (auto* cell3D = Cell3D(cell)) {
 					Engine::ForceFadeIn(cell3D);
 				}

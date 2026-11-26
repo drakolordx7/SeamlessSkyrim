@@ -115,16 +115,31 @@ namespace Bridge::PortalDiagnostics
 			}
 			return a_ref->Get3D();
 		};
-		// In an interior built of rooms, what lies outside them hangs nowhere and is drawn through
-		// the graph of the player's cell (ENGINE.md, Culling).
-		auto*      playerLoaded = RE::PlayerCharacter::GetSingleton()->GetParentCell()->GetRuntimeData().loadedData;
-		const auto* graph = playerLoaded ? playerLoaded->portalGraph.get() : nullptr;
+		// In a space built of rooms, the pieces stand in the rooms, which the graph holds (their
+		// parent is the graph's own node, in no scene), and what lies outside them hangs nowhere
+		// and is drawn through the graph (ENGINE.md, Culling). The graph is the player's interior's,
+		// or that of a cave or ruin worldspace (Alftand, Fallowstone Cave) held by the world's scene.
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* playerCell = player->GetParentCell();
+		auto* playerLoaded = playerCell->GetRuntimeData().loadedData;
+		auto* playerWorld = playerCell->IsInteriorCell() ? nullptr : playerCell->GetRuntimeData().worldSpace;
+		auto* worldScene = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0];
+		std::vector<const RE::BSPortalGraph*> graphs{ playerLoaded ? playerLoaded->portalGraph.get() : nullptr, playerWorld ? playerWorld->portalGraph.get() : nullptr,
+			worldScene ? worldScene->GetRuntimeData().portalGraph : nullptr };
 		const auto inScene = [&](const RE::NiAVObject* a_object) {
+			const auto inRoom = [&](const RE::NiAVObject* a_node) {
+				return std::ranges::any_of(graphs, [&](const RE::BSPortalGraph* a_graph) {
+					return a_graph && std::ranges::any_of(a_graph->rooms, [&](const auto& a_room) { return a_room.get() == a_node; });
+				});
+			};
+			bool room = inRoom(a_object);
 			while (a_object->parent) {
 				a_object = a_object->parent;
+				room |= inRoom(a_object);
 			}
 			const auto listed = [&](const auto& a_list) { return std::ranges::any_of(a_list, [&](const auto& a_child) { return a_child.get() == a_object; }); };
-			return a_object == RE::Main::WorldRootNode() || (graph && (listed(graph->alwaysRenderChildren) || listed(graph->pendingAlwaysRenderAdds)));
+			return room || a_object == RE::Main::WorldRootNode() ||
+			       std::ranges::any_of(graphs, [&](const RE::BSPortalGraph* a_graph) { return a_graph && (listed(a_graph->alwaysRenderChildren) || listed(a_graph->pendingAlwaysRenderAdds)); });
 		};
 		struct Part
 		{
@@ -175,8 +190,7 @@ namespace Bridge::PortalDiagnostics
 		};
 
 		// The player's own space, drawn where it stands.
-		auto*      player = RE::PlayerCharacter::GetSingleton();
-		auto*      here = player->GetParentCell();
+		auto*      here = playerCell;
 		const auto center = player->GetPosition();
 		Part       own;
 		std::vector<RE::TESObjectCELL*> ownCells{ here };
@@ -207,6 +221,10 @@ namespace Bridge::PortalDiagnostics
 			const auto linkedAt = linked->GetPosition();
 			const bool street = !Manager::Space().Cell()->IsInteriorCell();
 			Part       merged;
+			for (auto* cell : Manager::Space().Cells()) {
+				auto* loaded = cell->GetRuntimeData().loadedData;
+				graphs.push_back(loaded ? loaded->portalGraph.get() : nullptr);
+			}
 			for (auto* cell : Manager::Space().Cells()) {
 				checkCellRefs(merged, cell, linkedAt, toSource);
 			}

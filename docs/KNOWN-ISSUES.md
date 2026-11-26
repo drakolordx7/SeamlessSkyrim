@@ -196,3 +196,7 @@ Rebuilt (what is left of them is in RENDER-BACKENDS.md): rain and snow at the do
   Not looked into: why the scheduler took 5 s to bring the gate's space back after the save, or never for the jail.
 - Riftweald Manor (Riften, doors 065815 / 027EEC): walking out from inside, the crawler stops 300 units short of the door
   with a bandit talking to the player and the crosshair on 00050A03; looks like the walk's obstacle, not the crossing (walking in is fine). Not checked by hand.
+- `coc <interior>` from the console while the scheduler holds that interior as a remote cell (the crawler's
+  last door left Castle Dour kept, then `coc SolitudeCastleDour`: log `schedule: interior cold -> live
+  (entered)`, `crossing: dropped`) froze the game in the loading screen (not responding, CPU idle, no crash log).
+  Not looked into; a vanilla load into a cell we hold.
