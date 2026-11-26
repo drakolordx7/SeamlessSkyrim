@@ -879,6 +879,9 @@ def main() -> int:
         if not args.keep_game:
             try:
                 S.quit_game()
+                if not S.server.game_process():
+                    # A game that crashed on its own never went through quit_game's restore: put the MO2 profile back.
+                    S.server.restore_mo2_profile(S.server.launched_selected_profile)
             except Exception as e:
                 print(f"quit: {e}", flush=True)
     print(f"report: {out / 'report.md'}", flush=True)
