@@ -1,5 +1,6 @@
 #include "Skyrim/Plugin/Install.h"
 
+#include "Skyrim/Audio/DoorwayAudio.h"
 #include "Skyrim/Bridge/AgentMode.h"
 #include "Skyrim/Bridge/Bridge.h"
 #include "Skyrim/Diag/Telemetry.h"
@@ -67,6 +68,7 @@ namespace Plugin
 		// not portals are on: the manager's releases (a save, a load) reset it.
 		Graph::Install();
 		Portal::Schedule::Install();
+		Audio::Doorway::Install();
 		Pictures::SetPictureHeight(Settings::Int(Settings::Id::kDoorwayPictureHeight));
 		Spaces::LoadTuning();
 		hooksInstalled = Portal::Manager::Enabled() || Diag::AgentMode();

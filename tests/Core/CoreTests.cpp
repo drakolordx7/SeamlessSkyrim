@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "Core/Audio/Doorway.h"
 #include "Core/Crossing/Approach.h"
 #include "Core/Doors/Mapping.h"
 #include "Core/Doors/Panel.h"
@@ -519,8 +520,48 @@ namespace
 	}
 }
 
+	// A door on the y = 0 plane opening into +y: the listener stands at negative y.
+	void DoorwaySound()
+	{
+		namespace A = Core::Audio;
+		const A::Doorway doorway{ { 0.0f, 0.0f, 100.0f }, { 0.0f, 1.0f, 0.0f }, 50.0f, 100.0f };
+		const auto       at = [&](float a_x, float a_y, float a_open = 1.0f) { return A::ThroughDoorway({ a_x, a_y, 100.0f }, doorway, a_open); };
+
+		// Quieter with distance, nothing past the reach.
+		CHECK(at(0, -100).gain > at(0, -500).gain && at(0, -500).gain > at(0, -1500).gain && at(0, -1500).gain > 0.0f);
+		CHECK(at(0, -2600).gain == 0.0f && at(0, -5000).gain == 0.0f);
+		// Quieter and duller off the axis; at the wall's side hardly anything.
+		CHECK(at(0, -400).gain > at(300, -300).gain && at(300, -300).gain > at(400, -30).gain);
+		CHECK(at(0, -400).muffle < at(300, -300).muffle);
+		CHECK(Near(at(0, -400).cosine, 1.0f) && at(0, -400).gain <= 1.0f);
+		// In the room (past the door plane), or at the door shut: nothing.
+		CHECK(at(0, 100).gain == 0.0f && at(0, 0).gain == 0.0f);
+		CHECK(at(0, -200, 0.0f).gain == 0.0f && at(0, -200, 0.01f).gain == 0.0f);
+		// A door half open lets less through than a whole one.
+		CHECK(at(0, -200, 0.5f).gain < at(0, -200, 1.0f).gain && at(0, -200, 0.5f).gain > 0.0f);
+
+		// A sound at the doorway, further in, is quieter.
+		CHECK(Near(A::RoomFalloff(0.0f), 1.0f) && Near(A::RoomFalloff(600.0f), 0.5f) && A::RoomFalloff(1200.0f) < A::RoomFalloff(600.0f));
+
+		// The fade is a ramp: a shut door's sound leaves over fadeOutSeconds, not in one step, and
+		// the way up takes fadeInSeconds.
+		A::Fade fade;
+		fade.level = 1.0f;
+		fade.Step(0.0f, 0.1f);
+		CHECK(fade.level > 0.5f && fade.level < 1.0f);
+		for (int i = 0; i < 7; ++i) {
+			fade.Step(0.0f, 0.1f);
+		}
+		CHECK(fade.level == 0.0f);
+		fade.Step(1.0f, 0.3f);
+		CHECK(Near(fade.level, 0.5f));
+		fade.Step(0.2f, 0.01f);
+		CHECK(fade.level < 0.5f && fade.level > 0.4f);
+	}
+
 int main()
 {
+	Run("sound through a doorway: gain, angle, fade", DoorwaySound);
 	Run("door pair mapping round trip", MappingRoundTrip);
 	Run("door pair mapping corrections", MappingCorrection);
 	Run("swing timing", SwingTiming);

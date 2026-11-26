@@ -113,6 +113,13 @@ Found porting the plugin; each was checked in the code of both.
   only declares it). Whiterun's house doors: 0.6 s each; `Open` stands still for the first
   0.15 s, then eases in and out; `Close` eases in and out. Portal doors replay them
   (`Doors::Swing`, curves sampled by `SwingCurvesOf`), turned by the pair's own angle and towards the side they open into.
+- **Sound heard through a doorway** (`Audio/DoorwayAudio`, from CommonLib's headers only, not yet heard in game): a
+  cell's sound sources are `TESSound` marker refs (`descriptor`), `TESObjectACTI::soundLoop`, `TESObjectLIGH::sound` and
+  its `ExtraCellAcousticSpace` (`BGSAcousticSpace::loopingSound`); an exterior's weather loops are
+  `Sky::currentWeather->sounds`. `BSSoundHandle` calls are messages to the audio thread (fine from the main thread);
+  `FadeInPlay` / `FadeOutAndRelease` take milliseconds. A low-pass would need `BSXAudio2GameSound::sourceVoice` (+0x128),
+  reachable only through `BSAudioManager::activeSounds`, which the audio thread mutates. The acoustic space and music are
+  set on the player's cell change, so attaching a remote cell leaves them alone.
 - **A door's open and close sounds** are its base form's `TESObjectDOOR::openSound` and
   `closeSound`; `BSAudioManager::GetSoundHandle`, then `SetPosition`/`SetObjectToFollow`, `Play`.
 - **A door's model isn't always upright.** Castle Dour's doors (`SDoorJail02Load.nif`, 00025199
