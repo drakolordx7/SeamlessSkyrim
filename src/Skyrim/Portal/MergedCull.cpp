@@ -193,10 +193,21 @@ namespace Portal::MergedCull
 			OccluderNode* last;
 			std::uint32_t count;
 		};
+		// The list is the engine's (the graph's cells add and drop their shapes in it), and the engine runs between our
+		// taking nodes out (the manager's update) and putting them back (after the view). So only the nodes taken out
+		// are ours to keep; the rest stay linked where they are and are never written back: a node of the rest that the
+		// engine dropped meanwhile, put back from a list of all, stood in the list without a shape and crashed the next
+		// take (Karthwasten, a merged house).
 		struct Occluders
 		{
-			OccluderList*              list = nullptr;  // the graph's, while some are out
-			std::vector<OccluderNode*> all;             // as the list was, in order
+			struct Taken
+			{
+				OccluderNode*                       node;
+				OccluderNode*                       before;  // ahead of it in the list as it was: a node left in, or one taken before it
+				RE::NiPointer<RE::BSOcclusionShape> shape;   // the list holds none: kept, to see that its owner still has it
+			};
+			RE::NiPointer<RE::BSPortalGraph> graph;  // the list's owner while some are out
+			std::vector<Taken>               taken;  // in the list's order
 		} occluders;
 
 		// A merged room lies inside the street's house, and the house's occlusion boxes hide what is behind them:
@@ -214,43 +225,68 @@ namespace Portal::MergedCull
 			if (!graph) {
 				return;
 			}
-			occluders.list = reinterpret_cast<OccluderList*>(reinterpret_cast<std::uintptr_t>(graph) + 0x10);
-			occluders.all.clear();
-			for (auto* node = occluders.list->first; node; node = node->next) {
-				occluders.all.push_back(node);
+			auto* list = reinterpret_cast<OccluderList*>(reinterpret_cast<std::uintptr_t>(graph) + 0x10);
+			occluders.graph.reset(graph);
+			std::vector<OccluderNode*> chain;
+			for (auto* node = list->first; node; node = node->next) {
+				chain.push_back(node);
 			}
-			OccluderNode* last = nullptr;
-			*occluders.list = {};
-			for (auto* node : occluders.all) {
+			for (std::size_t i = 0; i < chain.size(); ++i) {
+				auto*       node = chain[i];
 				const auto* shape = node->shape;
 				const float size = shape->IsOcclusionBox() ? static_cast<const RE::BSOcclusionBox*>(shape)->size.Length() : static_cast<const RE::BSOcclusionPlane*>(shape)->size.Length();
-				if (shape->translation.GetDistance(a_door) - size > kRoomReach) {
-					node->prev = last;
-					node->next = nullptr;
-					(last ? last->next : occluders.list->first) = node;
-					last = node;
-					++occluders.list->count;
+				if (shape->translation.GetDistance(a_door) - size <= kRoomReach) {
+					occluders.taken.push_back({ node, i ? chain[i - 1] : nullptr, RE::NiPointer(node->shape) });
+					(node->prev ? node->prev->next : list->first) = node->next;
+					(node->next ? node->next->prev : list->last) = node->prev;
+					--list->count;
 				}
 			}
-			occluders.list->last = last;
+		}
+
+		bool Linked(const OccluderList& a_list, const OccluderNode* a_node)
+		{
+			for (const auto* node = a_list.first; node; node = node->next) {
+				if (node == a_node) {
+					return true;
+				}
+			}
+			return false;
 		}
 
 		void ReturnOccluders()
 		{
-			if (!occluders.list) {
+			if (!occluders.graph) {
 				return;
 			}
-			OccluderNode* last = nullptr;
-			*occluders.list = {};
-			for (auto* node : occluders.all) {
-				node->prev = last;
-				node->next = nullptr;
-				(last ? last->next : occluders.list->first) = node;
-				last = node;
-				++occluders.list->count;
+			// A different graph in the scene: the engine freed this one's list with the change (ENGINE.md,
+			// SetPortalGraph), and nothing of it is ours to fill.
+			std::size_t lost = 0;
+			if (RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]->GetRuntimeData().portalGraph == occluders.graph.get()) {
+				auto& list = *reinterpret_cast<OccluderList*>(reinterpret_cast<std::uintptr_t>(occluders.graph.get()) + 0x10);
+				for (auto& taken : occluders.taken) {
+					// Its owner let it go while it was out of the list, so the engine found nothing to take out.
+					if (taken.shape->GetRefCount() == 1) {
+						++lost;
+						continue;
+					}
+					auto* node = taken.node;
+					// Where the engine dropped the node it stood behind: at the end.
+					auto* before = taken.before && Linked(list, taken.before) ? taken.before : taken.before ? list.last : nullptr;
+					node->prev = before;
+					node->next = before ? before->next : list.first;
+					(before ? before->next : list.first) = node;
+					(node->next ? node->next->prev : list.last) = node;
+					++list.count;
+				}
+			} else {
+				lost = occluders.taken.size();
 			}
-			occluders.list->last = last;
-			occluders.list = nullptr;
+			if (lost) {
+				logger::info("portal: {} occlusion shape(s) taken out for the view were gone from the world scene's graph by the end of it", lost);
+			}
+			occluders.taken.clear();
+			occluders.graph.reset();
 		}
 
 		void Hide(RE::NiAVObject* a_object)

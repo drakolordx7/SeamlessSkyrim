@@ -496,6 +496,16 @@ Found porting the plugin; each was checked in the code of both.
   before the view reads it. `MergedCull::Set` takes out the occluders within 1500 units of the doorway
   (their bound against the door) until `AfterView`; the rest keep culling the street. The view costs
   ~2 ms more there, partly the room's pieces now being drawn.
+  The list is `NiTPointerList<BSOcclusionShape>`: raw shape pointers (the shapes are kept by their cells' 3D,
+  refcount 2 with ours), and a node the engine drops goes back to the list's pool with its shape cleared (inferred from
+  the null shape, not seen). The
+  engine runs between `Set` (the manager's update) and `AfterView` and does drop and add nodes there (cells of the
+  grid loading or unloading, the scene taking another graph). Taking every node out and writing them all back
+  put a node the engine had dropped into the list again, empty: the next take read its null shape (crash in
+  `MergedCull::Set` in the Karthwasten crawl, Enmon's House merged into the street; not reproduced since, so the
+  cause is inferred from the crash site).
+  Only the nodes taken out are written back now, each after the node that stood ahead of it if that is still
+  linked, and not at all when the scene's graph is another one by then or the shape's cell has let it go.
 - **An auto-load door is five culled `EditorMarker` shapes** (`AutoLoadMarker01.nif`: Whiterun's
   000351EC, the Underforge's 0006767E): culled by the engine, no opener hid them.
 
