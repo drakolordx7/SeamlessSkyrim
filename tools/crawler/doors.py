@@ -26,6 +26,70 @@ PRESETS: dict[str, dict[str, Any]] = {
         "space": ["WhiterunWorld"],
         "near": [["Tamriel", "door:Skyrim.esm:01B1F1", 4000]],
     },
+    # The other cities: the city worldspace plus the Tamriel doors around its gate (positions from the census).
+    "solitude": {
+        "space": ["SolitudeWorld"],
+        "near": [["Tamriel", "door:Skyrim.esm:101D9E", 4000]],
+    },
+    "windhelm": {
+        "space": ["WindhelmWorld"],
+        "near": [["Tamriel", "door:Skyrim.esm:055FCB", 4000]],
+    },
+    # Riften has two gate pairs (the north gate and the south one) and a third pair a mod (cutting room floor) added.
+    "riften": {
+        "space": ["RiftenWorld"],
+        "near": [["Tamriel", "door:Skyrim.esm:078EDB", 4000], ["Tamriel", "door:Skyrim.esm:042286", 4500]],
+    },
+    "markarth": {
+        "space": ["MarkarthWorld"],
+        "near": [["Tamriel", "door:Skyrim.esm:01C389", 4000]],
+    },
+    # Fort Dawnguard (Dayspring Canyon is its own worldspace, entered from the gate in Tamriel).
+    "dawnguard": {
+        "space": ["DLC1HunterHQWorld", "DLC1DawnguardHQ01"],
+        "near": [["Tamriel", "door:Dawnguard.esm:0110B5", 4000]],
+    },
+    # Castle Volkihar: the courtyard worldspace and the castle's doors on its island in Tamriel.
+    "volkihar": {
+        "space": ["DLC1VampireCastleCourtyard", "DLC1VampireCastleGuildhall"],
+        "near": [["Tamriel", "-172500,150700", 6000]],
+    },
+    # Raven Rock is part of Solstheim's worldspace: the doors of the town and the Bulwark around it.
+    "ravenrock": {
+        "near": [["DLC2SolstheimWorld", "30500,35000", 7000]],
+    },
+    # Interiors and caves: a spread of doors that no city crawl reaches. Each group is {"space": [...], "kind": [...]}
+    # (kind: of the doors in those spaces; none: every kind); one visit per link, started from the first space's side.
+    "interiors": {
+        "groups": [
+            # Inner doors of Dragonsreach, Understone Keep and a ruin of several cells (Bleak Falls Barrow).
+            {"space": ["WhiterunDragonsreach", "WhiterunDragonsreachBasement", "WhiterunDragonsreachJarlsQuarters"], "kind": ["interior-interior"]},
+            {"space": ["MarkarthUnderStoneKeep"], "kind": ["interior-interior"]},
+            {"space": ["BleakFallsBarrow01", "BleakFallsBarrow02"], "kind": ["interior-interior"]},
+            # Caves and ruins with load doors between their cells.
+            {"space": ["TolvaldsCave01", "TolvaldsCave02", "TolvaldsCave03"], "kind": ["interior-interior"]},
+            {"space": ["ForsakenCave01", "ShimmermistCave01", "FellglowKeep02"], "kind": ["interior-interior"]},
+            # Blackreach: its doors to the interior cells (and its lifts), and the one interior-interior pair there.
+            {"space": ["Blackreach", "BlackreachZcell04"]},
+            # Cave worldspaces.
+            {"space": ["BlindCliffCaveWorld", "FallowstoneCaveWorldStart", "FallowstoneCaveWorldEnd"]},
+        ],
+    },
+    # The smaller towns: Tamriel doors around a point in each.
+    "towns": {
+        "near": [
+            ["Tamriel", "22000,-46000", 3500],      # Riverwood
+            ["Tamriel", "-31500,-87000", 4500],     # Falkreath
+            ["Tamriel", "31500,104500", 6000],      # Dawnstar
+            ["Tamriel", "-37500,65000", 4500],      # Morthal
+            ["Tamriel", "109500,102000", 3000],     # Winterhold
+            ["Tamriel", "115500,111500", 3500],     # College of Winterhold
+            ["Tamriel", "-84000,8000", 3500],       # Rorikstead
+            ["Tamriel", "76500,-64000", 3500],      # Ivarstead
+            ["Tamriel", "-102000,84000", 3500],     # Dragon Bridge
+            ["Tamriel", "-133500,39500", 4000],     # Karthwasten
+        ],
+    },
 }
 
 

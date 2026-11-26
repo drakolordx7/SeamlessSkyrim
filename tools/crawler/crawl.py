@@ -228,7 +228,7 @@ def dist3(a: list[float], b: tuple[float, float, float]) -> float:
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
 
 
-def go_front(S: Session, door: dict[str, Any], front: dict[str, Any]) -> None:
+def go_front(S: Session, door: dict[str, Any], front: dict[str, Any], force_reload: bool = False) -> None:
     c = S.census
     at = door["at"]
     state = S.state()
@@ -244,7 +244,7 @@ def go_front(S: Session, door: dict[str, Any], front: dict[str, Any]) -> None:
     else:
         reload = not (cell["interior"] and cell["editorId"] == c.space_edid(at["spaceId"]))
         command = f"coc {c.space_edid(at['spaceId'])}"
-    if reload:
+    if reload or force_reload:
         S.console(command)
         time.sleep(3)
         S.wait_in_game(200)
@@ -374,13 +374,38 @@ def walk_once(S: Session, target: tuple[float, float]) -> dict[str, Any]:
     return {"status": "harness-timeout"}
 
 
-def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], label: str, doorstep: tuple[float, float, float] | None = None, ref: str | None = None) -> dict[str, Any]:
+def aim_at(S: Session, door_pos: list[float]) -> None:
+    """Turn the camera on the door (heading and pitch): floor hatches and trapdoors are used by looking down at them."""
+    player = S.state()["player"]["pos"]
+    dx, dy = door_pos[0] - player[0], door_pos[1] - player[1]
+    flat = math.hypot(dx, dy)
+    pitch = -math.degrees(math.atan2(door_pos[2] - (player[2] + 120.0), max(flat, 1.0)))  # setangle x: positive looks down
+    if flat > 1.0:
+        S.console(f"player.setangle z {D.heading_deg(dx, dy):.2f}")
+    S.console(f"player.setangle x {pitch:.2f}")
+    time.sleep(0.5)
+
+
+def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], label: str, doorstep: tuple[float, float, float] | None = None, ref: str | None = None,
+                 door_pos: list[float] | None = None) -> dict[str, Any]:
     """Walk to a point past the door. Stopped at the door (stuck) with the crosshair on it: press the
     activate key as a player would (bridge use_pick) and walk again once."""
     before = S.blocked
+    start_cell = S.state()["player"]["cell"]["editorId"]
     walk = walk_once(S, target)
     crossed = ("travelled through a door", "arrived")
     first = walk.get("status")
+    # "arrived" at the target with the player still in the cell it left from: nothing was crossed (a floor hatch, or a
+    # gate whose far side the walk missed): treated like a stuck walk.
+    here_cell = S.state()["player"]["cell"]["editorId"]
+    if first == "arrived" and here_cell == start_cell:
+        first = "arrived-without-crossing"
+    elif first not in crossed and here_cell != start_cell:
+        # The walk crossed (a vanilla loading-screen trip does not report "travelled through a door"): the player is already
+        # on the other side, and the stuck handling below (use_pick, a teleport to the doorstep) must not run there.
+        walk = {**walk, "status": "crossed (cell changed, reported " + str(first) + ")"}
+        first = walk["status"]
+        crossed = crossed + (first,)
     if first not in crossed:
         here = S.state()["player"]["pos"]
         rec["walks"][label + "-first"] = {"status": first, "stoppedAt": [round(v) for v in here], "distanceToTarget": round(math.hypot(here[0] - target[0], here[1] - target[1]))}
@@ -389,6 +414,10 @@ def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], l
             rec["walks"][label + "-first"]["door"] = door_state(S, ref)
             rec["walks"][label + "-first"]["schedule"] = schedule_state(S)
         pick = S.call("use_pick")
+        if not pick.get("target") and door_pos:
+            aim_at(S, door_pos)  # a floor hatch or a door above the eyes: look at it and press use
+            pick = S.call("use_pick")
+            rec["walks"][label + "-first"]["aimedAt"] = True
         rec["walks"][label + "-first"]["usePick"] = pick
         if not pick.get("target") and doorstep and rec["walks"][label + "-first"]["distanceToTarget"] > 250:
             # The straight walk from 6 m is blocked by stairs, a rail or furniture (the harness steers straight, a
@@ -462,6 +491,9 @@ def test_door(S: Session, door: dict[str, Any], index: int) -> dict[str, Any]:
     if door["initiallyDisabled"]:
         rec["result"], rec["notes"] = "skipped", ["initially disabled in the plugin: nothing to see"]
         return rec
+    if "PlaceHolder" in door["base"]["editorId"]:
+        rec["result"], rec["notes"] = "skipped", ["placeholder door (Creation Club test hook): never placed in the world"]
+        return rec
     if "Marker" in door["base"]["editorId"]:
         rec["result"], rec["notes"] = "skipped", ["marker door: no doorway by design (scripts use it; the scheduler leaves marker doors out of the graph)"]
         return rec
@@ -496,6 +528,17 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     # The door must be there: a wrong run-time id (load order differs from the census) shows up here.
     near = S.call("refs_near", radius=1200, kind="doors", limit=40)
     mine = next((r for r in near["refs"] if r["id"] == ref), None)
+    for attempt in range(2):
+        if mine:
+            break
+        # The cells around the spot may not have loaded yet (the first door after a worldspace change): wait, then
+        # once reload the cell with the console command before calling it a failed setup.
+        time.sleep(4.0)
+        if attempt == 1:
+            go_front(S, door, front, force_reload=True)
+            time.sleep(2.0)
+        near = S.call("refs_near", radius=1200, kind="doors", limit=40)
+        mine = next((r for r in near["refs"] if r["id"] == ref), None)
     if not mine:
         rec["problems"].append(("setup-failed", f"door {ref} is not among the {near['count']} doors loaded within 1200 units of the spot in front of it"))
         rec["result"] = "setup-failed"
@@ -594,7 +637,7 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     walk = {"status": "vanilla load"}
     if not vanilla:
         target = D.beyond_of(door["pos"], -front["dir"][0], -front["dir"][1])
-        walk = walk_through(S, rec, target, "in", (door["pos"][0] + front["dir"][0] * 110, door["pos"][1] + front["dir"][1] * 110, door["pos"][2] + 20), ref)
+        walk = walk_through(S, rec, target, "in", (door["pos"][0] + front["dir"][0] * 110, door["pos"][1] + front["dir"][1] * 110, door["pos"][2] + 20), ref, door["pos"])
     here = where_am_i(S, dest_kind, dest_edid, c.space_form_id(dest["at"]["spaceId"]), dest["landPos"][2])
     rec["checks"]["in"] = here
     if D.is_exterior(door):
@@ -629,10 +672,15 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
         # Out through the door from where the player stands (the census landing spot can sit behind the door:
         # the Underforge's lands 26 units on the wrong side of it).
         out_dir = D.unit(P["pos"][0] - pos[0], P["pos"][1] - pos[1])
+        if math.hypot(P["pos"][0] - pos[0], P["pos"][1] - pos[1]) < 200:
+            # Landed within a few steps of the door (a gate): the direction to it says nothing, the census front side does.
+            front_p = D.front_of(c, P)
+            if not front_p["guess"]:
+                out_dir = (-front_p["dir"][0], -front_p["dir"][1])
         target = D.beyond_of(P["pos"], out_dir[0], out_dir[1])
         S.mark(f"stage out {ref}")
         S.call("frame_stats", reset=True)
-        walk = walk_through(S, rec, target, "out", (P["pos"][0] - out_dir[0] * 110, P["pos"][1] - out_dir[1] * 110, P["pos"][2] + 20), p_ref)
+        walk = walk_through(S, rec, target, "out", (P["pos"][0] - out_dir[0] * 110, P["pos"][1] - out_dir[1] * 110, P["pos"][2] + 20), p_ref, P["pos"])
     src_kind = "worldspace" if D.is_exterior(door) else "interior"
     here = where_am_i(S, src_kind, src_edid, c.space_form_id(door["at"]["spaceId"]), front["landZ"])
     rec["checks"]["out"] = here
@@ -694,7 +742,12 @@ def build_selection(args: argparse.Namespace, census: D.Census) -> list[dict[str
         spaces += preset.get("space", [])
         near += [D.parse_near(census, f"{w}:{where}:{r}") for w, where, r in preset.get("near", [])]
     ids = set(args.id or [])
-    selected = D.select(census, spaces, near, args.kind or [], args.ends == "both", None, args.origin)
+    selected = D.select(census, spaces, near, args.kind or [], args.ends == "both", None, args.origin) if not args.preset or not D.PRESETS[args.preset].get("groups") else []
+    if args.preset:
+        for group in D.PRESETS[args.preset].get("groups", []):
+            for door in D.select(census, group["space"], [], group.get("kind") or args.kind or [], args.ends == "both", None, args.origin):
+                if door["id"] not in {d["id"] for d in selected}:
+                    selected.append(door)
     if ids:
         selected = [d for d in selected if d["id"] in ids]
     return selected[: args.max] if args.max else selected
@@ -709,6 +762,18 @@ def recover(S: Session, rec: dict[str, Any], why: str) -> None:
         tail = s.PLUGIN_LOG.read_text("utf-8", "replace").splitlines()[-60:] if s.PLUGIN_LOG.exists() else []
         (S.out / f"hang-{rec['dir']}.log").write_text("\n".join(tail), "utf-8")
         rec["notes"].append(f"plugin log tail: hang-{rec['dir']}.log; see read_log('crash') for a crash dump")
+    except OSError:
+        pass
+    try:
+        # The crash log CrashLogger wrote for this game (newest one from the last few minutes): path and the top frames.
+        logs = sorted(s.PLUGIN_LOG.parent.glob("crash-*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
+        if logs and time.time() - logs[0].stat().st_mtime < 600:
+            lines = logs[0].read_text("utf-8", "replace").splitlines()
+            top = [ln.strip()[:200] for ln in lines if ln.startswith("Unhandled exception")][:1]
+            at = next((i for i, ln in enumerate(lines) if ln.startswith("CALL STACK")), None)
+            top += [ln.strip()[:200] for ln in lines[at + 1:at + 6]] if at is not None else []
+            rec["notes"].append(f"crash log: {logs[0]}")
+            rec["notes"] += ["  " + t for t in top]
     except OSError:
         pass
     S.kill_ours()
