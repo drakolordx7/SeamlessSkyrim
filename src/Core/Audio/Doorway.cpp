@@ -32,6 +32,18 @@ namespace Core::Audio
 		return heard;
 	}
 
+	float LowPassCutoff(float a_muffle, const Tuning& a_tuning)
+	{
+		const float muffle = std::clamp(a_muffle, 0.0f, 1.0f);
+		return a_tuning.clearCutoff * std::pow(a_tuning.mutedCutoff / a_tuning.clearCutoff, muffle);
+	}
+
+	float FilterFrequency(float a_cutoffHz, float a_sampleRate)
+	{
+		constexpr float pi = 3.14159265358979f;
+		return std::clamp(2.0f * std::sin(pi * a_cutoffHz / a_sampleRate), 0.0f, 1.0f);
+	}
+
 	float RoomFalloff(float a_distance, const Tuning& a_tuning)
 	{
 		const float ratio = a_distance / a_tuning.roomRefDistance;

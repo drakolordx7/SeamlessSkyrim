@@ -113,13 +113,37 @@ Found porting the plugin; each was checked in the code of both.
   only declares it). Whiterun's house doors: 0.6 s each; `Open` stands still for the first
   0.15 s, then eases in and out; `Close` eases in and out. Portal doors replay them
   (`Doors::Swing`, curves sampled by `SwingCurvesOf`), turned by the pair's own angle and towards the side they open into.
-- **Sound heard through a doorway** (`Audio/DoorwayAudio`, from CommonLib's headers only, not yet heard in game): a
-  cell's sound sources are `TESSound` marker refs (`descriptor`), `TESObjectACTI::soundLoop`, `TESObjectLIGH::sound` and
-  its `ExtraCellAcousticSpace` (`BGSAcousticSpace::loopingSound`); an exterior's weather loops are
+- **Sound heard through a doorway** (`Audio/DoorwayAudio`, `Audio/DoorwayFilter`): a cell's sound sources are
+  `TESSound` marker refs (`descriptor`), `TESObjectACTI::soundLoop`, `TESObjectLIGH::sound` and its
+  `ExtraCellAcousticSpace` (`BGSAcousticSpace::loopingSound`); an exterior's weather loops are
   `Sky::currentWeather->sounds`. `BSSoundHandle` calls are messages to the audio thread (fine from the main thread);
-  `FadeInPlay` / `FadeOutAndRelease` take milliseconds. A low-pass would need `BSXAudio2GameSound::sourceVoice` (+0x128),
-  reachable only through `BSAudioManager::activeSounds`, which the audio thread mutates. The acoustic space and music are
-  set on the player's cell change, so attaching a remote cell leaves them alone.
+  `FadeInPlay` / `FadeOutAndRelease` take milliseconds. The acoustic space and music are set on the player's cell
+  change, so attaching a remote cell leaves them alone. Run in game (2026-11-25, read back through the bridge, not listened to): the loop and the markers play from
+  the doorway; the engine plays none of the room's own sounds at the merged place (bridge `sounds`: no second voice with
+  the same file), so nothing doubles.
+- **`BSAudioManager::GetSoundHandle` returns false while the descriptor's conditions are false.** A sound descriptor
+  (SNDR, `BGSSoundDescriptorForm::soundDescriptor`, a `BGSStandardSoundDef`) can carry conditions
+  (`BGSStandardSoundDef::conditions`, CTDA). The Bannered Mare's crowd loop `AMBTavernInteriorA2DLPSD` (00100F8D,
+  the room's only sound marker) has `GetCurrentTime <= 2 OR >= 20`: by day the engine hands out no handle, at 22:00 it
+  does (same call, same descriptor, same flags 0x1A; found by running at 12:00 and at 22:00). The form is the right type, the
+  sound has a file, an output model and a category; nothing is wrong with the call. `TESCondition::IsTrue(player, player)`
+  gives the same answer, so a refusal with false conditions is a sound that isn't due, not a failure (the bridge shows
+  `blockedStarts` against `failedStarts`). The file's hash (`sounds`) is `596B204F` for that loop. Dig into a descriptor
+  with Skyrim.esm's SNDR record (EDID, ANAM file, ONAM output model, CTDA conditions, LNAM loop flags) before suspecting
+  the engine call.
+- **XAudio2 under BSXAudio2 is the 2.7 interface** (CommonLib's `IXAudio2`: `GetDeviceCount`, `Initialize`) and the game makes
+  every source voice with flags 0, so no `XAUDIO2_VOICE_USEFILTER`: `SetFilterParameters` on such a voice does nothing.
+  `IXAudio2::CreateSourceVoice` is slot 8 of the `IXAudio2` object's vtable (`BSXAudio2Audio::XAudio`); adding the flag
+  there gives every voice a filter, whose default is a low-pass at a sixth of the voice's sample rate (it would dull every
+  sound), so each voice is set to a high-pass at 0, which passes everything. The filter's frequency is
+  `2 sin(pi f / rate)`, at most 1, with the rate of the voice's input (`GetVoiceDetails().InputSampleRate`: the ambient loops
+  are 8 kHz stereo, so their filter reaches 1.3 kHz at most); it can't leave a sound as it is above that, so a cutoff higher than
+  a sixth of the rate has to be a pass-through. `BSXAudio2GameSound::sourceVoice` (+0x128) is only safe to touch on the audio
+  thread: `BSXAudio2GameSound::Update` (vtable slot 0xE of `VTABLE_BSXAudio2GameSound[0]`) runs there once per sound per tick
+  (hundreds of thousands of calls a minute), and so does every change of `BSAudioManager::activeSounds`, which is why the
+  lookup of a handle's `soundID` is done in that hook. `GetFilterParameters` shows a change one pass late.
+  Static reading of `SkyrimSE.exe` 1.6.1170 in the MO2 instance fails (`.text` is Steam-DRM encrypted; `retools` prints
+  garbage), so the sound code was probed at runtime instead.
 - **A door's open and close sounds** are its base form's `TESObjectDOOR::openSound` and
   `closeSound`; `BSAudioManager::GetSoundHandle`, then `SetPosition`/`SetObjectToFollow`, `Play`.
 - **A door's model isn't always upright.** Castle Dour's doors (`SDoorJail02Load.nif`, 00025199
