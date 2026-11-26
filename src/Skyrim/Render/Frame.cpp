@@ -15,7 +15,9 @@
 #include "Skyrim/Portal/StreetMerge.h"
 #include "Skyrim/Portal/Travel.h"
 #include "Skyrim/Render/D3D.h"
+#include "Skyrim/Render/DoorwayDaylight.h"
 #include "Skyrim/Render/MainView.h"
+#include "Skyrim/Render/Native/Native.h"
 #include "Skyrim/Render/PortalPass.h"
 #include "Skyrim/Render/SpaceLighting.h"
 
@@ -51,6 +53,44 @@ namespace Render::Frame
 			trampoline.write_branch<5>(a_target, a_thunk);
 			return stub;
 		}
+
+		// The sky's precipitation update (ID 26179, from Sky::Update) gives the rain and snow no
+		// particles unless the sky is in full mode (the emitter's density 0, the shape culled), and
+		// indoors it is in dome-only mode. While the street is merged in, the update runs as outdoors:
+		// the street through the doorway has the weather's rain, fading in and out with the weather as
+		// it does outdoors. The shape follows the camera into the room; the doorway mask keeps it to the
+		// street (the native mask hooks the particle shader, and MergedView::IsMergedShape names the
+		// shape the street's while it is merged).
+		struct PrecipitationUpdateHook
+		{
+			static void Thunk(RE::Precipitation* a_precip, float a_delta)
+			{
+				auto*      sky = RE::Sky::GetSingleton();
+				const auto mode = sky->mode;
+				if (Portal::StreetMerge::Merged() && Native::Ready()) {
+					sky->mode = RE::Sky::Mode::kFull;
+				}
+				original(a_precip, a_delta);
+				sky->mode = mode;
+			}
+
+			// The sky's precipitation update is called from two places (Sky::Update and ID 26222), so the
+			// function itself is redirected: its first instructions (mov rax, rsp; push rbx; sub rsp,
+			// imm32: 11 bytes, the frame size differing between builds).
+			static void Install()
+			{
+				REL::Relocation<std::uintptr_t> target{ REL::RelocationID(25638, 26179) };
+				constexpr std::size_t           kMoved = 11;
+				const auto*                     code = reinterpret_cast<const std::uint8_t*>(target.address());
+				static constexpr std::uint8_t   expected[7] = { 0x48, 0x8B, 0xC4, 0x53, 0x48, 0x81, 0xEC };
+				if (std::memcmp(code, expected, sizeof(expected)) != 0 || code[9] != 0 || code[10] != 0) {
+					logger::warn("portal: precipitation update not as expected; no rain or snow through a doorway seen from indoors");
+					return;
+				}
+				original = reinterpret_cast<decltype(original)>(MovePrologue(target.address(), kMoved, reinterpret_cast<std::uintptr_t>(&Thunk)));
+			}
+			static inline void (*original)(RE::Precipitation*, float) = nullptr;
+		};
 
 		std::optional<Active> PortalToDraw()
 		{
@@ -340,6 +380,11 @@ namespace Render::Frame
 					}
 				}
 				if (!a_menuOpen) {
+					// The street's daylight through an open doorway of a merged space, over what the world
+					// and the doorway's picture drew.
+					if (auto daylight = DoorwayDaylight::Draw(); !daylight.empty() && portal) {
+						result["daylight"] = std::move(daylight);
+					}
 					// Merged, the real space is drawn with the world itself. A pass that still met freed
 					// render passes has parts of the view missing. Said before the pass for a picture of
 					// a space out of sight, which counts its own.
@@ -365,6 +410,7 @@ namespace Render::Frame
 		const auto started = std::chrono::steady_clock::now();
 		PortalPass::Prewarm(device);
 		Pictures::Composite::Prewarm(device);
+		DoorwayDaylight::Prewarm(device);
 		const auto& engineColor = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
 		const auto& engineDepth = renderer->GetDepthStencilData().depthStencils[PortalPass::kDepthTarget];
 		if (engineColor.texture && engineDepth.texture) {
@@ -391,6 +437,7 @@ namespace Render::Frame
 		}
 		RenderWorldHook::func = trampoline.write_call<5>(renderWorld.address(), RenderWorldHook::Thunk);
 		ActorCullHook::Install();
+		PrecipitationUpdateHook::Install();
 		REL::Relocation<std::uintptr_t> playerView{ REL::RelocationID(35559, 36558), REL::Relocate(0x11D, 0x11D) };
 		if (Hooks::CallsTo(playerView.address(), REL::RelocationID(35560, 36559), "portal: Main::RenderPlayerView")) {
 			RenderPlayerViewHook::func = trampoline.write_call<5>(playerView.address(), RenderPlayerViewHook::Thunk);

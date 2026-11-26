@@ -15,6 +15,9 @@ namespace Render::Native
 	void SetGatePassage(float a_depth);
 	void SetPortalClip(const std::optional<ClipPlane>& a_plane);
 	void SetPortalPass(bool a_active);
+	// The weather's rain and snow are being drawn into a doorway's picture, with the main camera and in the
+	// main view's coordinates: not cut at the doorway (the picture is what shows there).
+	void SetPrecipitationWhole(bool a_whole);
 	[[nodiscard]] bool MergedDoorSet();  // a space is merged in this frame
 	[[nodiscard]] json DescribeMask();
 

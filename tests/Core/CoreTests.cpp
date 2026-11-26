@@ -21,6 +21,8 @@
 #include "Core/Pictures/Exposure.h"
 #include "Core/Pictures/FileFormat.h"
 #include "Core/Pictures/Layers.h"
+#include "Core/Lighting/Daylight.h"
+#include "Core/Lighting/SunCorrection.h"
 #include "Core/Render/DoorwayPlanes.h"
 #include "Core/Selection/Ranking.h"
 #include "GraphTests.h"
@@ -494,6 +496,7 @@ namespace
 	}
 
 #include "PictureTests.h"
+#include "LookTests.h"
 
 	void PictureCamera()
 	{
@@ -533,6 +536,8 @@ int main()
 	Run("depth image layers: march, votes, camera", LayeredDepthImages);
 	Run("picture exposure, budget, load order, files", ExposureBudgetAndFiles);
 	Run("pictures: block compression", CompressedPictures);
+	Run("doorway daylight: patch, sky view, gains", DoorwayDaylight);
+	Run("sun direction learned against the formula", SunCorrectionLearns);
 	failures += RunGraphTests();
 	std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
 	return failures ? 1 : 0;

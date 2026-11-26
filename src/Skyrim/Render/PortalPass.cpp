@@ -298,6 +298,7 @@ namespace Render::PortalPass
 			Native::SetPortalClip(std::nullopt);
 			auto* camera = RE::Main::WorldRootCamera();
 			Native::SetPortalPass(true);
+			Native::SetPrecipitationWhole(true);
 			auto* precip = RE::Sky::GetSingleton()->precip;
 			ResetAccumulator(portalAccumulator.get());
 			auto& data = portalAccumulator->GetRuntimeData();
@@ -317,6 +318,7 @@ namespace Render::PortalPass
 			// In the live picture's viewport, pixel for pixel over the main view's depth.
 			RE::BSGraphics::Renderer::SubmitAccumulator(camera, portalAccumulator.get(), LiveRenderFlags());
 			inPortalSubmit = false;
+			Native::SetPrecipitationWhole(false);
 			SetDepthTarget(kDepthTarget, RE::BSGraphics::SRTM_NO_CLEAR, 0);
 		}
 

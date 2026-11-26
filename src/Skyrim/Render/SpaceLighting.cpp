@@ -1,5 +1,7 @@
 #include "Skyrim/Render/SpaceLighting.h"
 
+#include "Core/Lighting/Daylight.h"
+#include "Core/Lighting/SunCorrection.h"
 #include "Skyrim/Engine/Fog.h"
 
 namespace Render::SpaceLighting
@@ -140,6 +142,9 @@ namespace Render::SunDirections
 		// Interiors' directional light as the engine set it (the world light scene's sun) while the
 		// player was in them, by cell, for this session (Observe).
 		std::unordered_map<RE::FormID, RE::NiPoint3> seenDirections;
+
+		// The difference between the formula and the engine's outdoor sun, by hour (Core::Lighting::SunCorrection).
+		Core::Lighting::SunCorrection outdoorCorrection;
 	}
 
 	RE::NiPoint3 OfCell(RE::TESObjectCELL* a_cell)
@@ -153,7 +158,7 @@ namespace Render::SunDirections
 	// side): from east (+1) to west (-1) by day, and back by night. The light travels along
 	// (-fSunDirXExtreme x, -fSunDirXExtreme * fSunYExtreme / fSunXExtreme, fSunZExtreme), the
 	// settings read where Sun::Update reads them.
-	RE::NiPoint3 Outdoors()
+	RE::NiPoint3 OutdoorsFormula()
 	{
 		auto* sky = RE::Sky::GetSingleton();
 		auto* calendar = RE::Calendar::GetSingleton();
@@ -174,6 +179,28 @@ namespace Render::SunDirections
 		RE::NiPoint3 direction{ -*dirXExtreme * x, -*dirXExtreme * *yExtreme / *xExtreme, *zExtreme };
 		direction.Unitize();
 		return direction;
+	}
+
+	RE::NiPoint3 Outdoors()
+	{
+		const float hour = RE::Calendar::GetSingleton()->GetHour();
+		return ToNi(outdoorCorrection.Apply(hour, ToCore(OutdoorsFormula())));
+	}
+
+	void LearnOutdoors(const RE::NiPoint3& a_actual, float a_sunLuminance)
+	{
+		// By day only: at night the engine's sun light isn't the sun, and a direction far from the
+		// formula's is something other than a mod moving the sun's path.
+		const auto formula = OutdoorsFormula();
+		if (a_sunLuminance < 0.05f || formula.Dot(a_actual) < 0.5f) {
+			return;
+		}
+		const bool first = outdoorCorrection.Samples() == 0;
+		outdoorCorrection.Observe(RE::Calendar::GetSingleton()->GetHour(), ToCore(formula), ToCore(a_actual));
+		if (first) {
+			const float apart = RE::rad_to_deg(std::acos(std::clamp(formula.Dot(a_actual), -1.0f, 1.0f)));
+			logger::info("portal: outdoor sun direction learned against the formula ({:.1f} degrees apart; Sky Sync and the like move the sun's path)", apart);
+		}
 	}
 
 	void Observe()
@@ -202,7 +229,7 @@ namespace Render::SunDirections
 		checked = true;
 		const auto&        r = light->world.rotate;
 		const RE::NiPoint3 engine{ r.entry[0][0], r.entry[1][0], r.entry[2][0] };
-		const auto         ours = cell->IsInteriorCell() ? FormulaDirection(cell) : Outdoors();
+		const auto         ours = cell->IsInteriorCell() ? FormulaDirection(cell) : OutdoorsFormula();
 		if (cell->IsInteriorCell()) {
 			seenDirections.insert_or_assign(current, engine);
 		}
@@ -373,6 +400,10 @@ namespace Render::SpaceLighting
 		snapshot.sunFade = light->GetLightRuntimeData().fade;
 		const auto& r = light->world.rotate;
 		snapshot.sunDirection = { r.entry[0][0], r.entry[1][0], r.entry[2][0] };  // along its local +X
+		{
+			const auto& diffuse = snapshot.sun;
+			SunDirections::LearnOutdoors(snapshot.sunDirection, Core::Daylight::Luminance(diffuse.red, diffuse.green, diffuse.blue) * snapshot.sunFade);
+		}
 		snapshot.ambient = SaveAmbient();
 		using Color = RE::TESWeather::ColorTypes;
 		snapshot.sky = { sky->skyColor[Color::kSkyUpper], sky->skyColor[Color::kHorizon], sky->skyColor[Color::kSkyLower] };
@@ -468,6 +499,18 @@ namespace Render::SpaceLighting
 			a_rotation);
 	}
 
+	std::optional<StreetDaylight> DaylightOfStreet(RE::TESObjectCELL* a_streetCell, const RE::NiMatrix3& a_rotation, float a_sunlightScale)
+	{
+		const auto weather = WeatherLighting();
+		if (!weather) {
+			return std::nullopt;
+		}
+		const auto direction = OutdoorLightDirection(RecentOutdoors(a_streetCell));
+		const auto ambient = AmbientTransform(weather->ambient);
+		return StreetDaylight{ { weather->sun.red * a_sunlightScale, weather->sun.green * a_sunlightScale, weather->sun.blue * a_sunlightScale }, ToCore(a_rotation * (direction * -1.0f)),
+			{ ambient.translate.x, ambient.translate.y, ambient.translate.z } };
+	}
+
 	std::optional<Render::SpaceFog> MergedFog()
 	{
 		const auto weather = WeatherLighting();
@@ -522,7 +565,9 @@ namespace Render::SpaceLighting
 				{ "direction", { outdoorSnapshot.sunDirection.x, outdoorSnapshot.sunDirection.y, outdoorSnapshot.sunDirection.z } } };
 		}
 		const auto computed = SunDirections::Outdoors();
+		const auto formula = SunDirections::OutdoorsFormula();
 		result["computedDirection"] = { computed.x, computed.y, computed.z };
+		result["formulaDirection"] = { formula.x, formula.y, formula.z };
 		return result;
 	}
 }
