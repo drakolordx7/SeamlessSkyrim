@@ -122,4 +122,94 @@ namespace Sampler
 		}).detach();
 		return true;
 	}
+
+	// ---- hitch watcher ------------------------------------------------------------------------
+
+	namespace
+	{
+		using Clock = std::chrono::steady_clock;
+		constexpr std::size_t kMaxHitchSamples = 4000;
+
+		std::atomic<std::int64_t> lastTick = 0;  // Clock ticks of the last finished frame
+		std::atomic_bool          watching = false;
+		std::mutex                markLock;
+		std::vector<std::string>  marks;  // pending, written by the watcher
+
+		std::int64_t Now()
+		{
+			return Clock::now().time_since_epoch().count();
+		}
+
+		std::string WallClock()
+		{
+			return std::format("{:%H:%M:%S}", std::chrono::current_zone()->to_local(std::chrono::floor<std::chrono::milliseconds>(std::chrono::system_clock::now())));
+		}
+	}
+
+	void WatchTick()
+	{
+		lastTick.store(Now(), std::memory_order_relaxed);
+	}
+
+	void WatchMark(const std::string& a_text)
+	{
+		std::scoped_lock lock(markLock);
+		marks.push_back(std::format("M\t{}\t{}", WallClock(), a_text));
+	}
+
+	bool WatchStart(const std::filesystem::path& a_file, double a_thresholdMs)
+	{
+		if (!mainThread || watching.exchange(true)) {
+			return false;
+		}
+		std::thread([a_file, a_thresholdMs] {
+			auto        samples = std::make_unique<Sample[]>(kMaxHitchSamples);
+			HANDLE      thread = ::OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, mainThread);
+			std::ofstream out(a_file, std::ios::app);
+			std::unordered_map<std::uintptr_t, std::string> names;
+			::timeBeginPeriod(1);
+			const auto ms = [](std::int64_t a_from, std::int64_t a_to) { return std::chrono::duration<double, std::milli>(Clock::duration(a_to - a_from)).count(); };
+			for (;;) {
+				::Sleep(1);
+				{
+					std::scoped_lock lock(markLock);
+					for (const auto& m : marks) {
+						out << m << '\n';
+					}
+					out.flush();
+					marks.clear();
+				}
+				const auto before = lastTick.load(std::memory_order_relaxed);
+				if (!before || ms(before, Now()) < a_thresholdMs) {
+					continue;
+				}
+				// The frame in progress has run past the threshold: sample it until it ends.
+				const auto wall = WallClock();
+				std::size_t taken = 0;
+				while (lastTick.load(std::memory_order_relaxed) == before) {
+					if (taken < kMaxHitchSamples && ::SuspendThread(thread) != static_cast<DWORD>(-1)) {
+						CONTEXT context{};
+						context.ContextFlags = CONTEXT_FULL;
+						if (::GetThreadContext(thread, &context)) {
+							auto& sample = samples[taken++];
+							sample.ms = static_cast<float>(ms(before, Now()));
+							sample.count = Unwind(&context, sample.frames);
+						}
+						::ResumeThread(thread);
+					}
+					::Sleep(1);
+				}
+				out << std::format("H\t{}\t{:.1f}\n", wall, ms(before, lastTick.load(std::memory_order_relaxed)));
+				for (std::size_t i = 0; i < taken; ++i) {
+					out << std::format("S\t{:.1f}\t", samples[i].ms);
+					for (std::uint32_t f = 0; f < samples[i].count; ++f) {
+						out << (f ? "," : "") << Describe(samples[i].frames[f], names);
+					}
+					out << '\n';
+				}
+				out.flush();
+			}
+		}).detach();
+		return true;
+	}
 }

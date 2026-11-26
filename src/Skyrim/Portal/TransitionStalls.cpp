@@ -59,6 +59,25 @@ namespace
 		static inline REL::Relocation<decltype(Thunk)> func;
 	};
 
+	// The end of TES::SetCurrentCell (ID 13316 + 0x7E5) and of the change into an exterior (ID 13317 +
+	// 0x781) call ID 30451 on the task manager (global ID 400442), which waits, a millisecond at a
+	// time under a lock, until every queued task has finished; skipped only when the loading screen
+	// flag in ID 403330 says so. Entering a cell whose loads weren't done yet (the first door of a
+	// session, a street not seen before) it held the main thread for 80-500 ms, and a loading screen
+	// is what that wait is meant to sit behind. Seamless, the queue drains over the next frames.
+	struct QueueWaitHook
+	{
+		static void Thunk(void* a_manager)
+		{
+			if (seamlessTeleport) {
+				Portal::TravelTrace::Note("waiting for the task queue to drain skipped");
+				return;
+			}
+			func(a_manager);
+		}
+		static inline REL::Relocation<decltype(Thunk)> func;
+	};
+
 	// TES::SetCurrentCell (ID 13316) + 0x273: when no loading screen is up it draws one more frame
 	// (Main::Draw, ID 36555) of the space being left, in the middle of the transition: ~15 ms and
 	// a frame nobody should see (the next one is already drawn from the other side).
@@ -240,6 +259,14 @@ namespace Portal::TransitionStalls
 		REL::Relocation<std::uintptr_t> settle{ REL::RelocationID(39657, 40744), 0x53B };
 		if (REL::Module::IsAE() && callsTo(settle.address(), REL::RelocationID(0, 37507))) {
 			SettleHook::func = SKSE::GetTrampoline().write_call<5>(settle.address(), SettleHook::Thunk);
+		}
+		// AE 1.6.1170 (read off it); other builds keep the wait until their sites are found.
+		const REL::RelocationID         kQueueWait(0, 30451);
+		REL::Relocation<std::uintptr_t> queueWaitA{ REL::RelocationID(0, 13316), 0x7E5 };
+		REL::Relocation<std::uintptr_t> queueWaitB{ REL::RelocationID(0, 13317), 0x781 };
+		if (REL::Module::IsAE() && REL::Module::get().version() < SKSE::RUNTIME_SSE_1_7_99 && callsTo(queueWaitA.address(), kQueueWait) && callsTo(queueWaitB.address(), kQueueWait)) {
+			QueueWaitHook::func = SKSE::GetTrampoline().write_call<5>(queueWaitA.address(), QueueWaitHook::Thunk);
+			SKSE::GetTrampoline().write_call<5>(queueWaitB.address(), QueueWaitHook::Thunk);
 		}
 		REL::Relocation<std::uintptr_t> extraFrame{ REL::RelocationID(13171, 13316), REL::Relocate(0x24C, 0x273) };
 		if (callsTo(extraFrame.address(), REL::RelocationID(35556, 36555))) {

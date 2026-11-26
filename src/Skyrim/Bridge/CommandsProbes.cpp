@@ -13,6 +13,7 @@
 #include "Skyrim/Portal/LightScene.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
+#include "Skyrim/Render/FlashGuard.h"
 #include "Skyrim/Render/Frame.h"
 #include "Skyrim/Render/SpaceLighting.h"
 
@@ -967,7 +968,7 @@ namespace Bridge
 				 }
 				 return json{ { "model", model ? model->GetModel() : "" }, { "refFlags", ref->GetFormFlags() }, { "nodes", nodes }, { "chain", chain } };
 			 } } },
-			{ "frame_stats", { [](const json&) { return FrameHooks::FrameStats(); } } },
+			{ "frame_stats", { [](const json& a) { return FrameHooks::FrameStats(a.value("reset", false)); } } },
 			{ "perf", { Perf::Command, false } },
 			// {"start": true} clears and records; {"start": false} stops; no argument just reads.
 			{ "brightness", { [](const json& a) {
@@ -1136,6 +1137,34 @@ namespace Bridge
 			// Samples the main thread now, for {seconds} (default 3), into {file}: a steady view, where
 			// travel_profile starts at a crossing.
 			// Off the main thread: it samples the main thread from its own, also when that one hangs.
+			// Hitch watcher: frames longer than {thresholdMs} (default 40) are sampled while they last and
+			// appended with their stacks to {file}; hitch_mark {text} puts a line in the same file.
+			{ "hitch_watch", { [](const json& a) {
+				 const auto file = a.at("file").get<std::string>();
+				 if (!Sampler::WatchStart(std::filesystem::path(file), a.value("thresholdMs", 40.0))) {
+					 throw std::runtime_error("not watching: already watching, or the main thread isn't known yet");
+				 }
+				 return json{ { "file", file } };
+			 }, false } },
+			// The flash guard (Render/FlashGuard): {frames} caps its window (0 switches it off), {jump, brightness}
+			// set what a frame has to pass to be replaced (very low: every frame is, to see that it works), {start} watches
+			// that many frames from now, as a crossing does.
+			{ "flash_guard", { [](const json& a) {
+				 if (a.contains("frames")) {
+					 ::Render::FlashGuard::SetWindow(a.at("frames").get<int>());
+				 }
+				 if (a.contains("jump") || a.contains("brightness")) {
+					 ::Render::FlashGuard::SetLimits(a.value("jump", 0.3f), a.value("brightness", 0.8f));
+				 }
+				 if (a.contains("start")) {
+					 ::Render::FlashGuard::Guard(a.at("start").get<int>());  // watch the next frames now, as a crossing does
+				 }
+				 return ::Render::FlashGuard::Status();
+			 }, false } },
+			{ "hitch_mark", { [](const json& a) {
+				 Sampler::WatchMark(a.at("text").get<std::string>());
+				 return json{ { "ok", true } };
+			 }, false } },
 			{ "profile", { [](const json& a) {
 				 const auto file = a.at("file").get<std::string>();
 				 // Said, not passed over: a hang reported "sampled into" a file that never appeared.

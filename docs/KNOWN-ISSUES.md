@@ -13,6 +13,23 @@
   again before the step didn't help. The settle step is left out on our seamless teleports; not
   hooked on SE and AE 1.7.99+ (the call site is only known for 1.6.1170, so the bug may stay there).
 
+- Frame hitches left after the crossing work (Whiterun crawl, 38 doors, the hitch watcher: BUILD.md): around each crossing
+  (`in`, `out` stages) 80-90 frames per crawl are 40-90 ms (median frame 10-13 ms), no door over 100 ms except two
+  one-frame ones: the main gate walking in from Tamriel (~160 ms: the engine reads Whiterun's grid cells from the plugin
+  files, `TESFile::SeekCell` under `TESWorldSpace::LoadCell` in the teleport; `RemoteCell::Prewarm` only runs for a walk
+  out of an interior) and Dragonsreach's cellar door walking out (~140 ms, `TESWaterSystem::AddLODWater` in the teleport).
+  The rest is spread thin: the portal pass's draws (`PortalPass::DrawPassHook` and the driver waits under it, ~half),
+  scene graph walks of ours in the crossing frame (`Engine::ForceFadeIn`, `MovedBounds::UnfixBeforeMove`,
+  `SettleMotion`, 40-70 ms), the light update, `Pictures::Cache` creating a layered picture's textures (`gpu-wait`).
+  Not cut: each is under 100 ms and was not the cause of the long ones.
+- The test machine's GPU is the limit in Whiterun's main street (99% 3D engine use, the world draw 28 ms with `perf` on):
+  60-300 ms frames after the crawler's teleports and looking down the street are all in `Present` (the render queue
+  full), nothing the plugin does. The crawler leaves its own teleports out of the hitch table.
+- `TransitionStalls::QueueWaitHook` (the wait for the task queue at the end of `SetCurrentCell`, ENGINE.md) is hooked on
+  AE 1.6.1170 only; SE 1.5.97 and AE 1.7.99+ keep the wait (80-500 ms when loads are queued) until the call sites are found.
+- The shaders compiled during a session (35 in a Whiterun crawl, 10-90 ms each on the main thread) are kept in
+  `SeamlessSkyrim_Shaders` next to the DLL; the first session after an install, or after a shader's source changes,
+  still compiles them in the frame that first needs them (the first door opened: ~70-90 ms).
 - AE: `place_go` (`coc RiftenBeggarsRow`) from Riften's street just after walking out of Beggar's
   Row hung the game during the load: no CPU, every thread waiting; the log ends with the room's
   door opened again (`Doors::Open`) after the release. Once.

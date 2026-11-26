@@ -242,6 +242,25 @@ Frame rate:
   (`lightOcclusion.raysTotal` in `portal_status`).
 - `sampler_report.py file [from_ms to_ms]` names the functions in SeamlessSkyrim's frames
   from the build folder's PDB, so the DLL in the game must be that build.
+- Which frame was long, and what the main thread was doing in it: bridge `hitch_watch {file, thresholdMs}`
+  (the crawler starts it, into the run folder's `hitches.txt`). A thread wakes every millisecond and, once a
+  frame has run past the threshold (40 ms), samples the main thread's stack until the frame ends:
+  `H <time> <frame ms>` and `S <ms into the frame> <stack>` lines; `hitch_mark {text}` adds `M <time> <text>`
+  (the crawler marks its stages, doors and commands). `tools/crawler/hitches.py <run>` reads it:
+  `--causes` sorts the frames by where most samples were, `--summary` counts per door and stage, without
+  options it prints the leaf-most non-system frames of each frame; `--dll` names the DLL (and PDB) the game ran
+  when the build folder has moved on. Frames the crawler's own commands cause (a screenshot encodes in the
+  Present hook, 50-100 ms; `move_to`, `console cow`, `scene_check`) are recognised by their mark and left out
+  of the crawl report's hitch table; `frame_stats` is read before the screenshot for the same reason.
+  Reading the stacks: `wait:` is inside ntdll/kernel (blocked), `gpu-wait:` inside the driver (`nvwgf2umx`,
+  `d3d11`, `dxgi`, `gameoverlayrenderer64`): the main thread waits for the GPU. A frame all in `Present`
+  (`gameoverlayrenderer64 < ... PresentThunk`) is a GPU-bound frame, nothing the CPU did.
+- `SkyrimSE.exe` on disk is encrypted: to name an engine function in such a stack, dump the running game
+  (`python tools/se-port/dump.py <pid> build/se-port/SkyrimSE-mem.exe`) and open that with
+  `retools.Image`/`Disassembler` (the `re_disassemble` tool reads the file on disk and shows garbage).
+- `flash_guard {frames, jump, brightness, start}`: the guard against the engine's white frame after a
+  crossing (`Render/FlashGuard`); `start: n` watches the next n frames as a crossing does, very low `jump` and
+  `brightness` make every frame count as a flash (the tally in `replacedInAll` shows it works).
 - The camera moving changes the numbers a lot. Measure with nobody at the controls.
 - Left alone, the game's idle camera starts orbiting the player after a while (camera state 1 in
   bridge `camera`), so pictures and numbers taken a few seconds apart look in different

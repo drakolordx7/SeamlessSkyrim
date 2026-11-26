@@ -23,7 +23,7 @@ namespace FrameHooks
 	json WalkStatus();
 
 	// Diagnostics: frame times of the last 120 frames (average, median, 95th percentile, worst).
-	json FrameStats();
+	json FrameStats(bool a_reset = false);
 
 	// Any thread except the main/render thread: blocks until the next Present wrote the file.
 	json CaptureScreenshot(const std::wstring& a_path, std::chrono::milliseconds a_timeout);

@@ -562,3 +562,31 @@ Found porting the plugin; each was checked in the code of both.
 - **Nothing runs in a space attached for a picture:** `RemoteCell::AttachForPicture` skips `MoveToHigh` (the high process is what
   runs an NPC's AI), never steps the Havok world, skips `AnimateReferences` and `CheckLooseItems`. A kept (T3) space is dormant the same way
   until it is live (see "A space's people follow its tier").
+
+## Frame hitches: what held the main thread (measured with the hitch watcher, docs/BUILD.md)
+
+- **A CPU read of this frame's result waits for the whole render queue.** `Map(READ)` on a staging copy of
+  the back buffer (the old flash guard, every frame for 60 frames after each crossing) blocked the main
+  thread 60-150 ms a frame on this GPU-bound game (99% 3D engine use, the world draw alone 28 ms in
+  Whiterun's main street with `perf` on): 841 of the 945 frames over 40 ms in a full Whiterun crawl, in the
+  crossing stages. The Present hook's work must never wait for the GPU; decide on the GPU
+  (`Render/FlashGuard`: copy, one thread group averages three rows and decides, a fullscreen triangle writes
+  the frame or the one before it; the tally is read three frames later with `D3D11_MAP_FLAG_DO_NOT_WAIT`).
+- **A frame all in `Present` is the GPU.** With the render queue full the main thread sits in
+  `SSEDisplayTweaks < PresentThunk < CommunityShaders < gameoverlayrenderer64 < d3d11 < nvwgf2umx`; the same
+  wait shows inside `ID 107644` (`SetupAndDrawPass`) when the driver's command buffer is full. 40-100 ms
+  frames of this kind in front of a door looking down Whiterun's street are the scene's own GPU cost.
+- **`ID 30451` waits for the task queue to drain.** `TES::SetCurrentCell` (ID 13316 + 0x7E5, AE 1.6.1170) and
+  the change into an exterior (ID 13317 + 0x781) end with a call to it on the global ID 400442 unless a flag
+  in ID 403330 + 0x340 says otherwise: under a lock it sleeps 1 ms at a time (ID 91402 on a task's state)
+  until every queued task has finished. At a seamless crossing with loads still queued (the first door of a
+  session: 495 ms, Arcadia's Cauldron 78 ms) it holds the main thread; a loading screen is what it is meant to
+  sit behind. `TransitionStalls::QueueWaitHook` skips it on our teleports, like the wait at ID 40438 + 0x8B2.
+- **`D3DCompile` takes 10-90 ms.** The doorway mask's geometry shaders are compiled when a draw first needs
+  one (`NativeMask.cpp`, one per output signature of the engine's vertex shaders: ~20 of the 35 shaders the
+  plugin compiles) and the picture, composite and daylight shaders when first used: a 60-90 ms frame the
+  first time a door was opened. `Render::D3D::Compile` keeps the bytecode in `SeamlessSkyrim_Shaders` (named
+  by a hash of source, entry, profile and flags); from the second session on it is a file read.
+- **A screenshot is a hitch of its own**: `Capture` encodes in the Present hook (50-100 ms and more). The
+  crawler's per-stage `frame_stats` covered the last 120 frames, the screenshot's among them, and made
+  ordinary doors look like 200-400 ms ones.

@@ -70,6 +70,8 @@ def write(out: Path, config: dict[str, Any], results: list[dict[str, Any]], cens
         lines += ["## Slowest frames (max ms over the visit)", ""]
         lines += [f"- {r['id']} {r['base']} ({r['place']}): max {worst_frame(r):.0f} ms, p95 {frame_p95(r):.0f} ms" for r in slow]
         lines.append("")
+    import hitches
+    lines += hitches.report_lines(out)
     fronts = [(r.get("checks", {}).get("front") or {}) for r in results if r["result"] != "skipped"]
     reached = collections.Counter(f.get("tierReached", "?") for f in fronts if f.get("shut", True))
     lines.append("Tier of the space behind the door when approached with it shut (6 m): " + ", ".join(f"{n} {t}" for t, n in reached.most_common()) + ".")

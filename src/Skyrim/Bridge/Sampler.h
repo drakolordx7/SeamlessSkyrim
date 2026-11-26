@@ -15,4 +15,14 @@ namespace Sampler
 	bool Start(const std::filesystem::path& a_file, double a_seconds);
 
 	[[nodiscard]] bool Running();
+
+	// Hitch watcher: a thread that, when a frame runs longer than a_thresholdMs, samples the main
+	// thread until it ends and appends "H <time> <frame ms>" with its "S <ms> <stack>" lines to
+	// a_file; "M <time> <text>" lines are the marks of WatchMark. Costs a wake-up per millisecond.
+	// False when already watching or before the main thread is known.
+	bool WatchStart(const std::filesystem::path& a_file, double a_thresholdMs);
+	// Main thread, once per frame (at Present).
+	void WatchTick();
+	// Any thread: a line in the watcher's file saying where the test is (a crawl's stage).
+	void WatchMark(const std::string& a_text);
 }

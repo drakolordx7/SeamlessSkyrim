@@ -1,5 +1,7 @@
 #include "Skyrim/Render/D3D.h"
 
+#include "Skyrim/Engine/Paths.h"
+
 #pragma comment(lib, "d3dcompiler.lib")
 
 namespace Render::D3D
@@ -24,8 +26,47 @@ namespace Render::D3D
 			state.dynamicResolutionHeightRatio > 0.0f ? state.dynamicResolutionHeightRatio : 1.0f };
 	}
 
+	namespace
+	{
+		// Compiling a shader takes 10-80 ms on the main thread, in the middle of a frame (the first
+		// door opened, the first picture composed). What was compiled is kept in a folder next to the
+		// DLL, named by a hash of everything that goes into it, and read back in a fraction of a
+		// millisecond from the second session on.
+		std::filesystem::path CacheFile(std::string_view a_source, const char* a_entry, const char* a_profile, UINT a_flags)
+		{
+			std::uint64_t h[2] = { 0xcbf29ce484222325ull, 0x84222325cbf29ce4ull };
+			const auto    add = [&](std::string_view a_part) {
+				for (auto& hash : h) {
+					for (const unsigned char c : a_part) {
+						hash = (hash ^ c) * 0x100000001b3ull;
+					}
+					hash = (hash ^ 0xff) * 0x100000001b3ull;
+					hash += 0x9e3779b97f4a7c15ull;  // the two hashes part ways
+				}
+			};
+			add(a_source);
+			add(a_entry);
+			add(a_profile);
+			add(std::to_string(a_flags));
+			return Paths::PluginDirectory() / "SeamlessSkyrim_Shaders" / std::format("{:016x}{:016x}.cso", h[0], h[1]);
+		}
+	}
+
 	ID3DBlob* Compile(std::string_view a_source, const char* a_name, const char* a_entry, const char* a_profile, UINT a_flags, std::string* a_errors)
 	{
+		const auto file = CacheFile(a_source, a_entry, a_profile, a_flags);
+		if (std::ifstream in(file, std::ios::binary | std::ios::ate); in) {
+			const auto size = static_cast<std::size_t>(in.tellg());
+			ID3DBlob*  cached = nullptr;
+			if (size > 0 && SUCCEEDED(::D3DCreateBlob(size, &cached))) {
+				in.seekg(0);
+				in.read(static_cast<char*>(cached->GetBufferPointer()), static_cast<std::streamsize>(size));
+				if (in) {
+					return cached;
+				}
+				cached->Release();
+			}
+		}
 		ID3DBlob* code = nullptr;
 		ID3DBlob* errors = nullptr;
 		if (FAILED(::D3DCompile(a_source.data(), a_source.size(), a_name, nullptr, nullptr, a_entry, a_profile, a_flags, 0, &code, &errors))) {
@@ -39,6 +80,12 @@ namespace Render::D3D
 				*a_errors = static_cast<const char*>(errors->GetBufferPointer());
 			}
 			errors->Release();
+		}
+		if (code) {
+			std::error_code error;
+			std::filesystem::create_directories(file.parent_path(), error);
+			std::ofstream out(file, std::ios::binary | std::ios::trunc);
+			out.write(static_cast<const char*>(code->GetBufferPointer()), static_cast<std::streamsize>(code->GetBufferSize()));
 		}
 		return code;
 	}

@@ -52,6 +52,8 @@ import report  # noqa: E402
 PRIORITY = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "fallback-loading-screen", "live-while-shut", "not-live", "tier-low", "scene-problem", "visual-suspect"]
 TIERS = ["cold", "image", "depth-image", "loaded-paused", "live"]
 T3, T4 = TIERS.index("loaded-paused"), TIERS.index("live")
+# Bridge commands that put a line in hitches.txt (a hitch right after one is the command's own work).
+MARKED = {"move_to", "console", "activate", "walk_to", "use_pick", "scene_check", "camera_view", "ray_down", "refs_near"}
 TRANSIENT = ("timed out waiting for the game's main thread", "bridge unreachable")
 
 
@@ -74,6 +76,7 @@ class Session:
         self.ours_pid: int | None = None
         self.blocked = 0.0  # seconds the main thread did not answer, summed over transient retries
         self.hang_s = args.hang_seconds
+        self.watching = False  # the plugin's hitch watcher is running (hitches.txt)
 
     # ---- bridge ----------------------------------------------------------------------------
 
@@ -82,6 +85,8 @@ class Session:
         game stops answering or is gone. Time spent waiting adds to self.blocked."""
         s = self.server
         started = time.monotonic()
+        if cmd in MARKED and self.watching:
+            self.mark(cmd)
         while True:
             try:
                 result = s.bridge.call(cmd, **a)
@@ -98,6 +103,13 @@ class Session:
                     raise Hang(f"bridge silent for {self.hang_s:.0f}+ s ({e})") from e
                 s.background.apply()
                 time.sleep(1)
+
+    def mark(self, text: str) -> None:
+        """A line in hitches.txt (the plugin's hitch watcher) saying where the crawl is."""
+        try:
+            self.server.bridge.call("hitch_mark", text=text)
+        except self.server.BridgeError:
+            pass
 
     def state(self) -> dict[str, Any]:
         return self.call("state")
@@ -150,6 +162,12 @@ class Session:
         for command in (["tgm"] if god_mode else []) + ["set gamehour to 13", "set timescale to 0"]:
             self.console(command)
         self.call("camera_view", firstPerson=True)
+        try:
+            # Frames over 40 ms are sampled while they last: hitches.txt (tools/crawler/hitches.py reads it).
+            self.server.bridge.call("hitch_watch", file=str(self.out / "hitches.txt"), thresholdMs=40.0)
+        except self.server.BridgeError as e:
+            print(f"hitch watcher not started: {e}", flush=True)
+        self.watching = True
         status = self.call("portals_enable", enabled=True)
         if not status.get("enabled"):
             raise RuntimeError("portals could not be enabled in this build")
@@ -189,6 +207,7 @@ class Session:
         from PIL import Image
 
         path = self.out / "shots" / rec["dir"] / f"{stage}.jpg"
+        self.mark(f"screenshot {stage}")
         try:
             self.server.take_picture(path, max_width=960)
         except self.server.BridgeError as e:
@@ -469,7 +488,10 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     linked = c.hex_id(dest["doorId"])
     S.server.background.remember_user_window()
     S.server.background.guard(120)
+    S.mark(f"DOOR {ref} {rec['dest']}")
     go_front(S, door, front)
+    S.mark(f"stage front {ref}")
+    S.call("frame_stats", reset=True)  # each stage's frame times cover that stage only (not the teleport before it)
 
     # The door must be there: a wrong run-time id (load order differs from the census) shows up here.
     near = S.call("refs_near", radius=1200, kind="doors", limit=40)
@@ -501,8 +523,8 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     elif TIERS.index(best) >= T4:
         rec["problems"].append(("live-while-shut", f"the space behind the shut door is live at 6 m with no door open into it: {ds.get('lastDecision')}"))
     eye = S.call("camera")["camera"]
-    front_img = S.snap(rec, "front")
     rec["checks"]["front"]["frame"] = S.call("frame_stats")
+    front_img = S.snap(rec, "front")
     rec["checks"]["front"]["scene"] = S.call("scene_check", radius=3000)
     if TIERS.index(best) < need:
         rec["problems"].append(("tier-low", f"at 6 m with the door shut the space behind it reached only {best} in {settled:.0f} s (wanted {TIERS[need]}): {ds.get('reason') or ds.get('lastDecision')}"))
@@ -536,12 +558,14 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     time.sleep(1.0)
 
     # Open it: the space should go live (T4) within a few seconds, with the door open and the player near.
+    S.mark(f"stage open {ref}")
+    S.call("frame_stats", reset=True)
     vanilla = use_door(S, rec, ref, linked, "open")
     ds, best, took = ({}, "cold", 0.0) if vanilla else wait_tier(S, ref, T4, S.args.live_wait)
     time.sleep(0.8 if best == "live" else 0.0)
     status = portal_summary(S)
-    open_img = S.snap(rec, "open")
     rec["checks"]["open"] = {"liveS": round(took, 1), "portal": status, "door": ds, "tierReached": best, "schedule": schedule_state(S), "frame": S.call("frame_stats")}
+    open_img = S.snap(rec, "open")
     if not vanilla:
         # The merged room is drawn by now: where its pieces stand is what the picture above shows.
         rec["checks"]["open"]["scene"] = S.call("scene_check", radius=3000)
@@ -565,6 +589,8 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
                 rec["flags"].append("open:no-visible-change")
 
     # Cross in.
+    S.mark(f"stage in {ref}")
+    S.call("frame_stats", reset=True)
     walk = {"status": "vanilla load"}
     if not vanilla:
         target = D.beyond_of(door["pos"], -front["dir"][0], -front["dir"][1])
@@ -576,8 +602,8 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     else:
         src_ok = here["cell"] == src_edid
     judge_arrival(rec, "in", here, src_ok, walk)
-    S.snap(rec, "in")
     rec["checks"]["in"]["frame"] = S.call("frame_stats")
+    S.snap(rec, "in")
     rec["checks"]["in"]["scene"] = S.call("scene_check", radius=3000)
     if not rec["checks"]["in"]["scene"].get("ok", True):
         rec["problems"].append(("scene-problem", "scene_check inside: " + "; ".join(scene_problems(rec["checks"]["in"]["scene"])[:3])))
@@ -592,6 +618,7 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     pos = S.state()["player"]["pos"]
     face(S, P["pos"][0] - pos[0], P["pos"][1] - pos[1])
     time.sleep(1.5)
+    S.mark(f"stage in-back {ref}")
     S.snap(rec, "in-back")
     p_ref = c.hex_id(P["id"])
     vanilla_back = use_door(S, rec, p_ref, ref, "back")
@@ -603,13 +630,15 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
         # the Underforge's lands 26 units on the wrong side of it).
         out_dir = D.unit(P["pos"][0] - pos[0], P["pos"][1] - pos[1])
         target = D.beyond_of(P["pos"], out_dir[0], out_dir[1])
+        S.mark(f"stage out {ref}")
+        S.call("frame_stats", reset=True)
         walk = walk_through(S, rec, target, "out", (P["pos"][0] - out_dir[0] * 110, P["pos"][1] - out_dir[1] * 110, P["pos"][2] + 20), p_ref)
     src_kind = "worldspace" if D.is_exterior(door) else "interior"
     here = where_am_i(S, src_kind, src_edid, c.space_form_id(door["at"]["spaceId"]), front["landZ"])
     rec["checks"]["out"] = here
     judge_arrival(rec, "out", here, False, walk)
-    S.snap(rec, "out")
     rec["checks"]["out"]["frame"] = S.call("frame_stats")
+    S.snap(rec, "out")
 
 
 def scene_problems(scene: dict[str, Any]) -> list[str]:

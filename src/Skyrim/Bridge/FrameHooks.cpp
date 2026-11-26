@@ -339,10 +339,15 @@ namespace FrameHooks
 		walk.status = a_reason;
 	}
 
-	json FrameStats()
+	json FrameStats(bool a_reset)
 	{
 		std::scoped_lock lock(frameLock);
 		const auto       count = std::min(frameIndex, frameMs.size());
+		if (a_reset) {
+			// The next call covers the frames from now on (a stage of a test, not what came before it).
+			frameIndex = 0;
+			lastFrame.reset();
+		}
 		if (!count) {
 			return nullptr;
 		}

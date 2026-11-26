@@ -167,7 +167,7 @@ namespace Bridge
 			.addCount = Perf::AddCount,
 			.gpuBegin = Perf::GpuBegin,
 			.gpuEnd = Perf::GpuEnd,
-			.frameEnd = Perf::FrameEnd,
+			.frameEnd = [] { Perf::FrameEnd(); Sampler::WatchTick(); },
 			.samplerStart = Sampler::Start,
 			.samplerRunning = Sampler::Running,
 			.samplerSetMainThread = Sampler::SetMainThread,
