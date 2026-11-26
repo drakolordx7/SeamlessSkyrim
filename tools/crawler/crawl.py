@@ -313,7 +313,11 @@ def use_door(S: Session, rec: dict[str, Any], ref: str, linked: str, label: str)
     """Activate `ref` and check at once that the plugin counts it as used (open). Returns True when
     the use blocked the game or a loading screen showed (vanilla loading: nothing seamless about it)."""
     before = S.blocked
-    result = S.call("activate", ref=ref)
+    if door_state(S, ref).get("doorUse"):
+        # The player's use toggles: an open door would be shut by it.
+        rec["activate"][label] = {"skipped": "already open", "counted": True}
+        return False
+    result = S.call("activate", ref=ref, open=True)
     rec["activate"][label] = result
     # The plugin registers the use a frame or two later (its own thread): poll for it.
     saw_loading, counted = False, False
@@ -349,7 +353,7 @@ def walk_once(S: Session, target: tuple[float, float]) -> dict[str, Any]:
     return {"status": "harness-timeout"}
 
 
-def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], label: str) -> dict[str, Any]:
+def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], label: str, doorstep: tuple[float, float, float] | None = None) -> dict[str, Any]:
     """Walk to a point past the door. Stopped at the door (stuck) with the crosshair on it: press the
     activate key as a player would (bridge use_pick) and walk again once."""
     before = S.blocked
@@ -362,7 +366,14 @@ def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], l
         S.snap(rec, f"{label}-stuck")
         pick = S.call("use_pick")
         rec["walks"][label + "-first"]["usePick"] = pick
-        if pick.get("target"):
+        if not pick.get("target") and doorstep and rec["walks"][label + "-first"]["distanceToTarget"] > 250:
+            # The straight walk from 6 m is blocked by stairs, a rail or furniture (the harness steers straight, a
+            # player walks round): put the player right in front of the door and walk the last metre.
+            S.call("move_to", pos=list(doorstep))
+            time.sleep(1.5)
+            rec["notes"].append(f"{label}: the straight walk from 6 m stopped {rec['walks'][label + '-first']['distanceToTarget']} short (obstacle); the last metre was walked from 110 units in front of the door")
+            walk = walk_once(S, target)
+        elif pick.get("target"):
             time.sleep(2.0)
             walk = walk_once(S, target)
             if walk.get("status") in crossed:
@@ -427,6 +438,9 @@ def test_door(S: Session, door: dict[str, Any], index: int) -> dict[str, Any]:
     if door["initiallyDisabled"]:
         rec["result"], rec["notes"] = "skipped", ["initially disabled in the plugin: nothing to see"]
         return rec
+    if "Marker" in door["base"]["editorId"]:
+        rec["result"], rec["notes"] = "skipped", ["marker door: no doorway by design (scripts use it; the scheduler leaves marker doors out of the graph)"]
+        return rec
     if front["guess"]:
         rec["notes"].append("partner door does not point back (census link " + door["link"] + "): approach side guessed from the door's rotation")
 
@@ -463,8 +477,8 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
 
     heading = face(S, -front["dir"][0], -front["dir"][1])
     # Approached with the door shut: nothing runs behind it (by design), but the space should be held loaded
-    # and paused (T3) by 6 m; a locked door keeps its picture (T2). No portal drawn here is correct.
-    need = TIERS.index("depth-image") if rec["locked"] else T3
+    # and paused (T3) by 6 m. A locked door is no way through: nothing is held for it. No portal drawn here is correct.
+    need = 0 if rec["locked"] else T3
     ds, best, settled = wait_tier(S, ref, need, S.args.portal_wait)
     status = portal_summary(S)
     rec["checks"]["front"] = {"settleS": round(settled, 1), "portal": status, "door": ds, "tierReached": best, "schedule": schedule_state(S)}
@@ -524,7 +538,7 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     walk = {"status": "vanilla load"}
     if not vanilla:
         target = D.beyond_of(door["pos"], -front["dir"][0], -front["dir"][1])
-        walk = walk_through(S, rec, target, "in")
+        walk = walk_through(S, rec, target, "in", (door["pos"][0] + front["dir"][0] * 110, door["pos"][1] + front["dir"][1] * 110, door["pos"][2] + 20))
     here = where_am_i(S, dest_kind, dest_edid, c.space_form_id(dest["at"]["spaceId"]), dest["landPos"][2])
     rec["checks"]["in"] = here
     if D.is_exterior(door):
@@ -555,9 +569,11 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     S.snap(rec, "back-open")
     walk = {"status": "vanilla load"}
     if not vanilla_back:
-        out_dir = D.unit(P["pos"][0] - door["dest"]["landPos"][0], P["pos"][1] - door["dest"]["landPos"][1])
+        # Out through the door from where the player stands (the census landing spot can sit behind the door:
+        # the Underforge's lands 26 units on the wrong side of it).
+        out_dir = D.unit(P["pos"][0] - pos[0], P["pos"][1] - pos[1])
         target = D.beyond_of(P["pos"], out_dir[0], out_dir[1])
-        walk = walk_through(S, rec, target, "out")
+        walk = walk_through(S, rec, target, "out", (P["pos"][0] - out_dir[0] * 110, P["pos"][1] - out_dir[1] * 110, P["pos"][2] + 20))
     src_kind = "worldspace" if D.is_exterior(door) else "interior"
     here = where_am_i(S, src_kind, src_edid, c.space_form_id(door["at"]["spaceId"]), front["landZ"])
     rec["checks"]["out"] = here

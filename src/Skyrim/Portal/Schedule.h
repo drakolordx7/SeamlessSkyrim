@@ -31,6 +31,7 @@ namespace Portal::Schedule
 		RE::TESObjectCELL* cell;
 		float              distance;
 		float              rank;
+		bool               open;  // the door is open now (of several doors into the space, the one in use is shown)
 	};
 
 	// At kDataLoaded, after Graph::Install and the settings.

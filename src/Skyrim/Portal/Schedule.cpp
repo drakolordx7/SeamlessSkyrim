@@ -276,14 +276,17 @@ namespace Portal::Schedule
 					continue;
 				}
 				const float rank = Selection::Rank(origin, door, linked);
-				if (live && rank >= live->rank) {
+				// Of several doors into the space (an inn's front and kitchen door, Jorrvaskr's four), the one
+				// that is open is the doorway: the crossing is prepared for the door the player uses.
+				const bool open = std::ranges::contains(openDoors, doorIx) || std::ranges::contains(openDoors, otherIx);
+				if (live && (live->open != open ? live->open : rank >= live->rank)) {
 					continue;
 				}
 				auto* cell = CellFor(other, linked);
 				if (!cell) {
 					continue;
 				}
-				live = Candidate{ door, linked->GetFormID(), cell, origin.GetDistance(door->GetPosition()), rank };
+				live = Candidate{ door, linked->GetFormID(), cell, origin.GetDistance(door->GetPosition()), rank, open };
 			}
 		}
 

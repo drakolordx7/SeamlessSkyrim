@@ -4,6 +4,7 @@
 #include "Skyrim/Bridge/AgentMode.h"
 #include "Skyrim/Bridge/FrameHooks.h"
 #include "Skyrim/Doors/DoorUse.h"
+#include "Skyrim/Doors/Policy.h"
 #include "Skyrim/Portal/EngineHooks.h"
 
 using namespace Bridge::Support;
@@ -76,17 +77,27 @@ namespace
 		return { { "saved", name } };
 	}
 
+	// The activate key, for a reference: a door the portals own is used the way the key does it (DoorActivateHook ->
+	// UseDoor), which opens it, or shuts it if a use had opened it, and registers it in DoorUse; any other reference
+	// goes through the engine's own activation (ActivateRef). {open: true} never shuts a door a use opened: for a
+	// test that must have it open. `effect` says what happened.
 	json Activate(const json& a_args)
 	{
 		auto* player = RequirePlayer();
 		auto* ref = RequireRef(a_args);
-		// A door the portals own is used the way the activate key does it (DoorActivateHook), so that
-		// DoorUse registers it; ActivateRef didn't reach that hook for every door.
-		if (ref->GetBaseObject() && ref->GetBaseObject()->Is(RE::FormType::Door) && Portal::EngineHooks::UseDoor(ref)) {
-			return { { "activated", true }, { "ref", Hex(ref->GetFormID()) }, { "portalUse", true }, { "doorUse", Portal::DoorUse::Used(ref->GetFormID()) } };
+		const bool isDoor = ref->GetBaseObject() && ref->GetBaseObject()->Is(RE::FormType::Door);
+		if (isDoor && Portal::Doors::UsedPairOf(ref)) {
+			const bool wasOpen = Portal::DoorUse::Used(ref->GetFormID());
+			if (wasOpen && a_args.value("open", false)) {
+				return { { "activated", false }, { "ref", Hex(ref->GetFormID()) }, { "portalUse", true }, { "doorUse", true }, { "effect", "already open" } };
+			}
+			Portal::EngineHooks::UseDoor(ref);
+			const bool open = Portal::DoorUse::Used(ref->GetFormID());
+			return { { "activated", true }, { "ref", Hex(ref->GetFormID()) }, { "portalUse", true }, { "doorUse", open },
+				{ "effect", open ? "opened" : wasOpen ? "shut" : "stands open" } };
 		}
 		const bool activated = ref->ActivateRef(player, 0, nullptr, 1, false);
-		return { { "activated", activated }, { "ref", Hex(ref->GetFormID()) }, { "portalUse", false } };
+		return { { "activated", activated }, { "ref", Hex(ref->GetFormID()) }, { "portalUse", false }, { "effect", "engine" } };
 	}
 
 	json MoveTo(const json& a_args)

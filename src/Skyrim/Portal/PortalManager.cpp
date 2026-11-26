@@ -134,7 +134,9 @@ namespace Portal::Manager
 			// space is clearly nearer.
 			const bool  better = a_candidate && ((a_candidate->cell != portal->cell) ||
 												   (a_candidate->door->GetFormID() != portal->sourceDoor &&
-													   a_candidate->rank + Selection::kSwitchMargin < (door && linkedDoor ? Selection::Rank(a_player->GetPosition(), door, linkedDoor) : FLT_MAX)));
+													   (a_candidate->rank + Selection::kSwitchMargin < (door && linkedDoor ? Selection::Rank(a_player->GetPosition(), door, linkedDoor) : FLT_MAX) ||
+														   // The player opened another door into the same space: that is the doorway.
+														   (a_candidate->open && !(door && linkedDoor && Portal::Doors::Wanted(door, Portal::Doors::Side(linkedDoor)))))));
 			// A shop closing for the night locks its door.
 			const bool  off = Portal::Doors::PortalOff(portal->sourceDoor) || Portal::Doors::PortalOff(portal->linkedDoor);
 			const bool  locked = door && Portal::Doors::LockedShut(door);
