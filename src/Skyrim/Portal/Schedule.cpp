@@ -645,6 +645,17 @@ namespace Portal::Schedule
 		const auto  origin = ToCore(RE::PlayerCharacter::GetSingleton()->GetPosition());
 		const float reach = Core::Selection::Reach((door.pos - origin).Length(), way.kind == DoorKind::Gate);
 		out["open"] = wanted;
+		// What the scheduler counts open into that space (any door of the doorways leading there, not only this one): a space
+		// is live only through one of these. A door standing open (a city gate, one set to open always) is one without anyone using it.
+		out["standsOpen"] = Portal::Doors::StandsOpen(ref, Portal::Doors::Side(linked));
+		json opened = json::array();
+		for (const auto openIx : openDoors) {
+			const auto& openDoor = graph.GetDoor(openIx);
+			if (graph.GetDoorway(openDoor.doorway).Other(playerSpace) == other) {
+				opened.push_back({ { "door", std::format("{:08X}", Graph::DoorForm(openIx)) }, { "used", std::ranges::contains(usedDoors, openIx) } });
+			}
+		}
+		out["openToSpace"] = std::move(opened);
 		out["reach"] = reach;
 		out["liveReach"] = Selection::DoorOpenDistance();
 		const auto tier = scheduler->TierOf(other);

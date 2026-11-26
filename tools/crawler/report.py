@@ -8,7 +8,7 @@ from typing import Any
 
 import imaging
 
-ORDER = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "fallback-loading-screen", "not-live", "tier-low", "scene-problem", "visual-suspect", "ok", "skipped"]
+ORDER = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "fallback-loading-screen", "live-while-shut", "not-live", "tier-low", "scene-problem", "visual-suspect", "ok", "skipped"]
 STAGES = ["front", "open", "in", "in-back", "back-open", "out"]
 
 
@@ -70,8 +70,12 @@ def write(out: Path, config: dict[str, Any], results: list[dict[str, Any]], cens
         lines += ["## Slowest frames (max ms over the visit)", ""]
         lines += [f"- {r['id']} {r['base']} ({r['place']}): max {worst_frame(r):.0f} ms, p95 {frame_p95(r):.0f} ms" for r in slow]
         lines.append("")
-    reached = collections.Counter((r.get("checks", {}).get("front") or {}).get("tierReached", "?") for r in results if r["result"] != "skipped")
+    fronts = [(r.get("checks", {}).get("front") or {}) for r in results if r["result"] != "skipped"]
+    reached = collections.Counter(f.get("tierReached", "?") for f in fronts if f.get("shut", True))
     lines.append("Tier of the space behind the door when approached with it shut (6 m): " + ", ".join(f"{n} {t}" for t, n in reached.most_common()) + ".")
+    standing = collections.Counter(f.get("tierReached", "?") for f in fronts if not f.get("shut", True))
+    if standing:
+        lines.append("Approached with a door open into the space (standing open by design, or used a moment ago): " + ", ".join(f"{n} {t}" for t, n in standing.most_common()) + ".")
     live = collections.Counter((r.get("checks", {}).get("open") or {}).get("tierReached", "?") for r in results if "open" in r.get("checks", {}))
     lines.append("Tier once opened: " + ", ".join(f"{n} {t}" for t, n in live.most_common()) + ".")
     lines.append("")

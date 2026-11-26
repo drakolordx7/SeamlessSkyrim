@@ -157,7 +157,8 @@ namespace Portal::Doors
 		std::uint32_t count = 0;
 		RE::BSVisit::TraverseScenegraphGeometries(a_door->Get3D(), [&](RE::BSGeometry* a_shape) {
 			const auto ours = [&](const std::vector<RE::NiPointer<RE::BSGeometry>>& a_list) { return std::ranges::contains(a_list, a_shape, &RE::NiPointer<RE::BSGeometry>::get); };
-			if (a_shape->GetAppCulled() && (open == openDoors.end() || (!ours(open->second.hiddenShapes) && !ours(open->second.behindShapes)))) {
+			// An editor marker (the auto-load door's whole model, AutoLoadMarker01.nif: five of them) is culled by the engine itself.
+			if (a_shape->GetAppCulled() && std::string_view(a_shape->name.c_str()) != "EditorMarker" && (open == openDoors.end() || (!ours(open->second.hiddenShapes) && !ours(open->second.behindShapes)))) {
 				++count;
 			}
 			return RE::BSVisit::BSVisitControl::kContinue;

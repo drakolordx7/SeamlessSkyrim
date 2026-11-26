@@ -44,10 +44,12 @@ import report  # noqa: E402
 # door shut is correct): a door is judged by the tier its space reached when it was approached (loaded
 # and paused, T3, at 6 m), whether it went live once opened (T4), and whether the crossing was seamless
 # or the engine's own loading screen.
+#   live-while-shut          the space went live at 6 m with no door open into it (a door standing open by design, a gate
+#                            or one set to open always, or one used a moment ago, is open: its space is live, not a fault)
 #   tier-low                 approached, but the space was held below loaded-paused at 6 m (reason from door_status)
 #   not-live                 opened and near, but the space never went live (reason from door_status)
 #   fallback-loading-screen  the crossing was the vanilla door trip (a door that fell back, or a load that blocked the game)
-PRIORITY = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "fallback-loading-screen", "not-live", "tier-low", "scene-problem", "visual-suspect"]
+PRIORITY = ["hang", "setup-failed", "wrong-cell", "fall-through", "timeout", "fallback-loading-screen", "live-while-shut", "not-live", "tier-low", "scene-problem", "visual-suspect"]
 TIERS = ["cold", "image", "depth-image", "loaded-paused", "live"]
 T3, T4 = TIERS.index("loaded-paused"), TIERS.index("live")
 TRANSIENT = ("timed out waiting for the game's main thread", "bridge unreachable")
@@ -259,7 +261,7 @@ def door_state(S: Session, ref: str) -> dict[str, Any]:
     """The scheduler's view of one door (bridge door_status): tier of the space behind it, whether it is shown,
     open, its reach, the last decision and the first thing that stops it."""
     st = S.call("door_status", ref=ref)
-    keep = ("shown", "inGraph", "space", "leadsTo", "link", "gate", "tier", "lastDecision", "open", "reach", "liveReach", "doorwayFallback", "fallback", "reason", "doorUse")
+    keep = ("shown", "inGraph", "space", "leadsTo", "link", "gate", "tier", "lastDecision", "open", "standsOpen", "openToSpace", "reach", "liveReach", "doorwayFallback", "fallback", "reason", "doorUse")
     return {k: st[k] for k in keep if k in st}
 
 
@@ -483,8 +485,21 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     # and paused (T3) by 6 m. A locked door is no way through: nothing is held for it. No portal drawn here is correct.
     need = 0 if rec["locked"] else T3
     ds, best, settled = wait_tier(S, ref, need, S.args.portal_wait)
+    # The first poll that sees T3 can come before the promotion to live: look again once the scheduler has settled.
+    time.sleep(1.5)
+    ds = door_state(S, ref)
+    if TIERS.index(ds.get("tier", "cold")) > TIERS.index(best):
+        best = ds["tier"]
+    # "Shut" means no door into the space is open: a gate or a door set to open always stands open, and a door used a
+    # moment ago (the previous visit's, or an NPC's) still is until it swings shut. Such a space is live by the rules.
+    opened = ds.get("openToSpace") or []
     status = portal_summary(S)
-    rec["checks"]["front"] = {"settleS": round(settled, 1), "portal": status, "door": ds, "tierReached": best, "schedule": schedule_state(S)}
+    rec["checks"]["front"] = {"settleS": round(settled, 1), "portal": status, "door": ds, "tierReached": best, "schedule": schedule_state(S), "openToSpace": opened, "shut": not opened}
+    if opened:
+        why = ", ".join(f"{o['door']} ({'used' if o['used'] else 'stands open'})" for o in opened)
+        rec["notes"].append(f"not shut at 6 m: open into the space: {why}; its space is live by design")
+    elif TIERS.index(best) >= T4:
+        rec["problems"].append(("live-while-shut", f"the space behind the shut door is live at 6 m with no door open into it: {ds.get('lastDecision')}"))
     eye = S.call("camera")["camera"]
     front_img = S.snap(rec, "front")
     rec["checks"]["front"]["frame"] = S.call("frame_stats")
@@ -528,6 +543,10 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     open_img = S.snap(rec, "open")
     rec["checks"]["open"] = {"liveS": round(took, 1), "portal": status, "door": ds, "tierReached": best, "schedule": schedule_state(S), "frame": S.call("frame_stats")}
     if not vanilla:
+        # The merged room is drawn by now: where its pieces stand is what the picture above shows.
+        rec["checks"]["open"]["scene"] = S.call("scene_check", radius=3000)
+        if not rec["checks"]["open"]["scene"].get("ok", True):
+            rec["problems"].append(("scene-problem", "scene_check opened: " + "; ".join(scene_problems(rec["checks"]["open"]["scene"])[:3])))
         if best != "live":
             rec["problems"].append(("not-live", f"opened at 6 m: the space reached only {best} in {took:.0f} s: {ds.get('reason') or ds.get('lastDecision')}"))
         elif not rec["activate"]["open"]["counted"]:

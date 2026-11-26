@@ -56,6 +56,13 @@ namespace Bridge
 			 } } },
 			// Tests (run_suite's checks): see PortalDiagnostics::SceneCheck.
 			{ "scene_check", { [](const json& a) { return PortalDiagnostics::SceneCheck(a.value("radius", 3000.0f)); } } },
+			// Tests: late_pieces {outOfPlace: 0..1, settle: bool}: the merged room's pieces as a late load leaves them, and the settling (RemoteCell::SettleLatePieces) on or off.
+			{ "late_pieces", { [](const json& a) {
+				 if (a.contains("settle")) {
+					 Spaces::RemoteCell::SetSettleLate(a.at("settle").get<bool>());
+				 }
+				 return a.contains("outOfPlace") ? PortalDiagnostics::PutPiecesOutOfPlace(a.at("outOfPlace").get<float>()) : json::object();
+			 } } },
 			{ "merged_shapes", { [](const json& a) {
 				 const auto& p = a.at("near");
 				 return json{ { "shapes", PortalDiagnostics::MergedShapesReport({ p.at(0).get<float>(), p.at(1).get<float>(), p.at(2).get<float>() }, a.value("far", 3000.0f)) } };

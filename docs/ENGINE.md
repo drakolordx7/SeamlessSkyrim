@@ -356,6 +356,22 @@ Found porting the plugin; each was checked in the code of both.
 
 ## Culling
 
+- **A piece of a merged room that loads after the merge is not moved with the room.** The merge sets
+  the cell's 3D to the door's place and updates it once. A reference whose 3D finishes loading
+  later (inferred, not caught live: a preloaded interior counts as ready at once, its queues still
+  empty) is hung under the
+  moved cell with the world transform the loader gave it, the cell's own coordinates, and a static
+  piece is never updated again: it stands where the room used to be, so the doorway shows the
+  street through a room with holes and floating pieces (Belethor's, the Bannered Mare, the Hall of
+  the Dead and the Temple in the Whiterun crawl, 20-85% of a room's pieces; each had logged
+  `merge failed: door ... has no 3D` from the merge waiting for the room's own door).
+  `RemoteCell::SettleLatePieces` finds them (world not parent's world * local) and updates the cell
+  again; a loose item of the room (a pot, a coin bag) whose body came late is made visual only as
+  `Merge` does, or it is drawn from its body at the cell's own place. Bridge `late_pieces {outOfPlace, settle}` puts a share of a merged room's pieces in that
+  state and switches the settling off, for a before/after at one spot.
+- **An auto-load door is five culled `EditorMarker` shapes** (`AutoLoadMarker01.nif`: Whiterun's
+  000351EC, the Underforge's 0006767E): culled by the engine, no opener hid them.
+
 - **A reference's 3D is a copy of a loaded one of the same model, as it is at that moment.** A
   shape hidden with `SetAppCulled` in the first instance of a model (loading a save inside The
   Drunken Huntsman: its own two doors) comes hidden in every instance loaded after (every Whiterun

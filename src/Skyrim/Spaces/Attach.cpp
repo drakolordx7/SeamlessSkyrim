@@ -740,6 +740,9 @@ namespace Spaces
 				if (auto* cell3D = Cell3D(cell)) {
 					Engine::ForceFadeIn(cell3D);
 				}
+				if (merged) {
+					SettleLatePieces(cell);
+				}
 				if (!cell->IsInteriorCell()) {
 					StillLooseObjects(cell);
 					ShowLand(cell);

@@ -220,6 +220,54 @@ namespace Spaces
 		}
 	}
 
+	int RemoteCell::SettleLatePieces(RE::TESObjectCELL* a_cell)
+	{
+		if (!settleLate || std::ranges::find(movedCells, a_cell) == movedCells.end()) {
+			return 0;
+		}
+		auto* cell3D = Cell3D(a_cell);
+		if (!cell3D) {
+			return 0;
+		}
+		int late = 0;
+		a_cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
+			// People are updated by the engine every frame, with the parents they have.
+			auto* object = a_ref && !a_ref->As<RE::Actor>() ? a_ref->Get3D() : nullptr;
+			if (!object) {
+				return RE::BSContainer::ForEachResult::kContinue;
+			}
+			// Only what hangs under this cell (a persistent reference's 3D borrowed from elsewhere is the street merge's).
+			auto* top = object->parent;
+			while (top && top != cell3D) {
+				top = top->parent;
+			}
+			if (!top) {
+				return RE::BSContainer::ForEachResult::kContinue;
+			}
+			// Its world transform is not its parent's applied to its own.
+			bool out = object->world.translate.GetDistance((object->parent->world * object->local).translate) > 2.0f;
+			// A loose item (a pot, a coin bag) of a room whose body came after the merge drives its 3D from the body,
+			// in the cell's own coordinates: made visual only, as Merge does for the ones it found. (A street's loose
+			// items are StillLooseObjects's, and stand where they fell.)
+			if (a_cell->IsInteriorCell()) {
+				RE::BSVisit::TraverseScenegraphObjects(object, [&](RE::NiAVObject* a_object) {
+					out |= a_object->collisionObject && StillCollision(a_object);
+					return RE::BSVisit::BSVisitControl::kContinue;
+				});
+			}
+			late += out;
+			return RE::BSContainer::ForEachResult::kContinue;
+		});
+		if (late) {
+			RE::NiUpdateData update;
+			cell3D->Update(update);
+			RecomputeBounds(cell3D);
+			SettleMotion(cell3D);
+			logger::info("portal: {} piece(s) of {:08X} loaded after the merge moved to where the room stands", late, a_cell->GetFormID());
+		}
+		return late;
+	}
+
 	void RemoteCell::RestoreBounds()
 	{
 		movedBounds.Restore();

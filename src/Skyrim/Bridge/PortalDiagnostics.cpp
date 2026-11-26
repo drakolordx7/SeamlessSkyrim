@@ -70,6 +70,36 @@ namespace Bridge::PortalDiagnostics
 		return out;
 	}
 
+	json PutPiecesOutOfPlace(float a_fraction)
+	{
+		int seen = 0, moved = 0;
+		for (auto* cell : Manager::Space().Cells()) {
+			cell->ForEachReference([&](RE::TESObjectREFR* a_ref) {
+				auto* base = a_ref && !a_ref->IsDisabled() && !a_ref->As<RE::Actor>() ? a_ref->GetBaseObject() : nullptr;
+				auto* object = base && base->Is(RE::FormType::Static, RE::FormType::MovableStatic, RE::FormType::Furniture, RE::FormType::Container, RE::FormType::Flora) ? a_ref->Get3D() : nullptr;
+				if (!object || (seen++ % 100) >= static_cast<int>(a_fraction * 100.0f)) {
+					return RE::BSContainer::ForEachResult::kContinue;
+				}
+				++moved;
+				// What the loader computes for a 3D with no parent yet: each node's world is its parent's within the piece.
+				const auto place = [](auto&& self, RE::NiAVObject* a_object, const RE::NiTransform& a_parent) -> void {
+					a_object->world = a_parent * a_object->local;
+					a_object->previousWorld = a_object->world;
+					if (auto* node = a_object->AsNode()) {
+						for (auto& child : node->GetChildren()) {
+							if (child) {
+								self(self, child.get(), a_object->world);
+							}
+						}
+					}
+				};
+				place(place, object, RE::NiTransform());
+				return RE::BSContainer::ForEachResult::kContinue;
+			});
+		}
+		return { { "pieces", seen }, { "putOutOfPlace", moved } };
+	}
+
 	json SceneCheck(float a_radius)
 	{
 		// Things that stand still where their reference stands (no physics, no animation, not doors,

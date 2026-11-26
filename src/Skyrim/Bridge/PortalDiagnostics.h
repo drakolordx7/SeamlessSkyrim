@@ -16,6 +16,10 @@ namespace Bridge::PortalDiagnostics
 	// own space, and of the door in the merged space, that hang nowhere or aren't drawn where they
 	// belong; the merged street's land and distant LOD the same. "ok": none found.
 	[[nodiscard]] json SceneCheck(float a_radius);
+	// Tests: a_fraction of the merged room's still things put back to the world transform a loader leaves a
+	// piece that came after the merge (the cell's own coordinates, parent not applied), as seen before
+	// RemoteCell::SettleLatePieces. Returns how many.
+	[[nodiscard]] json PutPiecesOutOfPlace(float a_fraction);
 	// Diagnostics: merged shapes (or their skin bones) farther than a_far from a_near.
 	[[nodiscard]] json MergedShapesReport(const RE::NiPoint3& a_near, float a_far);
 	// Diagnostics (portal_merge): the brightness of the view and of the rooms merged, and their scales.

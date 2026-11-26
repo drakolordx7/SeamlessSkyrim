@@ -119,6 +119,13 @@ namespace Spaces
 		[[nodiscard]] const Placement& Placed() const { return placed; }
 		// While merged, now and then: see MovedBounds::Unfix.
 		void UnfixNewBounds(const RE::TESObjectCELL* a_cell);
+		// While merged, now and then: references whose 3D came after the merge stand where the loader
+		// left them, the cell's own coordinates, and no scene update moves them again (static things
+		// are never updated). The cell is updated once more, so that they stand under it as the rest
+		// does. Returns how many were found out of place.
+		int SettleLatePieces(RE::TESObjectCELL* a_cell);
+		// Tests (bridge late_pieces): the settling switched off, to see a room with late pieces as it was.
+		static void SetSettleLate(bool a_on) { settleLate = a_on; }
 
 		// A city gate: the cells of both worldspaces share one Havok world, and the other one's
 		// buildings stand in the player's way at the gate (Tamriel's gatehouse has a raised floor
@@ -150,6 +157,8 @@ namespace Spaces
 
 		// FormIDs of the worldspace's persistent references with 3D standing in each of a_cells.
 		using PersistentByCell = std::unordered_map<const RE::TESObjectCELL*, std::vector<RE::FormID>>;
+
+		static inline bool settleLate = true;
 
 		static constexpr float kQuietSecondsRequired = 1.5f;
 		static constexpr float kQuietSecondsPreloaded = 0.0f;  // drawn the frame it is attached
