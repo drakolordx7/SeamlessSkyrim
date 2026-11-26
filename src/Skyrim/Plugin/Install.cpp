@@ -1,6 +1,7 @@
 #include "Skyrim/Plugin/Install.h"
 
 #include "Skyrim/Audio/DoorwayAudio.h"
+#include "Skyrim/Audio/DoorwayFilter.h"
 #include "Skyrim/Bridge/AgentMode.h"
 #include "Skyrim/Bridge/Bridge.h"
 #include "Skyrim/Diag/Telemetry.h"
@@ -57,6 +58,10 @@ namespace Plugin
 			Portal::MergedCull::Install();
 			Portal::Doors::InstallPromptHook();
 			Portal::EngineHooks::Install();
+			// The low-pass the live room's sound is heard through; only worth hooking the sound engine for with the sound on.
+			if (Audio::Doorway::Enabled()) {
+				Audio::Filter::Install();
+			}
 		}
 	}
 

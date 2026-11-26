@@ -12,7 +12,9 @@
 // with a sound that stand in it, an exterior's weather) are collected once when the room becomes
 // live and each is played as an ordinary 3D sound from the doorway's centre, as loud as the doorway
 // lets it through (Core/Audio/Doorway.h) and the source's own distance from the doorway inside the
-// room. The engine's own ambience is the player's space's and is not touched. See
+// room, through a low-pass that closes with the muffling (Audio/DoorwayFilter.h). A source whose own
+// conditions are false (a tavern's night-time crowd loop by day) gets no sound handle from the engine
+// and waits, retried every few seconds. The engine's own ambience is the player's space's and is not touched. See
 // .weaver/scratch/sound-notes.md for what is assumed and what to check in game.
 namespace Audio::Doorway
 {

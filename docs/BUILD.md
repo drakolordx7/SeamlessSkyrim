@@ -39,6 +39,16 @@ building when the game is running and the copy would fail.
   post-build step copies both files there; it fails while the game runs. Empty by default (no
   copy).
 
+### Building in a git worktree
+
+A fresh worktree has no `build/` and compiling CommonLib's ~500 files takes the better part of an hour with other builds
+running. Configure with `cmake --preset vs2026 -DVCPKG_INSTALLED_DIR=<main checkout>uildcpkg_installed`, copy the main
+checkout's `build\extern\CommonLibSSE-NG\RelWithDebInfo\CommonLibSSE.lib` to the same place in the worktree, then build
+`SeamlessCore` and `SeamlessCoreTests` as usual and the plugin with `-p:BuildProjectReferences=false` (so MSBuild doesn't
+recompile CommonLib) and `$env:CL = '/MP12 /FS'` (parallel compiles; a minute instead of an hour). `git` needs
+`--ignore-submodules=all` there (the `extern/CommonLibSSE-NG` link points into the main checkout, whose `.git` file is a
+relative path). `retools` can't read this game's `SkyrimSE.exe`: its `.text` is Steam-DRM encrypted on disk.
+
 ### Layout and Core
 
 `src/Skyrim/` is the plugin (everything that touches the engine), one folder per domain:

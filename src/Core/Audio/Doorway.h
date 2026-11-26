@@ -40,6 +40,12 @@ namespace Core::Audio
 		float sideBlend = 60.0f;
 		float fadeInSeconds = 0.6f;
 		float fadeOutSeconds = 0.8f;
+		// The low-pass the room is heard through, Hz: a clear doorway (muffle 0) lets nearly all of
+		// the sound through, the most muffled one (muffle 1) keeps the low end only. The cutoff
+		// moves between them in octaves, as the ear hears it. XAudio2's own filter can't go above
+		// a sixth of the sample rate, so clearCutoff is at most that.
+		float clearCutoff = 7000.0f;
+		float mutedCutoff = 500.0f;
 	};
 
 	struct Heard
@@ -53,6 +59,15 @@ namespace Core::Audio
 	// a_open: how far the door stands open, 0 shut .. 1. Zero gain for a listener in the room (past
 	// the door plane), a shut door and a doorway out of reach.
 	[[nodiscard]] Heard ThroughDoorway(const Vec3& a_listener, const Doorway& a_doorway, float a_open, const Tuning& a_tuning = {});
+
+	// The low-pass cutoff in Hz for a muffle 0..1 (Heard::muffle): clearCutoff at 0, mutedCutoff at 1,
+	// even octaves in between. Further from the doorway, further off its axis, a door barely open:
+	// duller.
+	[[nodiscard]] float LowPassCutoff(float a_muffle, const Tuning& a_tuning = {});
+
+	// XAudio2's filter parameter for a cutoff: 2 * sin(pi * cutoff / sampleRate), clamped to
+	// 0..1 (its largest value, a cutoff of a sixth of the sample rate).
+	[[nodiscard]] float FilterFrequency(float a_cutoffHz, float a_sampleRate);
 
 	// How much of a sound inside the room reaches its doorway, by its distance from it: 1 at the
 	// doorway, half at roomRefDistance, falling off as 1 / (1 + (d / ref)^2).

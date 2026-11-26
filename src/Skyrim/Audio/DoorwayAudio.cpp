@@ -1,6 +1,7 @@
 #include "Skyrim/Audio/DoorwayAudio.h"
 
 #include "Core/Audio/Doorway.h"
+#include "Skyrim/Audio/DoorwayFilter.h"
 #include "Skyrim/Doors/Pair.h"
 #include "Skyrim/Engine/CoreConvert.h"
 #include "Skyrim/Plugin/Settings.h"
@@ -39,6 +40,8 @@ namespace Audio::Doorway
 		constexpr std::uint16_t kStartFadeMs = 300;
 		constexpr std::uint16_t kStopFadeMs = 250;
 		constexpr std::uint16_t kQuickFadeMs = 150;
+		// A playing sound's conditions are asked again this often: a night-time loop stops at 02:00.
+		constexpr float kConditionSeconds = 2.0f;
 		// A sound that isn't a loop, ended: played again after this long.
 		constexpr float kRestartSeconds = 3.0f;
 		// A sound just started may not read as playing yet (the sound engine takes messages).
@@ -54,8 +57,10 @@ namespace Audio::Doorway
 			float             volume = 0.0f;
 			float             age = 0.0f;
 			float             restart = 0.0f;
+			float             conditionAge = 0.0f;
 			RE::NiPoint3      position;
-			int               failedStarts = 0;  // the sound engine gave no handle
+			int               failedStarts = 0;  // the sound engine gave no handle for a sound that should play
+			int               blockedStarts = 0; // ... for one whose conditions are false now (a night-time loop by day): not a failure
 		};
 
 		// The sounds of the live room being heard: the room, its sources and how loud it is now.
@@ -86,6 +91,7 @@ namespace Audio::Doorway
 		void StopVoice(Voice& a_voice, std::uint16_t a_fadeMs)
 		{
 			if (a_voice.handle.IsValid()) {
+				Filter::Clear(a_voice.handle.soundID);
 				a_voice.handle.FadeOutAndRelease(a_fadeMs);
 			}
 			a_voice.handle = RE::BSSoundHandle();
@@ -102,14 +108,29 @@ namespace Audio::Doorway
 			}
 		}
 
-		bool StartVoice(Voice& a_voice, float a_volume, const RE::NiPoint3& a_position)
+		// Whether a descriptor's own conditions hold: a sound record can carry conditions, and the sound engine
+		// hands out no handle while they are false (the Bannered Mare's crowd loop is only there from 20:00 to
+		// 02:00). The sound engine decides; this tells a refusal for that from a real failure.
+		bool ConditionsHold(RE::BGSSoundDescriptorForm* a_descriptor)
+		{
+			auto* standard = a_descriptor->soundDescriptor ? skyrim_cast<RE::BGSStandardSoundDef*>(a_descriptor->soundDescriptor) : nullptr;
+			if (!standard || !standard->conditions) {
+				return true;
+			}
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			return standard->conditions->IsTrue(player, player);
+		}
+
+		bool StartVoice(Voice& a_voice, float a_volume, const RE::NiPoint3& a_position, float a_cutoffHz)
 		{
 			auto* descriptor = RE::TESForm::LookupByID<RE::BGSSoundDescriptorForm>(a_voice.sound);
+			SEAMLESS_ASSERT(descriptor);
 			RE::BSSoundHandle handle;
-			if (!descriptor || !RE::BSAudioManager::GetSingleton()->GetSoundHandle(handle, descriptor)) {
-				++a_voice.failedStarts;
+			if (!RE::BSAudioManager::GetSingleton()->GetSoundHandle(handle, descriptor)) {
+				++(ConditionsHold(descriptor) ? a_voice.failedStarts : a_voice.blockedStarts);
 				return false;
 			}
+			Filter::Set(handle.soundID, a_cutoffHz);
 			handle.SetPosition(a_position);
 			handle.SetVolume(a_volume);
 			handle.FadeInPlay(kStartFadeMs);
@@ -207,17 +228,28 @@ namespace Audio::Doorway
 		// one too quiet to hear stops (faded), one that became audible starts (faded in).
 		void Drive(Group& a_group, float a_delta)
 		{
-			const auto position = ToNi(a_group.doorway.center);
+			const auto  position = ToNi(a_group.doorway.center);
+			const float cutoff = CA::LowPassCutoff(a_group.heard.muffle, tuning);
 			for (auto& voice : a_group.voices) {
 				const float want = a_group.fade.level * voice.roomGain;
 				voice.age += a_delta;
+				voice.conditionAge += a_delta;
 				if (voice.handle.IsValid()) {
+					if (voice.conditionAge > kConditionSeconds) {
+						voice.conditionAge = 0.0f;
+						if (!ConditionsHold(RE::TESForm::LookupByID<RE::BGSSoundDescriptorForm>(voice.sound))) {
+							StopVoice(voice, kStopFadeMs);
+							voice.restart = kRestartSeconds;
+							continue;
+						}
+					}
 					if (want < kStopBelow) {
 						StopVoice(voice, kStopFadeMs);
 					} else if (voice.age > kStartSettleSeconds && !voice.handle.IsPlaying()) {
 						voice.handle = RE::BSSoundHandle();
 						voice.restart = kRestartSeconds;
 					} else {
+						Filter::Set(voice.handle.soundID, cutoff);
 						if (std::abs(want - voice.volume) > kVolumeStep) {
 							voice.handle.SetVolume(want);
 							voice.volume = want;
@@ -229,7 +261,7 @@ namespace Audio::Doorway
 					}
 				} else if (want > kStartAbove) {
 					voice.restart -= a_delta;
-					if (voice.restart <= 0.0f && !StartVoice(voice, want, position)) {
+					if (voice.restart <= 0.0f && !StartVoice(voice, want, position, cutoff)) {
 						voice.restart = kRestartSeconds;
 					}
 				}
@@ -313,6 +345,18 @@ namespace Audio::Doorway
 		volume = std::clamp(a_percent, 0, 100);
 	}
 
+	namespace
+	{
+		json FilterJson(const RE::BSSoundHandle& a_handle)
+		{
+			const auto state = a_handle.IsValid() ? Filter::StateOf(a_handle.soundID) : std::nullopt;
+			if (!state) {
+				return nullptr;
+			}
+			return { { "type", state->type }, { "frequency", state->frequency }, { "sampleRate", state->rate } };
+		}
+	}
+
 	json Status()
 	{
 		json out = { { "enabled", enabled }, { "volume", volume }, { "playing", nullptr } };
@@ -323,8 +367,8 @@ namespace Audio::Doorway
 		for (const auto& voice : group->voices) {
 			auto* form = RE::TESForm::LookupByID(voice.sound);
 			voices.push_back({ { "kind", KindName(voice.kind) }, { "sound", std::format("{:08X}", voice.sound) }, { "name", form && form->GetFormEditorID() ? form->GetFormEditorID() : "" },
-				{ "roomDistance", voice.roomDistance }, { "roomGain", voice.roomGain }, { "volume", voice.volume }, { "failedStarts", voice.failedStarts }, { "soundId", voice.handle.IsValid() ? static_cast<std::int64_t>(voice.handle.soundID) : -1 },
-				{ "playing", voice.handle.IsValid() && voice.handle.IsPlaying() } });
+				{ "roomDistance", voice.roomDistance }, { "roomGain", voice.roomGain }, { "volume", voice.volume }, { "failedStarts", voice.failedStarts }, { "blockedStarts", voice.blockedStarts }, { "soundId", voice.handle.IsValid() ? static_cast<std::int64_t>(voice.handle.soundID) : -1 },
+				{ "playing", voice.handle.IsValid() && voice.handle.IsPlaying() }, { "conditionsHold", ConditionsHold(RE::TESForm::LookupByID<RE::BGSSoundDescriptorForm>(voice.sound)) }, { "filter", FilterJson(voice.handle) } });
 		}
 		out["playing"] = {
 			{ "door", std::format("{:08X}", group->door) },
@@ -334,6 +378,8 @@ namespace Audio::Doorway
 			{ "distance", group->heard.distance },
 			{ "cosine", group->heard.cosine },
 			{ "muffle", group->heard.muffle },
+			{ "cutoffHz", CA::LowPassCutoff(group->heard.muffle, tuning) },
+			{ "filter", Filter::Status() },
 			{ "gain", group->heard.gain },
 			{ "target", group->target },
 			{ "level", group->fade.level },

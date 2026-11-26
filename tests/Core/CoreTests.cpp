@@ -544,6 +544,20 @@ namespace
 		// A door half open lets less through than a whole one.
 		CHECK(at(0, -200, 0.5f).gain < at(0, -200, 1.0f).gain && at(0, -200, 0.5f).gain > 0.0f);
 
+		// The low-pass: open and head-on is nearly clear; further, off the axis or a door barely open
+		// cuts lower; never outside its range, an octave per equal step of muffle.
+		const A::Tuning tuning;
+		CHECK(Near(A::LowPassCutoff(0.0f), tuning.clearCutoff, 0.5f) && Near(A::LowPassCutoff(1.0f), tuning.mutedCutoff, 0.5f));
+		CHECK(Near(A::LowPassCutoff(2.0f), tuning.mutedCutoff, 0.5f) && Near(A::LowPassCutoff(-1.0f), tuning.clearCutoff, 0.5f));
+		CHECK(Near(A::LowPassCutoff(0.5f), std::sqrt(tuning.clearCutoff * tuning.mutedCutoff), 1.0f));
+		CHECK(at(0, -200).muffle < at(300, -300).muffle && A::LowPassCutoff(at(0, -200).muffle) > A::LowPassCutoff(at(300, -300).muffle));
+		CHECK(A::LowPassCutoff(at(0, -300, 1.0f).muffle) > A::LowPassCutoff(at(0, -300, 0.3f).muffle));
+		CHECK(A::LowPassCutoff(at(0, -2000).muffle) < A::LowPassCutoff(at(0, -300).muffle));
+		// XAudio2's frequency for a cutoff: 2 sin(pi f / rate); a sixth of the rate is its largest value.
+		CHECK(Near(A::FilterFrequency(44100.0f / 6.0f, 44100.0f), 1.0f) && Near(A::FilterFrequency(20000.0f, 44100.0f), 1.0f));
+		CHECK(Near(A::FilterFrequency(0.0f, 44100.0f), 0.0f));
+		CHECK(Near(A::FilterFrequency(500.0f, 44100.0f), 0.0712f, 0.001f));
+
 		// A sound at the doorway, further in, is quieter.
 		CHECK(Near(A::RoomFalloff(0.0f), 1.0f) && Near(A::RoomFalloff(600.0f), 0.5f) && A::RoomFalloff(1200.0f) < A::RoomFalloff(600.0f));
 
