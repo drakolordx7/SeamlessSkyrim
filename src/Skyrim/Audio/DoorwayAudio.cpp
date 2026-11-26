@@ -146,6 +146,14 @@ namespace Audio::Doorway
 			return std::ranges::any_of(a_voices, [&](const Voice& a_voice) { return a_voice.sound == a_sound; });
 		}
 
+		// A record can name a sound marker (SOUN) where a descriptor (SNDR) belongs: Blackreach's weather does (00012EA2).
+		// The engine plays the marker through its own descriptor, which is what this gives (none: the marker has no
+		// descriptor of its own).
+		RE::BGSSoundDescriptorForm* DescriptorOf(RE::TESForm* a_sound)
+		{
+			return a_sound && a_sound->Is(RE::FormType::Sound) ? a_sound->As<RE::TESSound>()->descriptor : a_sound ? a_sound->As<RE::BGSSoundDescriptorForm>() : nullptr;
+		}
+
 		// The sound a placed reference makes by itself while it stands in a loaded cell: a sound marker's
 		// descriptor, an activator's looping sound (a forge, a waterfall), a light's sound (a fire).
 		RE::BGSSoundDescriptorForm* SoundOf(RE::TESObjectREFR* a_ref)
@@ -154,16 +162,21 @@ namespace Audio::Doorway
 			if (!base) {
 				return nullptr;
 			}
+			RE::BGSSoundDescriptorForm* sound = nullptr;
 			switch (base->GetFormType()) {
 			case RE::FormType::Sound:
-				return base->As<RE::TESSound>()->descriptor;
+				sound = base->As<RE::TESSound>()->descriptor;
+				break;
 			case RE::FormType::Activator:
-				return base->As<RE::TESObjectACTI>()->soundLoop;
+				sound = base->As<RE::TESObjectACTI>()->soundLoop;
+				break;
 			case RE::FormType::Light:
-				return base->As<RE::TESObjectLIGH>()->sound;
+				sound = base->As<RE::TESObjectLIGH>()->sound;
+				break;
 			default:
 				return nullptr;
 			}
+			return DescriptorOf(sound);
 		}
 
 		// The room's sources, once, as it becomes live: its acoustic space's loop, the nearest few distinct
@@ -176,8 +189,8 @@ namespace Audio::Doorway
 			const auto         doorPlace = linked->GetPosition();
 
 			if (cell->IsInteriorCell()) {
-				if (auto* extra = cell->extraList.GetByType<RE::ExtraCellAcousticSpace>(); extra && extra->space && extra->space->loopingSound) {
-					voices.push_back({ Kind::kAcoustic, extra->space->loopingSound->GetFormID(), 1.0f, 0.0f });
+				if (auto* extra = cell->extraList.GetByType<RE::ExtraCellAcousticSpace>(); extra && extra->space && DescriptorOf(extra->space->loopingSound)) {
+					voices.push_back({ Kind::kAcoustic, DescriptorOf(extra->space->loopingSound)->GetFormID(), 1.0f, 0.0f });
 				}
 			}
 
@@ -215,8 +228,9 @@ namespace Audio::Doorway
 				auto* weather = RE::Sky::GetSingleton()->currentWeather;
 				if (weather) {
 					for (auto* weatherSound : weather->sounds) {
-						if (voices.size() < kMaxVoices + 2 && weatherSound->type != RE::TESWeather::SoundType::kThunder && !Has(voices, weatherSound->soundFormID)) {
-							voices.push_back({ Kind::kWeather, weatherSound->soundFormID, kWeatherShare, 0.0f });
+						auto* descriptor = DescriptorOf(RE::TESForm::LookupByID(weatherSound->soundFormID));
+						if (descriptor && voices.size() < kMaxVoices + 2 && weatherSound->type != RE::TESWeather::SoundType::kThunder && !Has(voices, descriptor->GetFormID())) {
+							voices.push_back({ Kind::kWeather, descriptor->GetFormID(), kWeatherShare, 0.0f });
 						}
 					}
 				}

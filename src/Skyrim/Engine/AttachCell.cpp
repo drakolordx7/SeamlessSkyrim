@@ -33,6 +33,19 @@ namespace Engine
 		detachCell(a_cell, true);
 	}
 
+	bool PrepareWorldSpace(RE::TESWorldSpace* a_world)
+	{
+		if (a_world->portalGraph) {
+			return true;
+		}
+		if (!REL::Module::IsAE()) {
+			return false;
+		}
+		REL::Relocation<void (*)(RE::TESWorldSpace*)> prepare{ REL::RelocationID(0, 20514) };
+		prepare(a_world);
+		return true;
+	}
+
 	bool AttachingRemote()
 	{
 		return attachingRemote;

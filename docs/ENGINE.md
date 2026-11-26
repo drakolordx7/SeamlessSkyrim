@@ -180,6 +180,17 @@ Found porting the plugin; each was checked in the code of both.
 - **Land meshes** are built only when a cell is loaded into the engine's own grid (IDs 13285 and
   13427 call it right after 19063). A remote cell needs it called itself (`RemoteCell::AttachOne`, `Spaces/Attach.cpp`).
 
+- **A worldspace's room graph and multi-bound map exist only once it has been the current worldspace.** `TESWorldSpace` +0x130
+  (`portalGraph`), +0x138 and +0x140 (the multi-bound map the references of its rooms are filed in) and +0x148 (`multiBoundNode`) are
+  made by ID 20514 (called first in `TES::SetWorldSpace`, ID 13315, and lazily at the end of the cell attach, ID 18978 +0xD2C).
+  The attach reads the map earlier, per reference of a room (ID 18978 +0xB39 -> ID 19191 -> ID 19437 -> ID 19486 through ID 19439's
+  accessor `cell+0x128 -> worldspace +0x138`): a cell of a worldspace the player isn't in, with a room in it, crashed on the null
+  map (Blackreach's door to Alftand Cathedral, `AlftandWorldOrigin` 0006987F, reference 000C3D08; crash logs of crawl `interiors-1`).
+  `Engine::PrepareWorldSpace` calls ID 20514 before attaching an exterior cell; it skips when `portalGraph` is there. Its SE ID isn't
+  known (no SE address table or dump on this machine): on SE a cell of a worldspace without the graph isn't attached.
+- **Weather sounds can name a sound marker.** `TESWeather::sounds[].soundFormID` of Blackreach's weather is 00012EA2, a SOUN
+  (`FormType::Sound`), not an SNDR: `LookupByID<BGSSoundDescriptorForm>` gives null. The marker's own `descriptor` is what plays.
+
 ## Simulation
 
 - **An actor's 3D is hung back into its cell every frame:** the 3D position update (ID 37995, for

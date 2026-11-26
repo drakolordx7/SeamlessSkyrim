@@ -14,6 +14,14 @@ namespace Engine
 	// The engine's detach of a_cell (ID 19130, with its 3D released).
 	void DetachCell(RE::TESObjectCELL* a_cell);
 
+	// Makes a_world's room graph and multi-bound map. The engine does it when a worldspace becomes the
+	// current one (TES::SetWorldSpace, ID 13315, its first call, ID 20514) and an attach of one of its
+	// cells reads them before that (ID 18978 -> 19437 reads ID 20514's map for each reference in a room):
+	// a cell of Blackreach's door to Alftand attached while the player is in Blackreach crashed on a null
+	// map. Does nothing when the graph is there. False where the function's SE ID isn't known (SE 1.5.97):
+	// no cell of that worldspace may be attached.
+	[[nodiscard]] bool PrepareWorldSpace(RE::TESWorldSpace* a_world);
+
 	// Main thread: inside AttachCell.
 	[[nodiscard]] bool AttachingRemote();
 }

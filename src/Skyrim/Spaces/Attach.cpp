@@ -316,6 +316,10 @@ namespace Spaces
 		if (!cells.empty() || !Attachable(a_cell)) {
 			return false;
 		}
+		if (!a_cell->IsInteriorCell() && !Engine::PrepareWorldSpace(a_cell->GetRuntimeData().worldSpace)) {
+			logger::warn("portal: {} is in a worldspace whose room data can't be made on this game version; left to the engine", Probe::DescribeCell(a_cell));
+			return false;
+		}
 		scene = Portal::LightScene::Create();
 		// Out of sight (a kept space, or one for a picture) it is dormant from the first frame.
 		paused = !a_show;
