@@ -353,7 +353,7 @@ def walk_once(S: Session, target: tuple[float, float]) -> dict[str, Any]:
     return {"status": "harness-timeout"}
 
 
-def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], label: str, doorstep: tuple[float, float, float] | None = None) -> dict[str, Any]:
+def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], label: str, doorstep: tuple[float, float, float] | None = None, ref: str | None = None) -> dict[str, Any]:
     """Walk to a point past the door. Stopped at the door (stuck) with the crosshair on it: press the
     activate key as a player would (bridge use_pick) and walk again once."""
     before = S.blocked
@@ -364,6 +364,9 @@ def walk_through(S: Session, rec: dict[str, Any], target: tuple[float, float], l
         here = S.state()["player"]["pos"]
         rec["walks"][label + "-first"] = {"status": first, "stoppedAt": [round(v) for v in here], "distanceToTarget": round(math.hypot(here[0] - target[0], here[1] - target[1]))}
         S.snap(rec, f"{label}-stuck")
+        if ref:
+            rec["walks"][label + "-first"]["door"] = door_state(S, ref)
+            rec["walks"][label + "-first"]["schedule"] = schedule_state(S)
         pick = S.call("use_pick")
         rec["walks"][label + "-first"]["usePick"] = pick
         if not pick.get("target") and doorstep and rec["walks"][label + "-first"]["distanceToTarget"] > 250:
@@ -509,6 +512,14 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
         rec["notes"].append("locked at the start: unlocked with the console to test the crossing")
         rec["locked"] = False
 
+    # A player opens a door from arm's length, not from 6 m, and the space only goes live within the door's
+    # reach (iDoorOpenDistance, 450 by default, 6 m is right at it): step up to 150 units (a teleport; the
+    # scheduler ignores steps no one can walk) and open it there.
+    exterior = D.is_exterior(door)
+    S.call("move_to", pos=[door["pos"][0] + front["dir"][0] * 150, door["pos"][1] + front["dir"][1] * 150, front["landZ"] + (150 if exterior else 48)])
+    face(S, -front["dir"][0], -front["dir"][1])
+    time.sleep(1.0)
+
     # Open it: the space should go live (T4) within a few seconds, with the door open and the player near.
     vanilla = use_door(S, rec, ref, linked, "open")
     ds, best, took = ({}, "cold", 0.0) if vanilla else wait_tier(S, ref, T4, S.args.live_wait)
@@ -538,7 +549,7 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
     walk = {"status": "vanilla load"}
     if not vanilla:
         target = D.beyond_of(door["pos"], -front["dir"][0], -front["dir"][1])
-        walk = walk_through(S, rec, target, "in", (door["pos"][0] + front["dir"][0] * 110, door["pos"][1] + front["dir"][1] * 110, door["pos"][2] + 20))
+        walk = walk_through(S, rec, target, "in", (door["pos"][0] + front["dir"][0] * 110, door["pos"][1] + front["dir"][1] * 110, door["pos"][2] + 20), ref)
     here = where_am_i(S, dest_kind, dest_edid, c.space_form_id(dest["at"]["spaceId"]), dest["landPos"][2])
     rec["checks"]["in"] = here
     if D.is_exterior(door):
@@ -573,7 +584,7 @@ def visit(S: Session, rec: dict[str, Any], door: dict[str, Any], partner: dict[s
         # the Underforge's lands 26 units on the wrong side of it).
         out_dir = D.unit(P["pos"][0] - pos[0], P["pos"][1] - pos[1])
         target = D.beyond_of(P["pos"], out_dir[0], out_dir[1])
-        walk = walk_through(S, rec, target, "out", (P["pos"][0] - out_dir[0] * 110, P["pos"][1] - out_dir[1] * 110, P["pos"][2] + 20))
+        walk = walk_through(S, rec, target, "out", (P["pos"][0] - out_dir[0] * 110, P["pos"][1] - out_dir[1] * 110, P["pos"][2] + 20), p_ref)
     src_kind = "worldspace" if D.is_exterior(door) else "interior"
     here = where_am_i(S, src_kind, src_edid, c.space_form_id(door["at"]["spaceId"]), front["landZ"])
     rec["checks"]["out"] = here
