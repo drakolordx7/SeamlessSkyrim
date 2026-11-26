@@ -35,7 +35,6 @@ def tiers(rec: dict[str, Any]) -> str:
 def plugin_errors() -> list[str]:
     """Distinct error lines ([E]) of the plugin log of the last game this crawl ran (shader compile
     failures and the like do not show in a door's result, so the report lists them)."""
-    import re
     import sys
     server = sys.modules.get("server")
     path = getattr(server, "PLUGIN_LOG", None)
@@ -44,7 +43,7 @@ def plugin_errors() -> list[str]:
     seen: dict[str, int] = {}
     for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
         if "] [E] " in line:
-            text = re.sub(r"^[[^]]*] [[^]]*] [E] ", "", line)
+            text = line.split("] [E] ", 1)[1]
             seen[text] = seen.get(text, 0) + 1
     return [f"{n}x {t}" if n > 1 else t for t, n in seen.items()]
 
