@@ -268,13 +268,15 @@ namespace Bridge::PortalDiagnostics
 					 { "objects", count(RE::BGSTerrainManager::GetLODObjectRoot().get()) }, { "trees", count(RE::BGSTerrainManager::GetTreeNode().get()) } };
 			 }() },
 			{ "lastEvent", Manager::LastEvent() },
+			// The shown space's people and their process levels, as the kept spaces' ("warm").
+			{ "shownActors", Manager::Space().Attached() ? Manager::Space().DescribeActors() : json(nullptr) },
 			{ "lightScenes", LightScene::DescribeAll(Manager::Space().Cell3D()) },
 			// The spaces kept loaded out of sight (tier 3 of the scheduler).
 			{ "warm", [] {
 				 json out = json::array();
 				 for (const auto& space : Schedule::Kept()) {
 					 out.push_back({ { "cell", Probe::DescribeCell(space.Cell()) }, { "healthy", space.Healthy() }, { "fullyLoaded", space.FullyLoaded() },
-						 { "lights", space.AdoptedLights() }, { "paused", space.Paused() } });
+						 { "lights", space.AdoptedLights() }, { "paused", space.Paused() }, { "actors", space.DescribeActors() } });
 				 }
 				 return json{ { "max", Schedule::LoadedRooms() }, { "spaces", out } };
 			 }() },

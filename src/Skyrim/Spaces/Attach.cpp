@@ -214,14 +214,11 @@ namespace Spaces
 				continue;
 			}
 			// A town's people are persistent: not in the cell's own list, so not raised to the high
-			// process with the cell's actors (AttachOne). Left in the low process the engine gives
+			// process with the cell's actors (SettleActors). Left in the low process the engine gives
 			// them while the player is indoors, they moved in a jump every few seconds and didn't
-			// animate, seen through the doorway.
-			if (auto* actor = ref->As<RE::Actor>(); actor && Spaces::tuning.stepExterior && !actor->IsDead()) {
-				auto* process = actor->GetActorRuntimeData().currentProcess;
-				if (!process || !process->InHighProcess()) {
-					actor->MoveToHigh();
-				}
+			// animate, seen through the doorway. Only while the space is live: paused, nothing of it runs.
+			if (auto* actor = ref->As<RE::Actor>(); actor && !paused && !forPicture && Spaces::tuning.stepExterior && !actor->IsDead()) {
+				Raise(actor);
 			}
 			// The 3D may hang in a node the engine took off the scene as a whole (the persistent
 			// cell's own); that node is what goes under the portal root.
@@ -291,14 +288,9 @@ namespace Spaces
 		cells.push_back(a_cell);
 		held.push_back(a_cell);
 
-		// High process so the engine runs full AI, animation and movement for its NPCs; it does
-		// not demote them again while the cell stays attached. Not for a space held for its pictures:
-		// nothing of it runs.
-		for (auto* actor : ActorsIn(a_cell)) {
-			if (!forPicture && !actor->IsDead()) {
-				actor->MoveToHigh();
-			}
-		}
+		// Its NPCs stay in the process the engine gave them: raised to the high process (full AI,
+		// animation and movement, and the engine doesn't demote them again while the cell stays
+		// attached) only once the space is live, by SettleActors.
 		// A light ref creates its light when its 3D loads. In a cell that is still loaded from an
 		// earlier visit nothing loads, and the lights the engine removed when the player left were
 		// never made again: the portal showed it unlit. TES::SetCurrentCell recreates them with
@@ -325,6 +317,8 @@ namespace Spaces
 			return false;
 		}
 		scene = Portal::LightScene::Create();
+		// Out of sight (a kept space, or one for a picture) it is dormant from the first frame.
+		paused = !a_show;
 		if (a_show) {
 			Portal::LightScene::Show(scene.get());
 		}
@@ -628,6 +622,8 @@ namespace Spaces
 		logger::info("portal: released {} (+{} neighbouring cells, {} handed over attached)", Probe::DescribeCell(cells.front()), cells.size() - 1, Spaces::WalkOut::HandedOver().size());
 		cells.clear();
 		forPicture = false;
+		raised.clear();
+		awake = false;
 		roundNext = 0;
 		roundPersistent.clear();
 		fadeForced = false;
@@ -715,8 +711,9 @@ namespace Spaces
 		const bool loading = quietSeconds < 3.0f;
 		fadeForced = loading;
 		// Nobody sees it: lights animated and a world stepped for no one were most of what a kept
-		// room cost each frame. Still loading, it carries on, or it would be found half-built when
-		// woken. Lights created meanwhile are taken in once it is woken.
+		// room cost each frame. Still loading, it carries on with the loading (the 3D, the lights), or it
+		// would be found half-built when woken, but its world is not stepped and its people not raised
+		// (below, SettleActors). Lights created meanwhile are taken in once it is woken.
 		if (paused && !loading) {
 			StepWorld(nullptr);
 			return;
@@ -792,7 +789,7 @@ namespace Spaces
 		if (ready && readySeconds > 1.0f && (prewarmModel || prewarmLand || !prewarmCells.empty())) {
 			Prewarm();
 		}
-		StepWorld(stepEnabled && !forPicture && (primary->IsInteriorCell() || (Spaces::tuning.stepExterior && groundFound)) ? primary->GetbhkWorld() : nullptr);
+		StepWorld(stepEnabled && !forPicture && !paused && (primary->IsInteriorCell() || (Spaces::tuning.stepExterior && groundFound)) ? primary->GetbhkWorld() : nullptr);
 	}
 
 	void RemoteCell::Prewarm()

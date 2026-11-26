@@ -157,7 +157,4 @@
 - A room released while the engine's job threads update its actors crashed the game once (`bhkCharProxyController` null vtable in `Actor::UpdateMovement`, Jorrvaskr's NPCs, right after a different room was let go). Not reproduced since rooms are held 8 s and not let go and re-attached within 4 s (`kMinHoldSeconds`, `kReattachSeconds`), but a release while actors update is still unguarded.
 - Whiterun, the Underforge (`01A701`): `scene_check` reports "door 0006767E: 5 shape(s) hidden by no opener" inside.
 
-- **A kept (T3) space runs its NPCs' AI.** `RemoteCell::AttachOne` raises the cell's actors to the high process for every attach, kept
-  out of sight included; only the Havok step and the lights' animation are paused. The design (nothing behind a shut door
-  simulates) wants them left alone until the space is shown; a space attached for a picture only (`AttachForPicture`) already does so.
-  Raising them at `Show`/`TakeKept` instead would change what a crossing finds: not done here.
+- **Dormant (T3) spaces and process levels are not seen in game yet.** A kept space no longer raises its NPCs (`RemoteCell::SettleActors`); built, not run. Not established: which level the engine leaves them at after its own attach (ENGINE.md, "Actor process levels"), and whether `MoveToMiddleHigh` / `MovetoMiddleLow` / `MovetoLow` on a live actor mid-animation leaves a trace when a room is paused again (a door shut with the room still held). The bridge's `actors` per space says what happened. Lowering while the jobs run is avoided (end of frame); a room released while they update is still unguarded, as above.

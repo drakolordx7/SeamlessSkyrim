@@ -140,6 +140,35 @@ Found porting the plugin; each was checked in the code of both.
   back with its loose items stilled, and give them their flags back afterwards (`Release`).
 - **High process:** `Actor::MoveToHigh()` on a remote cell's actors is accepted, and they aren't
   demoted while the cell stays attached.
+- **Actor process levels** (`RE::PROCESS_TYPE`: high 0, middle high 1, middle low 2, low 3, none -1; an actor's
+  `currentProcess->processLevel`, `Actor::GetProcessLevel()`):
+  - `ProcessLists` keeps four handle arrays, `highActorHandles`, `middleHighActorHandles`, `middleLowActorHandles`,
+    `lowActorHandles`, with per-list switches (`processHigh/MHigh/MLow/Low`) and a round-robin index for each lower list
+    (`currentLowActor`, `currentMiddleHighActor`, `currentMiddleLowActor`): the lower lists are worked through a few actors a
+    frame, the high list every frame. An `AIProcess` has `middleHigh` and `high` data only while it is at that level
+    (`process->high` is null below high; NpcTravel and NoFades read it for that), so the high process is also where the
+    animation sequencer, the fade state and the movement live.
+  - The moves between the lists are `Actor` virtuals: `MoveToHigh` (0xF1), `MovetoLow` (0xF2), `MovetoMiddleLow` (0xF3),
+    `MoveToMiddleHigh` (0xF4), and `TryMoveToMiddleLow` (0x92; the engine's own try, which can refuse). The plugin only uses the
+    first four.
+  - Low-process people in a remote cell move in a jump every few seconds and don't animate (AdoptPersistent's note); that is
+    what a vanilla actor in a loaded cell the player isn't in looks like, and what a dormant (T3) space shows now.
+  - Job threads: the actors of the high list are updated on the engine's job threads (movement, 3D position). Raising or lowering
+    one while they run is a race (a released room crashed in `bhkCharProxyController` on a null vtable inside
+    `Actor::UpdateMovement`, docs/KNOWN-ISSUES.md). The plugin moves actors only in `Travel`'s end-of-frame call (Main::Update
+    after the wait for the jobs).
+  - Not established, no way to look: whether the engine's own attach (ID 19063) puts an actor in the high process by itself
+    (the notes above say so; the code that skips `MoveToHigh` for pictures assumes not), and which level an actor of a freshly
+    attached remote cell has. The exe on disk is encrypted and the game is not run for this, and the web search returned
+    nothing but CommonLib's headers (`ProcessLists`, `ProcessType`, `Actor`), so the bridge reports each space's people per level
+    (`warm.spaces[].actors`, `schedule.kept[].actors`, `shownActors`) for the crawler to settle it.
+- **A space's people follow its tier** (`RemoteCell::SettleActors`, `Spaces/Processes.cpp`): paused (T3, or a shown room whose
+  door is shut) it is dormant: no `MoveToHigh`, no Havok step (also while it loads), the engine's level left alone, as for a space
+  attached for a picture. Live (T4) the living people of its cells, and the persistent ones of a street, are raised, each
+  remembered with the level it had; paused again, those still in its cells (not the ones carried into the player's cell) are
+  moved back with the matching `MoveTo...` call. People already in the high process are neither recorded nor lowered. Both
+  moves happen at the end of the frame: a door opening raises a frame later, a shut one lowers at once (the scheduler's 8 s hold
+  keeps the space attached, not its people up).
 - **An NPC's graph `Speed` is pulled, not set:** each graph update reads it from the actor's
   movement through `BSTAnimationGraphDataChannel<Actor, float, ActorSpeedChannel>` (vtable AE
   207549 / SE 260606, slot 1 `PollChannelUpdateImpl` stores it at +0x18; the actor is at +0x28),
@@ -440,5 +469,5 @@ Found porting the plugin; each was checked in the code of both.
   one back, swaps in an accumulator of its own (a new generation made a fresh one and kept the old for good), and passes the
   space's own cells (actors hidden for the capture). `LightOcclusion::SetWorld` is set to that space's world for the pass.
 - **Nothing runs in a space attached for a picture:** `RemoteCell::AttachForPicture` skips `MoveToHigh` (the high process is what
-  runs an NPC's AI), never steps the Havok world, skips `AnimateReferences` and `CheckLooseItems`. A kept (T3) space still gets
-  its NPCs raised at the attach (existing behaviour, see KNOWN-ISSUES).
+  runs an NPC's AI), never steps the Havok world, skips `AnimateReferences` and `CheckLooseItems`. A kept (T3) space is dormant the same way
+  until it is live (see "A space's people follow its tier").

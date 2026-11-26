@@ -408,6 +408,14 @@ namespace Portal::Manager
 		return remote;
 	}
 
+	void SettleActors()
+	{
+		remote.SettleActors();
+		for (auto& space : Schedule::Kept()) {
+			space.SettleActors();
+		}
+	}
+
 	std::optional<Active> CurrentPortal()
 	{
 		std::scoped_lock lock(activeLock);

@@ -191,6 +191,11 @@ namespace
 	{
 		static void Thunk(RE::PlayerCharacter* a_player)
 		{
+			// The jobs of the last frame are done here too: where the end-of-frame call wasn't found, the
+			// people of the spaces are settled at this one.
+			if (!endOfFrameHooked) {
+				Portal::Manager::SettleActors();
+			}
 			std::scoped_lock guard(lock);
 			if (pending && !endOfFrameHooked) {
 				const auto request = *pending;
@@ -376,6 +381,7 @@ namespace
 		{
 			func();
 			Spaces::RemoteCell::StepAtEndOfFrame();
+			Portal::Manager::SettleActors();
 			std::unique_lock guard(lock);
 			if (pending) {
 				const auto request = *pending;

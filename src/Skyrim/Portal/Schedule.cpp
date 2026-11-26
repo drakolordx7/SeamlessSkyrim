@@ -685,7 +685,7 @@ namespace Portal::Schedule
 		json keptList = json::array();
 		for (const auto& space : kept) {
 			keptList.push_back({ { "cell", Probe::DescribeCell(space.Cell()) }, { "healthy", space.Healthy() }, { "fullyLoaded", space.FullyLoaded() },
-				{ "lights", space.AdoptedLights() }, { "paused", space.Paused() } });
+				{ "lights", space.AdoptedLights() }, { "paused", space.Paused() }, { "actors", space.DescribeActors() } });
 		}
 		return {
 			{ "playerSpace", playerSpace != kNoSpace && playerSpace < graph.SpaceCount() ? graph.GetSpace(playerSpace).id : "" },
