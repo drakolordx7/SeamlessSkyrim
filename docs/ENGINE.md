@@ -280,6 +280,18 @@ Found porting the plugin; each was checked in the code of both.
     resolution. Binding a target with "update viewport" (ID 77453) applies the render scale
     (`BSGraphics::State` ratios), as for the main view, which is drawn into the target's top-left
     part. The main view submits with 0x41.
+- **The far-door clip is not for captures.** The portal pass's clip at the far door
+  (`Native::SetPortalClip`, the mask's geometry shader with `SV_ClipDistance`) drew the lighting
+  shader's passes flat grey (0.5, depth written) in a doorway picture's capture (3840x2160
+  R11G11B10 target, no jitter, flag 0x400), for every shape whose bounding sphere the plane
+  crosses: all of a room's walls, floor and ceiling within a couple of hundred units of the door
+  (the live pass, jittered at render scale, with the same clip is fine). The picture had colour
+  only for what stood further in, so a door seen at an angle (rays through the doorway land on
+  the walls and floor beside it) showed grey and white. With the clip off, the capture camera's
+  near plane (door plane + 12) does the cut and the picture is whole. Why the geometry-shader draw
+  breaks only there wasn't found. To see such a picture: the cache's `.ssdw` is a 72-byte header,
+  the BC6H mip chain (mode 11 only, one subset), then half-float distances; flat 0.5 texels with a
+  valid distance are the symptom.
 - **Scissor:** `RendererShadowState::rasterStateScissorMode` (+0xA4) = 1 with
   `DIRTY_RASTER_CULL_MODE` (0x20) makes the state apply pick rasterizer states with the scissor on;
   the rectangle is whatever `RSSetScissorRects` last set on the immediate context (nothing in

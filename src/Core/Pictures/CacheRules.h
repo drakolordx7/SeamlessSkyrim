@@ -26,7 +26,10 @@ namespace Core::Pictures
 	//
 	// 7: block compressed (BC6H colour with its mips, half-float distance apart: Compress.h), and the
 	// header says where the picture came from (a visit or taken ahead) and when.
-	inline constexpr std::uint32_t kVersion = 7;
+	//
+	// 8: pictures taken with the far-door clip left no colour (flat grey) on a room's walls, floor and
+	// ceiling near the doorway (PortalPass); they are taken again.
+	inline constexpr std::uint32_t kVersion = 8;
 	inline constexpr std::uint32_t kMagic = 0x57445353;  // "SSDW"
 
 	// A picture is taken again at most this often (the room changes; the light outdoors does).
