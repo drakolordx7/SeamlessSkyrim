@@ -3,6 +3,7 @@
 #include "Skyrim/Doors/Geometry.h"
 #include "Skyrim/Doors/Pair.h"
 #include "Skyrim/Engine/Fog.h"
+#include "Skyrim/Engine/SameSpace.h"
 #include "Skyrim/Pictures/DoorwaySnapshot.h"
 #include "Skyrim/Pictures/Tiers.h"
 #include "Skyrim/Portal/LightOcclusion.h"
@@ -189,7 +190,12 @@ namespace Pictures
 				// (Schedule::DoorTier): the depth image from T2, else the image from T1.
 				const Pictures::Doorway doorway{ standIn.door, standIn.outdoors, standIn.gate };
 				const auto              tier = Portal::Schedule::DoorTier(standIn.door);
-				if ((tier >= Core::Graph::Tier::DepthImage && Pictures::Draw(doorway, Pictures::Tier::kDepthImage, view, corners, standIn.alpha)) ||
+				// A door of the space merged into the player's, seen through the live doorway (a side room: the
+				// inn across the street from inside a shop) has no tier of its own here, but its depth image, if
+				// one was taken from the street, is what shows it in parallax at an angle.
+				auto*      doorRef = RE::TESForm::LookupByID<RE::TESObjectREFR>(standIn.door);
+				const bool seenThrough = doorRef && !Engine::SameSpace(doorRef->GetParentCell(), here);
+				if (((tier >= Core::Graph::Tier::DepthImage || seenThrough) && Pictures::Draw(doorway, Pictures::Tier::kDepthImage, view, corners, standIn.alpha)) ||
 					(tier >= Core::Graph::Tier::Image && Pictures::Draw(doorway, Pictures::Tier::kImage, view, corners, standIn.alpha))) {
 					return;
 				}

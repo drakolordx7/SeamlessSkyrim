@@ -72,6 +72,18 @@ namespace Render::SpaceLighting
 	// lit by them, rotated by a_rotation (the space's placement in the world). Main thread.
 	[[nodiscard]] std::optional<Render::SpaceLight> MergedLighting(RE::TESObjectCELL* a_cell, const RE::NiMatrix3& a_rotation);
 
+	// The street's light as it comes in through a doorway (Render/DoorwayDaylight.h): the weather's sun
+	// (times a_sunlightScale, the outdoors image space's) and the direction to it, turned by
+	// a_rotation into the coordinates the doorway is described in, and the mean colour of its
+	// ambient. a_streetCell: a cell of the street, for the direction the engine last lit it from.
+	struct StreetDaylight
+	{
+		Core::Render::Color sun;
+		Core::Vec3          towardSun;
+		Core::Render::Color sky;
+	};
+	[[nodiscard]] std::optional<StreetDaylight> DaylightOfStreet(RE::TESObjectCELL* a_streetCell, const RE::NiMatrix3& a_rotation, float a_sunlightScale);
+
 	// The outdoors' distance fog for the street merged into an interior (the interior's fog, a few
 	// thousand units deep and dark, turned the distant mountains black). From the weather.
 	[[nodiscard]] std::optional<Render::SpaceFog> MergedFog();
@@ -89,8 +101,14 @@ namespace Render::SunDirections
 	// The way the light travels in an interior, as the engine lit it while the player was in it
 	// (Observe) or else by the formula.
 	[[nodiscard]] RE::NiPoint3 OfCell(RE::TESObjectCELL* a_cell);
-	// Outdoors.
+	// Outdoors: the formula for the hour (Sun::Update's arc), with what Observe and LearnOutdoors
+	// found the engine's own sun differs by at that hour (mods that move the sun's path: Community
+	// Shaders' Sky Sync) added. Without such a mod, the formula alone.
 	[[nodiscard]] RE::NiPoint3 Outdoors();
+	[[nodiscard]] RE::NiPoint3 OutdoorsFormula();
+	// Render thread, every frame the player is outdoors: the engine's sun light travels along
+	// a_actual, with a_sunLuminance (colour times fade); learned against the formula by hour.
+	void LearnOutdoors(const RE::NiPoint3& a_actual, float a_sunLuminance);
 
 	// Render thread, before the world is drawn: the formulas against the engine's own light in the
 	// space the player is in, once per space, so a mistake in them shows in the log. What it sees in

@@ -64,9 +64,7 @@
   back out about 3 s later: the city's arrival point is 40 units past the city-side gate's plane,
   and once the view back out is attached, `Approach` crosses at depth >= 0 without the walk being
   towards the doorway. Seen at 4749361, before the gate reach changes.
-- Seen from indoors, the street's sun direction and colours are those of the moment the player
-  came in, for half a game hour; then they jump to the computed ones (`Render/SpaceLighting.cpp`,
-  `RecentOutdoors`).
+- Seen from indoors, the street's sun direction is the engine's from the moment the player came in for half a game hour; then the formula's plus what was learned outdoors for that hour (`SunDirections::LearnOutdoors`, Sky Sync and the like). A session that was never outdoors in those hours with such a mod has the formula's alone, up to ~13 degrees off with Sky Sync. The colours jump to the weather's computed ones at the same time (`Render/SpaceLighting.cpp`, `RecentOutdoors`).
 - A door's 3D rebuilt while held open is noticed at the next `Doors::Open` on it; the door the
   player came out of is opened once and waits for another opener.
 - Walking out of Solitude's gate and turning round at once: for up to 4 s the gateway shows
@@ -85,10 +83,7 @@
   until a second `coc`. Once.
 - Walking out of Belethor's (`belethors-walk-out`): one frame just after the crossing drawn almost
   white, as if overexposed. Once in two runs. Cause not looked into.
-- A room seen from across a sunlit street gets neither the street's light through its doorway, nor
-  a patch of sunlight on its floor, nor the street's fog in front of the doorway; only its dimming
-  by its doorway picture's brightness against the view's (the other pictures' mean when it has
-  none of its own).
+- A room merged into a sunlit street gets the street's sunlight patch and sky spill (`Render/DoorwayDaylight`), but not the street's fog in front of the doorway, and the patch knows nothing of what shades the street (an eave, the house opposite): the patch is drawn whenever the sun is up and the weather's sun colour is bright. Pictures of rooms (stand-ins, tiers) get none of it.
 - Whiterun, after walking into Arcadia's Cauldron and out, then saving at night ~600 units away:
   Arcadia's and Belethor's doors stood open on the house's backing panel, with no portal activated
   again, even at the door; seven other doors stuck as open stand-ins since the walk out. Not
@@ -159,3 +154,12 @@
 - **Dormant (T3) spaces and process levels are not seen in game yet.** A kept space no longer raises its NPCs (`RemoteCell::SettleActors`); built, not run. Not established: which level the engine leaves them at after its own attach (ENGINE.md, "Actor process levels"), and whether `MoveToMiddleHigh` / `MovetoMiddleLow` / `MovetoLow` on a live actor mid-animation leaves a trace when a room is paused again (a door shut with the room still held). The bridge's `actors` per space says what happened. Lowering while the jobs run is avoided (end of frame); a room released while they update is still unguarded, as above.
 - Whiterun crawl (`batch6`): the game crashed once 4 s after the Temple of Kynareth was merged (`SkyrimSE.exe+0D3CA22`, a texture stream read on a loader thread, `WRTempleWall01_n.dds`, null vtable call). Not reproduced in 3 runs of the same door.
 - Whiterun crawl: the Underforge's walk out (`01A701`) ended in the Underforge twice in a row with an intermediate build (every pass of the late-piece settling saw the street's loose items as out of place); fine since. Earlier crawls also timed out or ended wrong-cell there now and then.
+
+## Look features lost with the removed Community Shaders fork, by how much a player notices them
+
+Rebuilt (what is left of them is in RENDER-BACKENDS.md): rain and snow at the doorway, the street's daylight through an open door (now shaded by what the camera sees of the street), the street's sun shadow seen from inside an interior, Sky Sync's sun direction (learned), side rooms in parallax (doors of the merged street show their depth image). Not rebuilt, in the order they matter:
+
+- **TODO The other worldspace's sun shadows through a city gate.** The portal pass draws the other worldspace with the engine's sun shadow mask, which belongs to the main view; the real thing was the fork's shadow-map feed (`SetPortalShadows`). A screen-space pass like the street's (`Render/DoorwayDaylight`, `PSShadow`) over the picture's own depth would do it, but the portal target's depth is linearised with the portal camera's own near and far (`Pictures/Hlsl.h`, `kViewDistance`), and whether the mask already darkened those pixels isn't known: drawn blind it could shade twice. Matters at a low sun through Whiterun's and Solitude's gates (the picture's trees glint where cliffs should shade them).
+- **Check, was a TODO: the street's distance fog in front of a room seen from across a foggy street.** Probably already there: the SSAO composite (ID 107245) fogs every geometry pixel by view depth with the active scene's fog, which outdoors is the street's, so a merged room's pixels are fogged by the street's fog for their whole depth (the air up to the doorway included; the room's part too, which is slightly too much). A second fog pass would fog twice, so none was built. What to look at: a room seen from across the street in heavy fog should be as hazy as the wall around its doorway; if it is crisp, the composite skips merged pixels and a pass like `DoorwayDaylight` fogging by the distance to the doorway plane is the fix. Inside, the street through the doorway is fogged by the street's fog (`CompositeFogHook`), the interior's own fog for the air in front of the doorway is missing (rarely any).
+- **The daylight patch and the street's shade are made from what the camera sees**: occluders out of the frame (behind the camera when looking at a house from the street) shade nothing. Seen from outside, the eave over the door and the house opposite shade the patch only while they are on screen.
+- **TODO Skylighting settling on walking out.** Community Shaders' Skylighting probes are kept by position and the player jumps from the interior's coordinates to the street's, so for a second or two the street under porches is lit as if open to the sky. It is a probe cache inside Community Shaders (the fork forced its confidence); a plugin alone can't reach it, and with no CS patch there is no cheap stand-in (holding the doorway's picture longer hides it at the cost of a late reveal; darkening under roofs in our own pass needs the roof geometry). Left.

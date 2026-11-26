@@ -292,6 +292,16 @@ Found porting the plugin; each was checked in the code of both.
     frame indoors too, from the main view's cull roots, as long as the weather has rain or snow.
     ID 26176 switches it (and clears it once).
   - Rain writes no depth: a picture put over the main view later covers the rain in front of it.
+  - The weather's rain and snow are drawn by `BSParticleShader` (its `ENVCUBE` techniques), not the
+    effect shader: a hook on the effect shader's SetupGeometry never sees them. Hooked like the others
+    (`NativeMask.cpp`, vfuncs 6 and 7 of `VTABLE_BSParticleShader[0]`), the doorway's clip distances
+    apply to them. The update (ID 26179, SE 25638) is redirected by moving its first 11 bytes
+    (`mov rax, rsp; push rbx; sub rsp, imm32`), as it is called from `Sky::Update` and ID 26222.
+- **The main depth as a texture:** `DepthStencilData::depthSRV` of `kMAIN` reads the scene's depth
+  after `RenderWorld` (the doorway quad tests against the same view); bind the colour target without
+  a depth view while reading it. The depth is the raw value of the jittered `viewProjMat`
+  (camera-relative row vectors), so `mul(float4(ndc, depth, 1), inverse)` gives the camera-relative
+  position whichever way the depth runs.
 - **Two-sided at runtime:** setting `kTwoSided` on a shape's `BSShaderProperty` takes effect at its
   next draw. Community Shaders' lighting shader turns the normals of faces seen from behind (fading
   out past ~10000 units), so they are lit as their own side. Load doors' leaves are often modelled

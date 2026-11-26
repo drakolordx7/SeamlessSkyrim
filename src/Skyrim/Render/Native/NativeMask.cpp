@@ -46,6 +46,7 @@ namespace
 	float                     gatePassage = 0.0f;  // under stateLock; SetGatePassage
 	std::optional<ClipPlane>  portalClip;          // under stateLock
 	std::atomic<bool>         portalPass = false;
+	std::atomic<bool>         precipitationWhole = false;  // PortalPass's own draw of the weather's rain into a picture
 	bool                      ready = false;
 
 	// One draw's cut, worked out at the shader's per-draw setup.
@@ -208,7 +209,7 @@ namespace
 		const bool portalScenePass = Pass::InPortalScene();
 		if (portalPass && portalScenePass) {
 			PlanPortalPass(a_pass);
-		} else if (!portalScenePass) {
+		} else if (!portalScenePass && !precipitationWhole) {
 			PlanMerged(a_pass);
 		}
 	}
@@ -643,6 +644,9 @@ namespace Render::Native
 		HookShader<0>(RE::VTABLE_BSLightingShader[0]);
 		HookShader<1>(RE::VTABLE_BSUtilityShader[0]);
 		HookShader<2>(RE::VTABLE_BSEffectShader[0]);
+		// The weather's rain and snow (the particle shader's cube technique): cut at a merged doorway like
+		// any shape. Other particles of the world and of a merged room are cut with them.
+		HookShader<3>(RE::VTABLE_BSParticleShader[0]);
 		Render::Native::InstallLightingHooks();
 		ready = true;
 		logger::info("native renderer: shader setup and draw hooks installed (context {:X})", reinterpret_cast<std::uintptr_t>(context));
@@ -676,6 +680,11 @@ namespace Render::Native
 	{
 		std::scoped_lock lock(stateLock);
 		portalClip = a_plane;
+	}
+
+	void SetPrecipitationWhole(bool a_whole)
+	{
+		precipitationWhole = a_whole;
 	}
 
 	void SetPortalPass(bool a_active)

@@ -75,9 +75,77 @@ directional ambient at ID 390984. For the length of the engine's call these are 
 - Room merged into the street: its cell's own fog on its shapes. The SSAO composite fogs every
   pixel alike and keeps the street's (it takes the merged fog only with the player indoors).
 
-Not done: the street's sun shadows inside an interior (the sun's direction is the computed one),
-and, for a room seen from across the street, the street's light through its doorway and the
-street's fog in front of it.
+Not done: the other worldspace's sun shadows through a city gate. The street's fog in front of a room is the SSAO
+composite's (KNOWN-ISSUES.md, "Look features lost with the removed fork").
+
+## Rain and snow at the doorway
+
+The weather's rain and snow are one particle shape (ENGINE.md, "Rain and snow") that follows the
+camera. The mask treats it as any shape, in the main pass, by whose space it belongs to:
+
+- Outdoors, a room merged into the street: the shape is the street's (the player's space), so it is
+  cut inside X: no rain or snow falls in the room seen through the doorway.
+- Indoors, the street merged into the interior: `MergedView::IsMergedShape` names the shape the
+  street's while the street is merged, so it is kept only inside X (beyond the doorway). The engine
+  only gives it particles when the sky is in full mode; `PrecipitationUpdateHook` (`Render/Frame.cpp`,
+  ID 26179) runs the update in full mode while the street is merged, so the street through the
+  doorway has the weather's rain and snow, fading with the weather as it does outdoors.
+- Through a city gate, `DrawMainPrecipitation` draws the main view's rain into the doorway's picture;
+  that draw is not cut (`Native::SetPrecipitationWhole`).
+
+This needed the particle shader hooked like the lighting, utility and effect shaders
+(`NativeMask.cpp`, `HookShader<3>`); the cut is the geometry-shader clip distances, so it is the same
+under Community Shaders (whose pixel shaders it leaves alone). If a particle shader's vertex output
+can't be matched (or it draws points, not triangles) its shapes are drawn uncut and `drawsUncut`
+counts it: rain then falls in the room, as in vanilla. What the fork did (its particle shader's
+`discard`) was the same in both directions; it also lit the rain with the street's light, which the
+vanilla particle shader doesn't do.
+
+## Doorway daylight (our own pass)
+
+`Render/DoorwayDaylight.cpp`, called from the render hook right after the doorway's picture is
+composited (`Render/Frame.cpp`), before first person. One full-screen triangle with a pixel shader
+(`Render/DaylightHlsl.h`) that rebuilds each pixel's position from the main depth (the engine's `kMAIN`
+depth as a texture, the depth view unbound meanwhile), keeps those on the interior side of a
+merged doorway and multiplies the scene colour by `1 + gain` (blend `DEST_COLOR, ONE`, so it needs
+no copy of the scene). Nothing of the game's shaders is touched: stock Community Shaders (any
+version) and ENB draw the scene as they do, and ENB's grading comes after.
+
+- Sunlight patch: a surface is lit when the ray from it to the sun passes through the doorway's
+  rectangle (soft edge, fades out past 1400 units of ray and at grazing sun), tested against the
+  depth for what stands in the way inside (8 screen-space samples toward the doorway), times the
+  surface's cosine to the sun (from the depth's derivatives). Brightness follows the street's sun
+  colour times the outdoors' sunlight scale, nothing at night, in the sun's tint.
+- Sky spill: the opening taken as one small source at its centre, cosines at both ends over
+  `pi r^2 + area`, in the sky's ambient tint.
+- Both ways: the room merged into the street (seen from outside, and the patch on its floor once
+  walked in), and the street merged into an interior (the patch on the interior's floor). The sun is
+  the engine's own while the player is outdoors, else the weather's colour with the direction last
+  seen outdoors, then the formula plus what was learned for that hour (`Core/Lighting/SunCorrection.h`,
+  the Sky Sync difference).
+- The maths is `Core/Lighting/Daylight.h` (tested in `tests/Core/LookTests.h`); the HLSL repeats it
+  and takes its constants from it. Compile it with `tools/check-hlsl.ps1 -Files src/Skyrim/Render/DaylightHlsl.h`
+  after any change: the game's compiler reports errors only in the log.
+
+### The street's shade (same pass, `Core/Lighting/StreetShade.h`)
+
+Two uses of one screen-space march toward the sun (12 samples out to 700 units, crowding near the surface; a sample
+counts as inside something when it lies 6 units to a thickness behind the surface the camera sees there, the
+thickness growing with the distance along the ray):
+- The street merged into an interior has no sun shadow (an interior has no sun shadow map), so a second draw of the
+  pass (`PSShadow`, blend `ZERO, SRC_COLOR`: target times the shader's colour) darkens the street pixels seen through
+  the doorway, by the sun's share of their light (sun luminance times cosine against the sky's), at most 0.8. Only
+  with the camera on the interior's side of the doorway (`State::streetMerged`): a street the camera is outside of
+  has the engine's own shadows.
+- The sunlight patch's ray to the sun, once through the doorway, is marched 500 units out into the street (8
+  samples) as well as inside, so the eave over the door, the doorway's jambs and the house opposite shade it where
+  the camera sees them.
+Both need what shades to be on screen; the rest is lit as before.
+
+Side rooms: a doorway of the street merged into the player's interior (the inn across the street seen from inside a
+shop) has no tier of its own to the scheduler; its stand-in draws the depth image if one is ready (taken while the
+player was in the street) and the image tier otherwise (`DoorwayPictures.cpp`). Doors of the player's own space follow
+`Schedule::DoorTier` as before.
 
 ## ENB
 

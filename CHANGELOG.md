@@ -12,6 +12,22 @@
   inside an interior, rain and snow seen through the doorway, the street's light and fog on a room
   seen from across the street, Sky Sync's sun direction, skylighting settling on walking out.
   `[Render] sBackend` is gone.
+- Rebuilt in the plugin's own passes (no Community Shaders change, nothing of the game's shaders
+  replaced): rain and snow stop at a doorway (none inside a room seen from the street, rain and
+  snow beyond the doorway of the street seen from inside), and the street's daylight comes in
+  through an open door (a patch of sunlight on the floor where the sun's rays through the opening land,
+  a soft spill of the sky's light by the doorway), seen from outside and from inside. The street's
+  sun direction indoors follows a mod that moves the sun's path (Sky Sync) once the player has been
+  outdoors in the same hours. Still gone: rooms merged beside the shown one, sun shadows through a
+  city gate and on the street seen from an interior, the street's fog in front of a room, skylighting
+  settling on walking out (docs/KNOWN-ISSUES.md).
+- The street seen from inside a house through its open door has sun shadows again (made in the scene's
+  depth: houses, eaves and trees on the way to the sun darken what they shade), and the sunlight
+  patch on the floor is dimmed by the eave over the door and the house opposite where they are on
+  screen. The inn across the street, seen from inside a shop at an angle, shows its depth picture
+  (parallax) when one was taken. Still gone: the other worldspace's sun shadows through a city gate,
+  skylighting settling on walking out; the street's fog in front of a room should come from the
+  game's own fog pass (to be looked at in game).
 - Doorway picture files of an older version are no longer read; they are taken again.
 
 - Settings changed in the in-game menu are kept in `SeamlessSkyrim_User.ini` and survive updates;

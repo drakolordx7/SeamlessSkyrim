@@ -24,6 +24,7 @@
 #include "Skyrim/Portal/StandIns.h"
 #include "Skyrim/Portal/StreetMerge.h"
 #include "Skyrim/Render/Frame.h"
+#include "Skyrim/Render/DoorwayDaylight.h"
 #include "Skyrim/Render/Native/Native.h"
 #include "Skyrim/Render/SceneMeter.h"
 #include "Skyrim/Render/SceneQuery.h"
@@ -338,6 +339,32 @@ namespace Portal::MergedView
 			return Core::SmoothStep(std::clamp((offset.Length() - kNear) / (kFar - kNear), 0.0f, 1.0f));
 		}
 
+		// The street's light through the doorway into the interior (Render/DoorwayDaylight.h): the interior
+		// is the room merged into the street, or the player's own space with the street merged into it.
+		// The sun is the street's, in the coordinates the doorway is described in: the engine's own while the
+		// player is outdoors, the weather's with the direction last seen or learned (SunDirections) indoors.
+		void PublishDaylight(const Active& a_portal, const Doors::Mapping& a_mapping, bool a_street, float a_open)
+		{
+			auto*       outdoors = ImageSpaceBlend::Outdoors();
+			const float sunlightScale = outdoors ? outdoors->hdr.sunlightScale : 1.0f;
+			// From the street into the interior: the way through the doorway the street's side lies, turned.
+			const auto intoInterior = a_street ? a_mapping.inward * -1.0f : a_mapping.inward;
+			const auto light = a_street ? ::Render::SpaceLighting::DaylightOfStreet(a_portal.cell, a_mapping.toLinked.Invert().rotate, sunlightScale) :
+			                              ::Render::SpaceLighting::DaylightOfStreet(RE::PlayerCharacter::GetSingleton()->GetParentCell(), RE::NiMatrix3(), sunlightScale);
+			if (!light) {
+				::Render::DoorwayDaylight::Set(std::nullopt);
+				return;
+			}
+			::Render::DoorwayDaylight::State state;
+			state.opening = Core::Daylight::Opening::Upright(ToCore(a_mapping.sourceCenter), ToCore(intoInterior), a_mapping.halfWidth, a_mapping.halfHeight);
+			state.towardSun = light->towardSun;
+			state.sun = light->sun;
+			state.sky = light->sky;
+			state.open = a_open;
+			state.streetMerged = a_street;
+			::Render::DoorwayDaylight::Set(state);
+		}
+
 		// The shown room, every frame it is drawn: it can be the street merged into an interior and
 		// have the camera in it. a_space: the space it is merged from. a_wanted: its door swings
 		// towards open. Its cull is added to a_culls.
@@ -534,6 +561,7 @@ namespace Portal::MergedView
 				// few thousand units deep stood in the street's haze, bluish, where the doorway's
 				// picture before the merge (and the hall once walked in) had the keep's own.
 				Render::Native::SetMergedFog(street ? ::Render::SpaceLighting::MergedFog() : ::Render::SpaceLighting::CellFog(a_portal.cell));
+				PublishDaylight(a_portal, mapping, street, mergedRoom.swing.Amount());
 			}
 		}
 
@@ -552,6 +580,7 @@ namespace Portal::MergedView
 			mergedRoom.actors.clear();
 			StreetMerge::Hide();
 			Render::Native::SetMergedFog(std::nullopt);
+			::Render::DoorwayDaylight::Set(std::nullopt);
 			MergedCull::Set(std::nullopt);
 			Render::Native::SetDoor(std::nullopt);
 			Render::Native::SetMergedLighting(std::nullopt);
@@ -731,7 +760,16 @@ namespace Portal::MergedView
 		// is in has any: with the street merged into an interior it is the street's. Masked as the
 		// player's, the street's canal running under the houses showed in the Ratway's doorway, over
 		// the steps down behind it.
-		return published.streetMerged && netimmerse_cast<RE::BSWaterShaderProperty*>(a_shape->GetGeometryRuntimeData().shaderProperty.get());
+		if (!published.streetMerged) {
+			return false;
+		}
+		if (netimmerse_cast<RE::BSWaterShaderProperty*>(a_shape->GetGeometryRuntimeData().shaderProperty.get())) {
+			return true;
+		}
+		// The weather's rain and snow too: they follow the camera into the interior (the precipitation
+		// update runs as outdoors, Render/Frame.cpp) and fall only in the street seen through the doorway.
+		const auto* precipitation = RE::Sky::GetSingleton()->precip;
+		return a_shape == precipitation->currentPrecip.get() || a_shape == precipitation->lastPrecip.get();
 	}
 
 	bool IsShownCell(const RE::TESObjectCELL* a_cell)
