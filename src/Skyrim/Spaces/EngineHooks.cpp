@@ -27,20 +27,30 @@ namespace
 
 	// Detaching an interior (ours on release, or the engine's on a change of space) puts it at
 	// the front of the engine's buffer of recent interiors (ID 13435, TES::interiorBuffer) and
-	// unloads the one that falls off the end (ID 13721). That can be a cell we still hold
-	// attached: its 3D was detached from objRoot by the index it has under our root (0), which
-	// took objRoot's first child, the temporary node manager, and the game crashed the next
-	// frame in its update (ID 13292); a merged room vanished from the street. A held cell is
-	// left loaded and only drops out of the buffer; its own release puts it back in.
+	// unloads the one that falls off the end (ID 13721). The buffer lists every interior the
+	// engine has loaded, the player's own too, and loading one (ID 13434) pushes the others
+	// back. So the cells we attach and let go behind the doors of the room the player stands in
+	// (the Palace of the Kings: the Bloodworks and the upstairs rooms, attached for their
+	// pictures and let go again) push the player's own room to the end, and the next release
+	// unloads it. Its room graph is the world scene's, so the unload clears that (ID 19170,
+	// ShadowSceneNode::SetPortalGraph(nullptr)) and the actor cull of the same frame (ID 40335 ->
+	// ID 106433) reads a null graph; its 3D and data freed under the engine's worker threads
+	// crashed them. Vanilla never gets there: nothing else detaches while the player is in a room.
+	// A cell we hold attached is the same case: its 3D was detached from objRoot by the index it
+	// has under our root (0), which took objRoot's first child, the temporary node manager, and
+	// the game crashed the next frame in its update (ID 13292); a merged room vanished from the
+	// street. So the player's interior and a held cell are left loaded and only drop out of the
+	// buffer; the next change of space (ID 13316) or the cell's own release puts it back in.
 	// ID 13721 has some 25 callers, and hooked at the buffer's eviction alone the same crash
 	// came from another (walking about Dawnstar with the White Hall kept behind its door): the
 	// hook sits at its entry.
-	bool KeepHeld(RE::TESObjectCELL* a_cell)
+	bool KeepLoaded(RE::TESObjectCELL* a_cell)
 	{
-		if (!Spaces::RemoteCell::Holds(a_cell)) {
+		const bool current = a_cell == RE::TES::GetSingleton()->interiorCell;
+		if (!current && !Spaces::RemoteCell::Holds(a_cell)) {
 			return false;
 		}
-		logger::info("portal: {} kept loaded, not unloaded by the engine (held behind a door)", Probe::DescribeCell(a_cell));
+		logger::info("portal: {} kept loaded, not unloaded by the engine ({})", Probe::DescribeCell(a_cell), current ? "the player's room" : "held behind a door");
 		return true;
 	}
 
@@ -59,7 +69,7 @@ namespace
 			0x51, 0x52, 0x41, 0x50, 0x41, 0x51,  // push rcx, rdx, r8, r9
 			0x48, 0x83, 0xEC, 0x28,              // sub rsp, 28h
 			0x48, 0x89, 0xD1,                    // mov rcx, rdx (the cell)
-			0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,  // mov rax, KeepHeld
+			0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0,  // mov rax, KeepLoaded
 			0xFF, 0xD0,                          // call rax
 			0x48, 0x83, 0xC4, 0x28,              // add rsp, 28h
 			0x41, 0x59, 0x41, 0x58, 0x5A, 0x59,  // pop r9, r8, rdx, rcx
@@ -71,7 +81,7 @@ namespace
 			0, 0, 0, 0, 0, 0, 0, 0,              //   ID 13721 + 9
 			0xC3                                 // ret
 		};
-		const auto keep = reinterpret_cast<std::uintptr_t>(&KeepHeld);
+		const auto keep = reinterpret_cast<std::uintptr_t>(&KeepLoaded);
 		const auto resume = unload.address() + 9;
 		std::memcpy(stub.data() + 15, &keep, sizeof(keep));
 		std::memcpy(stub.data() + 50, &resume, sizeof(resume));

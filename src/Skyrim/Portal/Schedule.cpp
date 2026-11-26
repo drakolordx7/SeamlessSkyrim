@@ -378,6 +378,10 @@ namespace Portal::Schedule
 			// the crawler's move_to, looked like running at the door and loaded rooms for it).
 			if (step.Length() > 500.0f || step.Length() > Core::Selection::kMaxSpeed * a_delta) {
 				velocity = Core::Vec3();
+				// The doors that are no way through (switched off, locked) were found for the old place; until the next
+				// look the ones around the new place counted as open ways, and the rooms behind a switched-off door
+				// were attached for a few frames (the palace's front door from inside, after a teleport).
+				stateTimer = 0.0f;
 			} else {
 				velocity = velocity + (ToCore(step) / a_delta - velocity) * std::min(1.0f, 6.0f * a_delta);
 			}

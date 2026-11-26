@@ -65,6 +65,20 @@ Found porting the plugin; each was checked in the code of both.
   the end is unloaded by ID 13721. ID 13721 has about 25 callers, and a cell we still hold must
   not go through any of them: hooked at its entry (`InstallUnloadHook` in `Spaces/EngineHooks.cpp`). A held cell
   unloaded the same way crashed in ID 13292.
+  - **The buffer lists every loaded interior, the player's own room too** (ID 13434 adds a cell when it is loaded, ID 13435
+    puts it or moves it to the front; its size is a global read at ID 13435 +0xF, 3 in the dump read here). Cells we attach and let go
+    behind the doors of the player's room (Palace of the Kings: Bloodworks, Upstairs01, Upstairs02 for their pictures) push
+    the player's room to the end; the next detach of a cell not yet in the buffer unloads it (ID 13721 -> ID 19056 ->
+    ID 19170). ID 19170 sets the world scene's portal graph to null when the cell's graph is the scene's, which it is
+    for the player's room: the actor cull of the same frame (ID 40335 -> ID 106433, which reads
+    `ShadowSceneNode+0x228` unchecked) crashed on the main thread (Windhelm, Palace of the Kings front door 0C0E2D), and
+    the freed room crashed an engine worker thread the same ms (0C0E2E). Not a race: the main thread did both, and
+    the crash log's `Render::Frame::ShowActor` frames are the actor cull hook's trampoline mislabelled by the PDB.
+    The unload hook leaves the player's room (`TES::interiorCell`) loaded like a held cell.
+    Seen in the log (Windhelm crawl, pictures of the palace's inner doors cleared so they were taken again): the hook refused
+    the palace exactly when Upstairs02 was let go after its pictures. On walking out, `TES::interiorCell` still points to the
+    room (state Detaching) when ID 13316 detaches it into the buffer, and the cell that falls off then is another one
+    (Upstairs01): the room being left is not refused and sits at the buffer's front.
 - **Persistent references** (a town's houses, porches, paving) belong to the worldspace's
   persistent cell. The grid hangs their 3D under the cell they stand in, and takes it off some
   frames after the player goes inside.
