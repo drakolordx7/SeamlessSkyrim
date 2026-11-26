@@ -376,7 +376,10 @@ namespace Spaces
 		worldMapClouds.reset();
 		handedWorldMapClouds.reset();
 		prewarmModel = a_toMerge && !a_cell->IsInteriorCell();
-		if (prewarmModel) {
+		// The change into an exterior reads the grid around the arrival cell from the plugin files
+		// whoever walks into it (a gate from another worldspace: 160 ms in Whiterun's), so any exterior
+		// space gets its grid read beforehand, nearest the door last (taken from the back).
+		if (!a_cell->IsInteriorCell()) {
 			const auto* coordinates = a_cell->GetCoordinates();
 			const int   radius = static_cast<int>(RE::GetINISetting("uGridsToLoad:General")->data.u) / 2;
 			for (int dy = -radius; dy <= radius; ++dy) {
@@ -384,6 +387,11 @@ namespace Spaces
 					prewarmCells.emplace_back(static_cast<std::int16_t>(coordinates->cellX + dx), static_cast<std::int16_t>(coordinates->cellY + dy));
 				}
 			}
+			const auto distance = [&](const std::pair<std::int16_t, std::int16_t>& a_cellXY) {
+				return std::max(std::abs(a_cellXY.first - coordinates->cellX), std::abs(a_cellXY.second - coordinates->cellY)) * 16 +
+				       std::abs(a_cellXY.first - coordinates->cellX) + std::abs(a_cellXY.second - coordinates->cellY);
+			};
+			std::ranges::stable_sort(prewarmCells, [&](const auto& a_lhs, const auto& a_rhs) { return distance(a_lhs) > distance(a_rhs); });
 		}
 		// All the cells' persistent references in one pass over the worldspace's persistent cell
 		// (thousands of references in a city): done per cell, it was most of an attach.
@@ -715,6 +723,10 @@ namespace Spaces
 		// would be found half-built when woken, but its world is not stepped and its people not raised
 		// (below, SettleActors). Lights created meanwhile are taken in once it is woken.
 		if (paused && !loading) {
+			// A street kept out of sight is read ahead from here on: the crossing's change into it finds the grid in memory.
+			if (ready && readySeconds > 1.0f && PrewarmPending()) {
+				Prewarm();
+			}
 			StepWorld(nullptr);
 			return;
 		}
@@ -789,7 +801,7 @@ namespace Spaces
 			}
 		}
 		// Not in the frames around the merge, which are long already.
-		if (ready && readySeconds > 1.0f && (prewarmModel || prewarmLand || !prewarmCells.empty())) {
+		if (ready && readySeconds > 1.0f && PrewarmPending()) {
 			Prewarm();
 		}
 		StepWorld(stepEnabled && !forPicture && !paused && (primary->IsInteriorCell() || (Spaces::tuning.stepExterior && groundFound)) ? primary->GetbhkWorld() : nullptr);
@@ -826,6 +838,9 @@ namespace Spaces
 			// As 13427 does: GetLand makes the cell's land (from the parent worldspace's, or an
 			// empty one where there is none), and LoadVertices leaves a land already built as it is.
 			cell->GetLand()->LoadVertices(true, true);
+			if (prewarmCells.empty()) {
+				logger::info("portal: the grid around {} read ahead", Probe::DescribeCell(cells.front()));
+			}
 			return;
 		}
 		const auto [x, y] = prewarmCells.back();
