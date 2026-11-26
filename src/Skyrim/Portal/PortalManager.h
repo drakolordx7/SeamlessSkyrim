@@ -46,6 +46,10 @@ namespace Portal::Manager
 	// The space behind the portal's door, the one shown: for the portal modules, which each work on
 	// a part of it.
 	[[nodiscard]] Spaces::RemoteCell& Space();
+	// Main thread, once a frame with the engine's jobs done (Travel's end-of-frame call): the shown
+	// space's people and the kept spaces' go to the process level their space calls for
+	// (RemoteCell::SettleActors).
+	void SettleActors();
 	// The door pair in use, merged or not, loaded or not.
 	[[nodiscard]] std::optional<Active> CurrentPortal();
 	// The portal whose other side is ready, drawn by the portal pass or merged.

@@ -4,10 +4,16 @@
 #include "Skyrim/Spaces/Placement.h"
 
 // The space behind a portal door, which the player is *not* in, kept alive by the engine under
-// the portal's private root: attached, its NPCs in high process, its lights in the portal light
-// scene, an interior's Havok world stepped by us. Behind an exterior door: the door's cell and
+// the portal's private root: attached, its lights in the portal light scene and, while it is live, its NPCs in
+// high process and an interior's Havok world stepped by us. Behind an exterior door: the door's cell and
 // its loaded neighbours. All engine calls are the ones reversed from TES::SetCurrentCell
 // (AE 1.7.104), see docs/ENGINE.md, "Cells and spaces".
+//
+// A space nobody can see (paused: kept loaded behind a shut or far door, T3) is dormant, as the engine
+// leaves a cell it has loaded without the player in it: its people stay in the process level the engine
+// put them in (no high process, which is what runs their AI), its Havok world is not stepped. Only when
+// the space is the live one (T4, not paused) are its people raised to the high process; paused again,
+// they are put back to the level they had (SettleActors).
 //
 // One class, in files by reason to change: Attach.cpp (lifecycle, readiness, persistent
 // references, release), Havok.cpp (stepping), Placement.cpp (merging into the world's scene,
@@ -36,10 +42,22 @@ namespace Spaces
 		[[nodiscard]] bool Shown() const { return Portal::LightScene::Shown(scene.get()); }
 		// The light scene this space's lights are in (registered or not).
 		[[nodiscard]] RE::ShadowSceneNode* Scene() const { return scene.get(); }
-		// Set by the manager every frame for a kept space nobody can see: once loaded, Update leaves
-		// its Havok world unstepped and its lights unanimated and not taken in (see Update).
+		// Set by the manager every frame for a kept space nobody can see: Update leaves its Havok world
+		// unstepped (also while it loads) and, once loaded, its lights unanimated and not taken in (see
+		// Update). A space attached out of sight starts paused. The people follow in SettleActors.
 		void SetPaused(bool a_paused) { paused = a_paused; }
 		[[nodiscard]] bool Paused() const { return paused; }
+		// Main thread, once a frame after the engine's jobs are done (Travel's end-of-frame hook; raising or
+		// lowering a process while the job threads update the actors raced them before, see KNOWN-ISSUES):
+		// the space is live (not paused, not for a picture) and its people are not raised yet: every living
+		// one not in the high process goes there, as the engine does for a cell the player enters, and what
+		// level each had is remembered. The space is paused again: those still in its cells (not walked
+		// into the player's space) are put back to that level, MoveToMiddleHigh / MoveToMiddleLow /
+		// MoveToLow, the engine's own moves. People who were in the high process already are left alone.
+		void SettleActors();
+		// The people of the space and the process level each is in, for the bridge: counts per level over
+		// the cells' own actors, how many were raised by us, and whether they are raised now.
+		[[nodiscard]] json DescribeActors() const;
 		// a_handOver: the player is about to arrive in these (exterior) cells. They are given to
 		// the engine attached, under its own root, instead of detached (see Spaces/WalkOut).
 		void Release(bool a_handOver = false);
@@ -65,6 +83,8 @@ namespace Spaces
 		[[nodiscard]] int AdoptedLights() const { return adoptedLights; }
 		// Frames in which a remote world was stepped, since the last attach of any space.
 		[[nodiscard]] static std::uint64_t SteppedFrames() { return steppedFrames; }
+		// Raised to the high process by us and not lowered yet (see SettleActors).
+		[[nodiscard]] bool ActorsRaised() const { return awake; }
 		// Persistent references' 3D hung under our exterior cells (see AdoptPersistent).
 		[[nodiscard]] const std::vector<RE::NiPointer<RE::NiAVObject>>& BorrowedPersistent() const { return borrowedPersistent; }
 
@@ -165,6 +185,12 @@ namespace Spaces
 		// street's NPCs and loose items (see Update).
 		bool GroundUnderStreet();
 
+		// Processes.cpp
+		// a_actor to the high process unless it is there; remembered with its level for LowerActors.
+		void Raise(RE::Actor* a_actor);
+		void RaiseActors();
+		void LowerActors();
+
 		// Havok.cpp
 		void StepWorld(RE::bhkWorld* a_world);
 		static int  StepAll(RE::bhkWorld* a_stepped, bool a_inJob);
@@ -184,6 +210,14 @@ namespace Spaces
 		float                                      quietRequired = kQuietSecondsRequired;
 		bool                                       paused = false;
 		bool                                       forPicture = false;  // AttachForPicture
+		// The people raised to the high process (SettleActors), with the level each had before.
+		struct Raised
+		{
+			RE::ActorHandle  actor;
+			RE::PROCESS_TYPE before;
+		};
+		std::vector<Raised>                        raised;
+		bool                                       awake = false;  // raised, and not lowered since
 
 		// Readiness, per attach.
 		int   adoptedLights = 0;
