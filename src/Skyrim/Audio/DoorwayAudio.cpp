@@ -55,6 +55,7 @@ namespace Audio::Doorway
 			float             age = 0.0f;
 			float             restart = 0.0f;
 			RE::NiPoint3      position;
+			int               failedStarts = 0;  // the sound engine gave no handle
 		};
 
 		// The sounds of the live room being heard: the room, its sources and how loud it is now.
@@ -106,6 +107,7 @@ namespace Audio::Doorway
 			auto* descriptor = RE::TESForm::LookupByID<RE::BGSSoundDescriptorForm>(a_voice.sound);
 			RE::BSSoundHandle handle;
 			if (!descriptor || !RE::BSAudioManager::GetSingleton()->GetSoundHandle(handle, descriptor)) {
+				++a_voice.failedStarts;
 				return false;
 			}
 			handle.SetPosition(a_position);
@@ -321,7 +323,8 @@ namespace Audio::Doorway
 		for (const auto& voice : group->voices) {
 			auto* form = RE::TESForm::LookupByID(voice.sound);
 			voices.push_back({ { "kind", KindName(voice.kind) }, { "sound", std::format("{:08X}", voice.sound) }, { "name", form && form->GetFormEditorID() ? form->GetFormEditorID() : "" },
-				{ "roomDistance", voice.roomDistance }, { "roomGain", voice.roomGain }, { "volume", voice.volume }, { "playing", voice.handle.IsValid() && voice.handle.IsPlaying() } });
+				{ "roomDistance", voice.roomDistance }, { "roomGain", voice.roomGain }, { "volume", voice.volume }, { "failedStarts", voice.failedStarts }, { "soundId", voice.handle.IsValid() ? static_cast<std::int64_t>(voice.handle.soundID) : -1 },
+				{ "playing", voice.handle.IsValid() && voice.handle.IsPlaying() } });
 		}
 		out["playing"] = {
 			{ "door", std::format("{:08X}", group->door) },

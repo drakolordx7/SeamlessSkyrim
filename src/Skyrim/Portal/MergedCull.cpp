@@ -179,6 +179,80 @@ namespace Portal::MergedCull
 			static inline REL::Relocation<decltype(Thunk)> func;
 		};
 
+		// The world scene's occlusion planes and boxes (the street's: the houses and cliffs it hides things behind),
+		// a list in the portal graph at +0x10 (ENGINE.md, SetPortalGraph): first, last, count; each node next, prev, shape.
+		struct OccluderNode
+		{
+			OccluderNode*         next;
+			OccluderNode*         prev;
+			RE::BSOcclusionShape* shape;
+		};
+		struct OccluderList
+		{
+			OccluderNode* first;
+			OccluderNode* last;
+			std::uint32_t count;
+		};
+		struct Occluders
+		{
+			OccluderList*              list = nullptr;  // the graph's, while some are out
+			std::vector<OccluderNode*> all;             // as the list was, in order
+		} occluders;
+
+		// A merged room lies inside the street's house, and the house's occlusion boxes hide what is behind them:
+		// seen through the doorway the room lost its walls and roof (Belethor's, the Bannered Mare, in sunlit
+		// Whiterun). The per-object cull told to ignore them (ProcessHook, even all-pass) didn't help, and with the
+		// list empty nothing was lost, so the ones that reach the room are taken out of the list from the manager's
+		// update until the player view is over. The rest of the street keeps its occluders (all of them out cost
+		// ~2 ms of the view in Whiterun's market).
+		constexpr float kRoomReach = 1500.0f;
+
+		void TakeOccluders(const RE::NiPoint3& a_door)
+		{
+			auto* graph = RE::BSShaderManager::State::GetSingleton().shadowSceneNode[0]->GetRuntimeData().portalGraph;
+			// A cell without rooms or occluders may have no graph.
+			if (!graph) {
+				return;
+			}
+			occluders.list = reinterpret_cast<OccluderList*>(reinterpret_cast<std::uintptr_t>(graph) + 0x10);
+			occluders.all.clear();
+			for (auto* node = occluders.list->first; node; node = node->next) {
+				occluders.all.push_back(node);
+			}
+			OccluderNode* last = nullptr;
+			*occluders.list = {};
+			for (auto* node : occluders.all) {
+				const auto* shape = node->shape;
+				const float size = shape->IsOcclusionBox() ? static_cast<const RE::BSOcclusionBox*>(shape)->size.Length() : static_cast<const RE::BSOcclusionPlane*>(shape)->size.Length();
+				if (shape->translation.GetDistance(a_door) - size > kRoomReach) {
+					node->prev = last;
+					node->next = nullptr;
+					(last ? last->next : occluders.list->first) = node;
+					last = node;
+					++occluders.list->count;
+				}
+			}
+			occluders.list->last = last;
+		}
+
+		void ReturnOccluders()
+		{
+			if (!occluders.list) {
+				return;
+			}
+			OccluderNode* last = nullptr;
+			*occluders.list = {};
+			for (auto* node : occluders.all) {
+				node->prev = last;
+				node->next = nullptr;
+				(last ? last->next : occluders.list->first) = node;
+				last = node;
+				++occluders.list->count;
+			}
+			occluders.list->last = last;
+			occluders.list = nullptr;
+		}
+
 		void Hide(RE::NiAVObject* a_object)
 		{
 			if (!a_object->GetAppCulled()) {
@@ -587,6 +661,7 @@ namespace Portal::MergedCull
 			}
 			stats.lastWhy = none ? none : inside ? "camera in the room" : "doorway seen";
 			++(none ? stats.noneSeen : stats.shapeCulls);
+
 		}
 
 		void Cull()
@@ -627,7 +702,11 @@ namespace Portal::MergedCull
 
 	void Set(std::optional<Room> a_room)
 	{
+		ReturnOccluders();
 		mergedRoom = std::move(a_room);
+		if (mergedRoom && !mergedRoom->street && !mergedRoom->doorShut && !mergedRoom->door.cameraMerged && mode != Mode::kOff) {
+			TakeOccluders(ToNi(mergedRoom->door.center));
+		}
 		// Not the room the player has walked into: the engine culls it with its own graph then.
 		auto*                              here = RE::PlayerCharacter::GetSingleton()->GetParentCell();
 		std::vector<const RE::NiAVObject*> found;
@@ -671,6 +750,7 @@ namespace Portal::MergedCull
 			object->SetAppCulled(false);
 		}
 		hidden.clear();
+		ReturnOccluders();
 		if (std::exchange(viewOpen, false)) {
 			const auto slot = stats.index++ % stats.viewMs.size();
 			stats.viewMs[slot] = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - viewStarted).count();

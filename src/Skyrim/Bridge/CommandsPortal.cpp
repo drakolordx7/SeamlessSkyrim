@@ -64,6 +64,13 @@ namespace Bridge
 				 }
 				 return a.contains("outOfPlace") ? PortalDiagnostics::PutPiecesOutOfPlace(a.at("outOfPlace").get<float>()) : json::object();
 			 } } },
+			// Tests: {mode: 0 off, 1 whole, 2 shapes} sets the merged cull (as iMergedCull) for the session; returns its state.
+			{ "merged_cull", { [](const json& a) {
+				 if (a.contains("mode")) {
+					 Portal::MergedCull::SetMode(static_cast<Portal::MergedCull::Mode>(a.at("mode").get<int>()));
+				 }
+				 return Portal::MergedCull::Describe();
+			 } } },
 			{ "merged_shapes", { [](const json& a) {
 				 const auto& p = a.at("near");
 				 return json{ { "shapes", PortalDiagnostics::MergedShapesReport({ p.at(0).get<float>(), p.at(1).get<float>(), p.at(2).get<float>() }, a.value("far", 3000.0f)) } };

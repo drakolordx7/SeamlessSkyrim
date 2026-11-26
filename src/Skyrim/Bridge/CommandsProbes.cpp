@@ -662,6 +662,20 @@ namespace Bridge
 				 }
 				 return result;
 			 }, false } },
+			// Diagnostics: what the sound engine has active (BSAudioManager's map; the audio thread changes it, so a
+			// read can be torn). Per sound: its id (the voice's `soundId` in portal_status.audio), the file's hash, whether
+			// it plays, its volume, the distance to the listener and where its emitter is. Two entries with the same file
+			// playing, one of them ours, are a doubled sound.
+			{ "sounds", { [](const json&) {
+				 json out = json::array();
+				 for (auto& [id, sound] : RE::BSAudioManager::GetSingleton()->activeSounds) {
+					 RE::NiPoint3 at;
+					 sound->GetEmitterPositionImpl(at);
+					 out.push_back({ { "id", id }, { "file", std::format("{:08X}.{:.4}", sound->resourceID.file, sound->resourceID.ext) }, { "playing", sound->IsPlaying() }, { "volume", sound->volume },
+						 { "listenerDistance", sound->listenerDistance }, { "positionSet", sound->QPositionSet() }, { "at", { at.x, at.y, at.z } }, { "music", sound->IsMusic() } });
+				 }
+				 return json{ { "count", out.size() }, { "sounds", out } };
+			 } } },
 			{ "dump_world", { DumpWorld } },
 			{ "outdoors_probe", { OutdoorsProbe } },
 			{ "actors_3d", { Actors3D } },
