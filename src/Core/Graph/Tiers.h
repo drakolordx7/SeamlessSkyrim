@@ -4,6 +4,7 @@
 #include <span>
 #include <vector>
 
+#include "Core/Graph/Ahead.h"
 #include "Core/Graph/SpaceGraph.h"
 #include "Core/Math/Vec3.h"
 #include "Core/Selection/Ranking.h"
@@ -37,11 +38,12 @@ namespace Core::Graph
 	struct SpaceCost
 	{
 		// What holding the doorway's pictures takes, in video memory, at the default size (512 texels,
-		// 3 views; ForPictures works it out for another): a room's image is 1344 x 896 half-float texels
-		// with its mips, ~12 MB. The depth tier keeps the image too (the depth image falls back to it
-		// where its views don't reach), so it is the image and the views' ~10 MB.
-		float imageMb = 12.3f;
-		float depthMb = 22.7f;
+		// 3 views; ForPictures works it out for another): a room's image is 1344 x 896 texels of BC6H
+		// colour with its mips and half-float distances (Pictures/Compress.h), ~3.8 MB. The depth tier
+		// keeps the image too (the depth image falls back to it where its views don't reach), so it is
+		// the image and the views' ~3.3 MB.
+		float imageMb = 3.83f;
+		float depthMb = 7.09f;
 		float loadedMb = 120.0f;  // loaded and paused
 		float liveMb = 20.0f;     // more, once live
 		float attachMs = 1.5f;    // frame time a slice of attaching takes
@@ -70,6 +72,9 @@ namespace Core::Graph
 
 	struct SchedulerConfig
 	{
+		// Taking doorway pictures of spaces held out of sight (Ahead.h): what a capture pass costs in
+		// frame time, and the attach of a space held only for its pictures.
+		AheadConfig ahead;
 		// Spaces besides the player's that may be live at once.
 		std::uint32_t maxLive = 1;
 		// Spaces besides the live ones that may be kept loaded and paused.
@@ -148,6 +153,10 @@ namespace Core::Graph
 		// The tier the scheduler has put a space at (what the adapter should hold).
 		[[nodiscard]] Tier  TierOf(SpaceIx a_space) const { return tiers[a_space]; }
 		[[nodiscard]] float MemoryMb() const { return memoryMb; }
+		// How likely the player is to take a space's door as of the last tick (lower is likelier,
+		// Selection::Rank of the predicted reach); FLT_MAX for a space no door of the player's leads to.
+		// The order anything done ahead of the player goes in.
+		[[nodiscard]] float RankOf(SpaceIx a_space) const { return a_space < ranks.size() ? ranks[a_space] : 3.4e38f; }
 
 		// The adapter could not get a space to a tier: it holds a_reached instead (lower than put), and
 		// the space is not promoted again for a few seconds.
@@ -180,6 +189,7 @@ namespace Core::Graph
 		std::vector<bool>      open;            // by door, set during a tick
 		std::vector<bool>      blocked;         // by door, set during a tick
 		std::vector<int>       candidateOf;     // by space, -1 outside a tick
+		std::vector<float>     ranks;           // by space, as of the last tick
 		float                  attachTimer = 0.0f;
 		float                  memoryMb = 0.0f;
 	};

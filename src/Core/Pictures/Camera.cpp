@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "Core/Pictures/Compress.h"
+
 namespace Core::Pictures::Camera
 {
 	DoorwayPlace PlaceOf(const CameraShape& a_shape, float a_eyeUp)
@@ -23,8 +25,8 @@ namespace Core::Pictures::Camera
 
 	std::pair<std::uint32_t, std::uint32_t> SizeFor(const Extent& a_extent, int a_doorwayHeight, float a_aspect)
 	{
-		return { static_cast<std::uint32_t>(std::lround(a_doorwayHeight * a_aspect * (a_extent[1] - a_extent[0]))),
-			static_cast<std::uint32_t>(std::lround(a_doorwayHeight * (a_extent[3] - a_extent[2]))) };
+		return { Compress::RoundUp(static_cast<std::uint32_t>(std::lround(a_doorwayHeight * a_aspect * (a_extent[1] - a_extent[0])))),
+			Compress::RoundUp(static_cast<std::uint32_t>(std::lround(a_doorwayHeight * (a_extent[3] - a_extent[2])))) };
 	}
 
 	Frame::Frame(const Quad& a_corners, const Vec3& a_eye) :

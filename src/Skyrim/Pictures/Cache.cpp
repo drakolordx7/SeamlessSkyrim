@@ -1,17 +1,17 @@
 #include "Skyrim/Pictures/Cache.h"
 
+#include "Core/Pictures/Bc6h.h"
 #include "Core/Pictures/Budget.h"
 #include "Core/Pictures/FileFormat.h"
 #include "Skyrim/Engine/Paths.h"
 #include "Skyrim/Render/D3D.h"
-
-#include <DirectXPackedVector.h>
 
 namespace Pictures::Cache
 {
 	namespace
 	{
 		namespace Files = Core::Pictures::Files;
+		namespace Z = Core::Pictures::Compress;
 
 		std::unordered_map<std::string, Picture> pictures;
 		std::unordered_map<std::string, Layered> layered;
@@ -51,22 +51,27 @@ namespace Pictures::Cache
 			return Camera::SizeFor(Camera::kRoomCamera.extent, kMaxHeight, Camera::kWidest);  // the room's is the wider
 		}
 
-		// The brightness of a picture's texels (RGBA16F, alpha how far behind the doorway): every
-		// fourth row and column is plenty for a geometric mean.
-		float Brightness(const void* a_texels, UINT a_width, UINT a_height, std::size_t a_rowPitch, float a_lightScale)
+		// The brightness of a picture, read off its compressed colour (BC6H mode 11, which is all our
+		// compressor makes) and its distances: every fourth row and column is plenty for a geometric
+		// mean, and the first texel of a block is one of them.
+		float Brightness(const std::uint8_t* a_blocks, const std::uint16_t* a_distances, UINT a_width, UINT a_height, float a_lightScale)
 		{
-			using DirectX::PackedVector::XMConvertHalfToFloat;
-			constexpr UINT                 kStride = 4;
 			Core::Pictures::BrightnessMean mean;
-			for (UINT y = 0; y < a_height; y += kStride) {
-				const auto* row = reinterpret_cast<const std::uint16_t*>(static_cast<const char*>(a_texels) + y * a_rowPitch);
-				for (UINT x = 0; x < a_width; x += kStride) {
-					const auto* texel = row + x * 4;
-					// Nothing there (no wall of the room's beyond the capture camera's edge, the sky): not part of it.
-					if (XMConvertHalfToFloat(texel[3]) >= Core::Pictures::kNothingThere) {
+			const UINT                     across = Z::Blocks(a_width);
+			for (UINT by = 0; by < Z::Blocks(a_height); ++by) {
+				for (UINT bx = 0; bx < across; ++bx) {
+					const UINT x = bx * 4, y = by * 4;
+					if (x >= a_width || y >= a_height) {
 						continue;
 					}
-					mean.Add(Core::Pictures::Luminance(XMConvertHalfToFloat(texel[0]), XMConvertHalfToFloat(texel[1]), XMConvertHalfToFloat(texel[2])));
+					// Nothing there (no wall of the room's beyond the capture camera's edge, the sky): not part of it.
+					if (Core::Pictures::Bc6h::HalfValue(a_distances[static_cast<std::size_t>(y) * a_width + x]) >= Core::Pictures::kNothingThere) {
+						continue;
+					}
+					Core::Pictures::Bc6h::Block block;
+					std::memcpy(block.bytes.data(), a_blocks + (static_cast<std::size_t>(by) * across + bx) * Z::kBlockBytes, Z::kBlockBytes);
+					const auto texel = Core::Pictures::Bc6h::Decode(block)[0];
+					mean.Add(Core::Pictures::Luminance(texel[0], texel[1], texel[2]));
 				}
 			}
 			return mean.Result(a_lightScale);
@@ -119,7 +124,8 @@ namespace Pictures::Cache
 			}
 			layered.clear();
 			for (auto& readback : readbacks) {
-				readback.staging->Release();
+				readback.colour->Release();
+				readback.distance->Release();
 			}
 			readbacks.clear();
 		}
@@ -131,6 +137,16 @@ namespace Pictures::Cache
 			std::filesystem::last_write_time(a_path, std::filesystem::file_time_type::clock::now(), error);
 		}
 
+		// A file's body: the colour chain and distances after the header.
+		std::vector<std::byte> ReadBody(std::ifstream& a_file, std::uint64_t a_bytes)
+		{
+			std::vector<std::byte> body(a_bytes);
+			if (!a_file.read(reinterpret_cast<char*>(body.data()), static_cast<std::streamsize>(a_bytes))) {
+				body.clear();
+			}
+			return body;
+		}
+
 		void LoadImage(ID3D11Device* a_device, const std::string& a_key, Picture& a_picture, bool a_outdoors)
 		{
 			const auto    path = FileOf(a_key, false);
@@ -140,14 +156,16 @@ namespace Pictures::Cache
 			if (!file.read(reinterpret_cast<char*>(&header), sizeof(header)) || !Files::Valid(header, LoadOrder(), widest, highest)) {
 				return;
 			}
-			std::vector<std::uint16_t> texels(Files::TexelBytes(header) / sizeof(std::uint16_t));
-			if (!file.read(reinterpret_cast<char*>(texels.data()), texels.size() * sizeof(std::uint16_t)) || !MakeView(a_device, a_picture, texels.data(), header.width, header.height)) {
+			const auto body = ReadBody(file, Files::TexelBytes(header));
+			if (body.empty() || !MakeView(a_device, a_picture, body.data(), header.width, header.height)) {
 				return;
 			}
 			a_picture.takenFrom = { header.takenFrom[0], header.takenFrom[1], header.takenFrom[2] };
 			std::ranges::copy(header.extent, a_picture.extent.begin());
 			a_picture.lightScale = header.lightScale;
 			a_picture.brightness = header.brightness;
+			a_picture.source = static_cast<Source>(header.source);
+			a_picture.takenAt = header.takenAt;
 			(void)a_outdoors;
 			Touch(path);
 		}
@@ -161,9 +179,8 @@ namespace Pictures::Cache
 			if (!file.read(reinterpret_cast<char*>(&header), sizeof(header)) || !Files::Valid(header, LoadOrder(), widest, highest)) {
 				return;
 			}
-			std::vector<std::uint16_t> texels(Files::TexelBytes(header) / sizeof(std::uint16_t));
-			if (!file.read(reinterpret_cast<char*>(texels.data()), texels.size() * sizeof(std::uint16_t)) ||
-				!MakeLayeredView(a_device, a_layered, texels.data(), header.width, header.height, static_cast<int>(header.layers))) {
+			const auto body = ReadBody(file, Files::TexelBytes(header));
+			if (body.empty() || !MakeLayeredView(a_device, a_layered, body.data(), header.width, header.height, static_cast<int>(header.layers))) {
 				return;
 			}
 			for (int i = 0; i < Layers::kMaxLayers; ++i) {
@@ -172,7 +189,104 @@ namespace Pictures::Cache
 			a_layered.captured = (1u << header.layers) - 1u;
 			a_layered.lightScale = header.lightScale;
 			a_layered.brightness = header.brightness;
+			a_layered.source = static_cast<Source>(header.source);
+			a_layered.takenAt = header.takenAt;
 			Touch(path);
+		}
+
+		// A picture's textures: BC6H colour of a_layers slices with their mips, the distances beside it. a_file
+		// holds each slice's colour chain then distances (Files), or nothing.
+		bool MakeTextures(ID3D11Device* a_device, UINT a_width, UINT a_height, UINT a_layers, const void* a_file, ID3D11Texture2D*& a_colour, ID3D11ShaderResourceView*& a_colourView,
+			ID3D11Texture2D*& a_distance, ID3D11ShaderResourceView*& a_distanceView, bool a_array)
+		{
+			const UINT           mips = Z::MipCount(a_width, a_height);
+			D3D11_TEXTURE2D_DESC colour{ a_width, a_height, mips, a_layers, DXGI_FORMAT_BC6H_UF16, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0, 0 };
+			D3D11_TEXTURE2D_DESC distance{ a_width, a_height, 1, a_layers, DXGI_FORMAT_R16_FLOAT, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0, 0 };
+			std::vector<D3D11_SUBRESOURCE_DATA> colourData, distanceData;
+			if (a_file) {
+				const auto sliceBytes = Z::PictureBytes(a_width, a_height);
+				for (UINT slice = 0; slice < a_layers; ++slice) {
+					const auto*   base = static_cast<const std::byte*>(a_file) + slice * sliceBytes;
+					std::uint64_t offset = 0;
+					for (UINT level = 0; level < mips; ++level) {
+						colourData.push_back({ base + offset, Z::Blocks(Z::Level(a_width, level)) * Z::kBlockBytes, 0 });
+						offset += Z::ColourLevelBytes(a_width, a_height, level);
+					}
+					distanceData.push_back({ base + offset, a_width * Z::kDepthBytesPerTexel, 0 });
+				}
+			}
+			// A depth image's textures are arrays whatever the number of layers (the shader reads an array).
+			const auto view = [&](DXGI_FORMAT a_format, UINT a_levels) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
+				desc.Format = a_format;
+				desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+				desc.Texture2DArray = { 0, a_levels, 0, a_layers };
+				return desc;
+			};
+			const auto colourView = view(DXGI_FORMAT_BC6H_UF16, mips), distanceView = view(DXGI_FORMAT_R16_FLOAT, 1);
+			const bool made = SUCCEEDED(a_device->CreateTexture2D(&colour, a_file ? colourData.data() : nullptr, &a_colour)) &&
+			                  SUCCEEDED(a_device->CreateShaderResourceView(a_colour, a_array ? &colourView : nullptr, &a_colourView)) &&
+			                  SUCCEEDED(a_device->CreateTexture2D(&distance, a_file ? distanceData.data() : nullptr, &a_distance)) &&
+			                  SUCCEEDED(a_device->CreateShaderResourceView(a_distance, a_array ? &distanceView : nullptr, &a_distanceView));
+			if (!made) {
+				// Kept without its view, the picture counted as never taken (Capture's retake test asks
+				// for the view) while its texture stopped MakeView being tried again: captured, written
+				// and logged every frame.
+				Render::D3D::Release(a_distanceView);
+				Render::D3D::Release(a_distance);
+				Render::D3D::Release(a_colourView);
+				Render::D3D::Release(a_colour);
+			}
+			return made;
+		}
+
+		// The file of a picture or depth image as written: the header, then each slice's colour chain
+		// and distances. Read back from the staging copies, a subresource at a time.
+		struct Staged
+		{
+			std::vector<std::uint8_t>  firstColour;     // slice 0, level 0: the brightness is read off it
+			std::vector<std::uint16_t> firstDistances;  // and slice 0's distances
+		};
+
+		// Writes the body of a_readback to a_file: false if the GPU hasn't finished with it yet.
+		bool WriteBody(ID3D11DeviceContext* a_context, const Readback& a_readback, std::ofstream& a_file, Staged& a_staged)
+		{
+			const UINT slices = a_readback.layers > 0 ? static_cast<UINT>(a_readback.layers) : 1u;
+			const UINT mips = Z::MipCount(a_readback.width, a_readback.height);
+			for (UINT slice = 0; slice < slices; ++slice) {
+				for (UINT level = 0; level < mips; ++level) {
+					D3D11_MAPPED_SUBRESOURCE mapped{};
+					// The first read says whether the copy is done; the rest of the same copy then are.
+					const auto flags = slice == 0 && level == 0 ? D3D11_MAP_FLAG_DO_NOT_WAIT : 0u;
+					if (FAILED(a_context->Map(a_readback.colour, D3D11CalcSubresource(level, slice, mips), D3D11_MAP_READ, flags, &mapped))) {
+						return false;
+					}
+					const UINT rows = Z::Blocks(Z::Level(a_readback.height, level));
+					const UINT rowBytes = Z::Blocks(Z::Level(a_readback.width, level)) * Z::kBlockBytes;
+					for (UINT row = 0; row < rows; ++row) {
+						const auto* data = static_cast<const char*>(mapped.pData) + static_cast<std::size_t>(row) * mapped.RowPitch;
+						a_file.write(data, rowBytes);
+						if (slice == 0 && level == 0) {
+							a_staged.firstColour.insert(a_staged.firstColour.end(), data, data + rowBytes);
+						}
+					}
+					a_context->Unmap(a_readback.colour, D3D11CalcSubresource(level, slice, mips));
+				}
+				D3D11_MAPPED_SUBRESOURCE mapped{};
+				if (FAILED(a_context->Map(a_readback.distance, slice, D3D11_MAP_READ, 0, &mapped))) {
+					return false;
+				}
+				for (UINT row = 0; row < a_readback.height; ++row) {
+					const auto* data = static_cast<const char*>(mapped.pData) + static_cast<std::size_t>(row) * mapped.RowPitch;
+					a_file.write(data, a_readback.width * Z::kDepthBytesPerTexel);
+					if (slice == 0) {
+						const auto* texels = reinterpret_cast<const std::uint16_t*>(data);
+						a_staged.firstDistances.insert(a_staged.firstDistances.end(), texels, texels + a_readback.width);
+					}
+				}
+				a_context->Unmap(a_readback.distance, slice);
+			}
+			return true;
 		}
 	}
 
@@ -212,24 +326,10 @@ namespace Pictures::Cache
 		return pictures[a_key];
 	}
 
-	bool MakeView(ID3D11Device* a_device, Picture& a_picture, const void* a_texels, UINT a_width, UINT a_height)
+	bool MakeView(ID3D11Device* a_device, Picture& a_picture, const void* a_file, UINT a_width, UINT a_height)
 	{
-		D3D11_TEXTURE2D_DESC desc{ a_width, a_height, 0, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, { 1, 0 }, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET, 0,
-			D3D11_RESOURCE_MISC_GENERATE_MIPS };
-		if (FAILED(a_device->CreateTexture2D(&desc, nullptr, &a_picture.texture))) {
+		if (!MakeTextures(a_device, a_width, a_height, 1, a_file, a_picture.texture, a_picture.view, a_picture.distance, a_picture.distanceView, false)) {
 			return false;
-		}
-		if (FAILED(a_device->CreateShaderResourceView(a_picture.texture, nullptr, &a_picture.view))) {
-			// Kept without its view, the picture counted as never taken (Capture's retake test asks
-			// for the view) while its texture stopped MakeView being tried again: captured, written
-			// and logged every frame.
-			Render::D3D::Release(a_picture.texture);
-			return false;
-		}
-		if (a_texels) {
-			auto* context = Render::D3D::Context();
-			context->UpdateSubresource(a_picture.texture, 0, nullptr, a_texels, a_width * Camera::kBytesPerTexel, 0);
-			context->GenerateMips(a_picture.view);
 		}
 		a_picture.width = a_width;
 		a_picture.height = a_height;
@@ -238,6 +338,8 @@ namespace Pictures::Cache
 
 	void ReleaseTexture(Picture& a_picture)
 	{
+		Render::D3D::Release(a_picture.distanceView);
+		Render::D3D::Release(a_picture.distance);
 		Render::D3D::Release(a_picture.view);
 		Render::D3D::Release(a_picture.texture);
 	}
@@ -284,36 +386,21 @@ namespace Pictures::Cache
 		return layered[a_key];
 	}
 
-	bool MakeLayeredView(ID3D11Device* a_device, Layered& a_layered, const void* a_texels, UINT a_width, UINT a_height, int a_layers)
+	bool MakeLayeredView(ID3D11Device* a_device, Layered& a_layered, const void* a_file, UINT a_width, UINT a_height, int a_layers)
 	{
-		D3D11_TEXTURE2D_DESC desc{ a_width, a_height, 0, static_cast<UINT>(a_layers), DXGI_FORMAT_R16G16B16A16_FLOAT, { 1, 0 }, D3D11_USAGE_DEFAULT,
-			D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET, 0, D3D11_RESOURCE_MISC_GENERATE_MIPS };
-		if (FAILED(a_device->CreateTexture2D(&desc, nullptr, &a_layered.texture))) {
-			return false;
-		}
-		if (FAILED(a_device->CreateShaderResourceView(a_layered.texture, nullptr, &a_layered.view))) {
-			Render::D3D::Release(a_layered.texture);
+		if (!MakeTextures(a_device, a_width, a_height, static_cast<UINT>(a_layers), a_file, a_layered.texture, a_layered.view, a_layered.distance, a_layered.distanceView, true)) {
 			return false;
 		}
 		a_layered.width = a_width;
 		a_layered.height = a_height;
 		a_layered.layers = a_layers;
-		if (a_texels) {
-			auto*                context = Render::D3D::Context();
-			D3D11_TEXTURE2D_DESC made{};
-			a_layered.texture->GetDesc(&made);
-			const auto layerBytes = std::size_t{ a_width } * a_height * Camera::kBytesPerTexel;
-			for (int layer = 0; layer < a_layers; ++layer) {
-				context->UpdateSubresource(a_layered.texture, D3D11CalcSubresource(0, layer, made.MipLevels), nullptr, static_cast<const char*>(a_texels) + layer * layerBytes,
-					a_width * Camera::kBytesPerTexel, 0);
-			}
-			context->GenerateMips(a_layered.view);
-		}
 		return true;
 	}
 
 	void ReleaseLayered(Layered& a_layered)
 	{
+		Render::D3D::Release(a_layered.distanceView);
+		Render::D3D::Release(a_layered.distance);
 		Render::D3D::Release(a_layered.view);
 		Render::D3D::Release(a_layered.texture);
 		a_layered.captured = 0;
@@ -333,8 +420,23 @@ namespace Pictures::Cache
 		return entry.view ? &entry : nullptr;
 	}
 
-	void Queue(Readback a_readback)
+	void Queue(ID3D11Device* a_device, ID3D11DeviceContext* a_context, ID3D11Texture2D* a_colour, ID3D11Texture2D* a_distance, Readback a_readback)
 	{
+		D3D11_TEXTURE2D_DESC colour{}, distance{};
+		a_colour->GetDesc(&colour);
+		a_distance->GetDesc(&distance);
+		colour.Usage = distance.Usage = D3D11_USAGE_STAGING;
+		colour.BindFlags = distance.BindFlags = 0;
+		colour.CPUAccessFlags = distance.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		if (FAILED(a_device->CreateTexture2D(&colour, nullptr, &a_readback.colour))) {
+			return;
+		}
+		if (FAILED(a_device->CreateTexture2D(&distance, nullptr, &a_readback.distance))) {
+			a_readback.colour->Release();
+			return;
+		}
+		a_context->CopyResource(a_readback.colour, a_colour);
+		a_context->CopyResource(a_readback.distance, a_distance);
 		readbacks.push_back(std::move(a_readback));
 	}
 
@@ -352,29 +454,31 @@ namespace Pictures::Cache
 				++it;
 				continue;
 			}
-			const bool         isLayered = it->layers > 0;
-			const int          count = isLayered ? it->layers : 1;
-			D3D11_MAPPED_SUBRESOURCE mapped[Layers::kMaxLayers]{};
-			HRESULT                  result = S_OK;
-			int                      mappedCount = 0;
-			for (int layer = 0; layer < count && SUCCEEDED(result); ++layer) {
-				result = a_context->Map(it->staging, layer, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped[layer]);
-				mappedCount += SUCCEEDED(result);
-			}
-			if (result == DXGI_ERROR_WAS_STILL_DRAWING && it->frames < 60) {
-				for (int layer = 0; layer < mappedCount; ++layer) {
-					a_context->Unmap(it->staging, layer);
+			const bool isLayered = it->layers > 0;
+			const auto path = FileOf(it->key, isLayered);
+			std::error_code error;
+			std::filesystem::create_directories(path.parent_path(), error);
+			std::ofstream file(path, std::ios::binary | std::ios::trunc);
+			// The header's size is the same whatever it says: written first as a blank, again when the brightness is known.
+			const auto headerSize = isLayered ? sizeof(Files::LayeredHeader) : sizeof(Files::ImageHeader);
+			const std::vector<char> blank(headerSize);
+			file.write(blank.data(), static_cast<std::streamsize>(blank.size()));
+			Staged     staged;
+			const bool written = WriteBody(a_context, *it, file, staged);
+			if (!written) {
+				// Still being drawn: asked again next frame (the first read decides; nothing of the file is
+				// kept); given up on after a second.
+				file.close();
+				std::filesystem::remove(path, error);
+				if (it->frames < 60) {
+					++it;
+					continue;
 				}
-				++it;
-				continue;
 			}
-			if (SUCCEEDED(result)) {
-				const auto path = FileOf(it->key, isLayered);
-				std::error_code error;
-				std::filesystem::create_directories(path.parent_path(), error);
-				std::ofstream file(path, std::ios::binary | std::ios::trunc);
+			if (written) {
 				// The first (the middle view of a depth image) is what its brightness is read off.
-				const float brightness = Brightness(mapped[0].pData, it->width, it->height, mapped[0].RowPitch, it->lightScale);
+				const float brightness = Brightness(staged.firstColour.data(), staged.firstDistances.data(), it->width, it->height, it->lightScale);
+				file.seekp(0);
 				if (isLayered) {
 					Files::LayeredHeader header;
 					header.width = it->width;
@@ -383,6 +487,8 @@ namespace Pictures::Cache
 					header.loadOrder = LoadOrder();
 					header.lightScale = it->lightScale;
 					header.brightness = brightness;
+					header.takenAt = it->takenAt;
+					header.source = static_cast<std::uint32_t>(it->source);
 					for (int i = 0; i < Layers::kMaxLayers; ++i) {
 						std::ranges::copy(it->places[i], header.places[i]);
 					}
@@ -396,12 +502,9 @@ namespace Pictures::Cache
 					header.lightScale = it->lightScale;
 					std::ranges::copy(it->extent, header.extent);
 					header.brightness = brightness;
+					header.takenAt = it->takenAt;
+					header.source = static_cast<std::uint32_t>(it->source);
 					file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-				}
-				for (int layer = 0; layer < count; ++layer) {
-					for (UINT row = 0; row < it->height; ++row) {
-						file.write(static_cast<const char*>(mapped[layer].pData) + row * mapped[layer].RowPitch, it->width * Camera::kBytesPerTexel);
-					}
 				}
 				// Taken again meanwhile: the newer one's texels decide.
 				if (isLayered) {
@@ -415,19 +518,13 @@ namespace Pictures::Cache
 						found->second.brightness = brightness;
 					}
 				}
-				for (int layer = 0; layer < count; ++layer) {
-					a_context->Unmap(it->staging, layer);
-				}
 				wrote = true;
 				if (!file) {
 					logger::warn("doorway snapshot: could not write {}", Paths::Narrow(path.wstring()));
 				}
-			} else {
-				for (int layer = 0; layer < mappedCount; ++layer) {
-					a_context->Unmap(it->staging, layer);
-				}
 			}
-			it->staging->Release();
+			it->colour->Release();
+			it->distance->Release();
 			it = readbacks.erase(it);
 		}
 		if (wrote) {
@@ -460,6 +557,22 @@ namespace Pictures::Cache
 		}
 		const auto* picture = Find(Render::D3D::Device(), a_door, a_outdoors);
 		return picture ? picture->brightness : 0.0f;
+	}
+
+	void Invalidate(RE::FormID a_door, bool a_outdoors)
+	{
+		const auto key = KeyOf(a_door, a_outdoors, a_outdoors ? PartOfDay() : 0);
+		if (const auto found = pictures.find(key); found != pictures.end()) {
+			ReleaseTexture(found->second);
+			pictures.erase(found);
+		}
+		if (const auto found = layered.find(key); found != layered.end()) {
+			ReleaseLayered(found->second);
+			layered.erase(found);
+		}
+		std::error_code error;
+		std::filesystem::remove(FileOf(key, false), error);
+		std::filesystem::remove(FileOf(key, true), error);
 	}
 
 	int DeleteAll()
@@ -516,6 +629,66 @@ namespace Pictures::Cache
 		if (!victims.empty()) {
 			logger::info("doorway pictures: {} files deleted to keep to the {} MB budget", victims.size(), CacheBudgetBytes() >> 20);
 		}
+	}
+
+	std::vector<Listing> List()
+	{
+		std::vector<Listing> out;
+		const auto           suffix = std::format("@{:08x}", static_cast<std::uint32_t>(LoadOrder()));
+		std::error_code      error;
+		for (const auto& entry : std::filesystem::directory_iterator(Folder(), error)) {
+			const auto extension = entry.path().extension();
+			const bool isLayered = extension == L".ssdl";
+			if (!isLayered && extension != L".ssdw") {
+				continue;
+			}
+			// "Skyrim.esm_01A6FB_day@1234abcd": the stem of the key (FileName), the hash after the @.
+			const auto stem = Paths::Narrow(entry.path().stem().wstring());
+			if (!stem.ends_with(suffix)) {
+				continue;
+			}
+			const auto key = stem.substr(0, stem.size() - suffix.size());
+			const auto partAt = key.rfind('_');
+			const auto idAt = partAt == std::string::npos || partAt == 0 ? std::string::npos : key.rfind('_', partAt - 1);
+			if (idAt == std::string::npos) {
+				continue;
+			}
+			Listing listing;
+			listing.door = key.substr(0, idAt) + "|" + key.substr(idAt + 1, partAt - idAt - 1);
+			listing.part = key.substr(partAt + 1);
+			listing.layered = isLayered;
+			std::error_code sizeError;
+			listing.bytes = entry.file_size(sizeError);
+			std::ifstream file(entry.path(), std::ios::binary);
+			const auto [widest, highest] = Largest(isLayered);
+			if (isLayered) {
+				Files::LayeredHeader header;
+				if (!file.read(reinterpret_cast<char*>(&header), sizeof(header)) || !Files::Valid(header, LoadOrder(), widest, highest)) {
+					continue;
+				}
+				listing.layers = static_cast<int>(header.layers);
+				listing.source = static_cast<Source>(header.source);
+				listing.takenAt = header.takenAt;
+			} else {
+				Files::ImageHeader header;
+				if (!file.read(reinterpret_cast<char*>(&header), sizeof(header)) || !Files::Valid(header, LoadOrder(), widest, highest)) {
+					continue;
+				}
+				listing.source = static_cast<Source>(header.source);
+				listing.takenAt = header.takenAt;
+			}
+			// What is in memory is the newer of the two (a picture just taken is in memory before its file is written).
+			const auto fullKey = key.substr(0, idAt) + "|" + key.substr(idAt + 1, partAt - idAt - 1) + "#" + listing.part;
+			if (isLayered) {
+				const auto found = layered.find(fullKey);
+				listing.inMemory = found != layered.end() && found->second.view;
+			} else {
+				const auto found = pictures.find(fullKey);
+				listing.inMemory = found != pictures.end() && found->second.view;
+			}
+			out.push_back(std::move(listing));
+		}
+		return out;
 	}
 
 	Counts Count()

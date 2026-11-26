@@ -153,3 +153,8 @@
   place, not moved to the doorway (`scene_check`): loaded inside The Drunken Huntsman
   (`SeamlessTestDrunkenHuntsmanInside`, 3 of 9 cells), walked into Warmaiden's
   (`warmaidens-back-door-walk-in`). Not looked at on screen.
+
+- **A kept (T3) space runs its NPCs' AI.** `RemoteCell::AttachOne` raises the cell's actors to the high process for every attach, kept
+  out of sight included; only the Havok step and the lights' animation are paused. The design (nothing behind a shut door
+  simulates) wants them left alone until the space is shown; a space attached for a picture only (`AttachForPicture`) already does so.
+  Raising them at `Show`/`TakeKept` instead would change what a crossing finds: not done here.

@@ -57,6 +57,9 @@ namespace Pictures
 		// How bright the room's own lights were drawn in it (MergedView::RoomLightScale): turned down
 		// for a room merged into the street, not in the portal pass.
 		float lightScale = 1.0f;
+		// Taken from a space held out of sight, the player never there (Portal/Ahead): kept so, in the
+		// file, for the bridge's pictures command.
+		bool ahead = false;
 	};
 
 	// A doorway's capture camera (Core::Pictures::Camera::CaptureCamera). The portal pass draws one

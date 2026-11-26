@@ -544,21 +544,23 @@ namespace
 	}
 
 	// What the pictures of a room door cost the scheduler follows the picture settings (Pictures'
-	// numbers: a room image at 512 is 1344 x 896 texels of 8 bytes, with its mips ~12 MiB; a depth
-	// view 668 x 512).
+	// numbers: a room image at 512 is 1344 x 896 texels of BC6H colour with its mips and half-float
+	// distances, ~3.8 MiB; a depth view 668 x 512 ~1.1 MiB).
 	void PictureCosts()
 	{
 		const auto fallback = SpaceCost{};
 		const auto defaults = SpaceCost::ForPictures(512, 3);
-		CHECK(std::abs(defaults.imageMb - 12.3f) < 0.1f && std::abs(defaults.depthMb - 22.7f) < 0.2f);
-		CHECK(std::abs(fallback.imageMb - defaults.imageMb) < 0.1f && std::abs(fallback.depthMb - defaults.depthMb) < 0.2f);
+		CHECK(std::abs(defaults.imageMb - 3.83f) < 0.02f && std::abs(defaults.depthMb - 7.09f) < 0.03f);
+		// a third of what the half-float RGBA it replaced took (12.3 and 22.7 MiB)
+		CHECK(defaults.imageMb < 12.3f / 3.0f && defaults.depthMb < 22.7f / 3.0f);
+		CHECK(std::abs(fallback.imageMb - defaults.imageMb) < 0.02f && std::abs(fallback.depthMb - defaults.depthMb) < 0.03f);
 		// the depth tier holds the image as well, and each view adds the same
 		const auto one = SpaceCost::ForPictures(512, 1);
 		const auto two = SpaceCost::ForPictures(512, 2);
 		CHECK(one.depthMb > one.imageMb && std::abs((two.depthMb - one.depthMb) - (one.depthMb - one.imageMb)) < 0.01f);
 		CHECK(SpaceCost::ForPictures(512, 0).depthMb == SpaceCost::ForPictures(512, 0).imageMb);
 		// a quarter of the height is a sixteenth of the memory; double is four times
-		CHECK(std::abs(SpaceCost::ForPictures(128, 3).imageMb * 16.0f - defaults.imageMb) < 0.5f);
+		CHECK(std::abs(SpaceCost::ForPictures(128, 3).imageMb * 16.0f - defaults.imageMb) < 0.3f);
 		CHECK(SpaceCost::ForPictures(1024, 3).imageMb > 3.9f * defaults.imageMb);
 		// a street full of doors: at the default budget a few score pictures at most, and a depth image
 		// stays within the ladder (more than the image, less than a loaded room)
@@ -808,6 +810,32 @@ namespace
 	}
 }
 
+	// Pictures taken ahead: the likeliest ready space first, a space attached for its pictures one at a
+	// time and only with the frame time and the memory for it.
+	void AheadChoice()
+	{
+		const AheadConfig config;
+		const std::vector<AheadSpace> spaces{
+			{ .rank = 5.0f, .ready = true },
+			{ .rank = 2.0f, .attachable = true },
+			{ .rank = 3.0f, .ready = true },
+			{ .rank = 1.0f },
+			{ .rank = 4.0f, .attachable = true },
+		};
+		const float roomy = config.shotMs + config.reserveMs + 0.1f;
+		CHECK(NextShot(spaces, roomy, config) == std::optional<std::size_t>(2));
+		CHECK(!NextShot(spaces, config.shotMs, config));  // no reserve left: never a hitch
+		CHECK(!NextShot({}, 100.0f, config));
+		// the likeliest attachable, not the likeliest ready one
+		const float attachRoom = config.attachMs + config.shotMs + config.reserveMs + 0.1f;
+		CHECK(NextAttach(spaces, false, attachRoom, 500.0f, config) == std::optional<std::size_t>(1));
+		CHECK(!NextAttach(spaces, true, attachRoom, 500.0f, config));          // one at a time
+		CHECK(!NextAttach(spaces, false, roomy, 500.0f, config));              // a capture's room is not an attach's
+		CHECK(!NextAttach(spaces, false, attachRoom, config.attachMb - 1.0f, config));  // memory
+		const std::vector<AheadSpace> none{ { .rank = 1.0f, .ready = true } };
+		CHECK(!NextAttach(none, false, 100.0f, 500.0f, config));
+	}
+
 int RunGraphTests()
 {
 	Run("graph from a fixture: doorways, neighbours, paths, radius", GraphFixture);
@@ -818,6 +846,7 @@ int RunGraphTests()
 	Run("scheduler: no flapping at a boundary", SchedulerNoFlapping);
 	Run("scheduler: memory budget demotes the least likely", SchedulerBudget);
 	Run("scheduler: picture costs follow the picture settings", PictureCosts);
+	Run("scheduler: pictures ahead of the player", AheadChoice);
 	Run("scheduler: only N live, headroom", SchedulerOnlyN);
 	Run("scheduler: fallback, failure, player entering", SchedulerPolicy);
 	Run("scheduler: blocked doors, reset, rebind", SchedulerBlockedResetRebind);

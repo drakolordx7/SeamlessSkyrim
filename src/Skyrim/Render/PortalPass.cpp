@@ -45,6 +45,12 @@ namespace Render::PortalPass
 		// Ref-counted owner: the culling context also holds a reference, and when it drops it the
 		// accumulator would otherwise be freed.
 		RE::NiPointer<RE::BSShaderAccumulator> portalAccumulator;
+		std::uint32_t                          portalAccumulatorGeneration = UINT32_MAX;
+		// The pass for a doorway picture of a space nobody is looking at (DrawAhead) has an accumulator of
+		// its own, swapped in for its draw: the shown space's would be made anew, and its predecessor kept
+		// for good (below), at every switch between the two.
+		RE::NiPointer<RE::BSShaderAccumulator> aheadAccumulator;
+		std::uint32_t                          aheadAccumulatorGeneration = UINT32_MAX;
 		float                                  defaultNear = 0.0f;
 
 		// (AE 1.7.104, seen in ID 52727); CommonLib's wrappers pass a different object. SetColorTarget's
@@ -870,8 +876,8 @@ namespace Render::PortalPass
 		// on its leftover passes. The old one is kept alive, like the old light scenes.
 		void EnsureAccumulator(const Active& a_portal)
 		{
-			static std::uint32_t                                       generation = UINT32_MAX;
 			static std::vector<RE::NiPointer<RE::BSShaderAccumulator>> retiredAccumulators;
+			auto&                                                      generation = portalAccumulatorGeneration;
 			if (!portalAccumulator || generation != a_portal.generation) {
 				if (portalAccumulator) {
 					// Kept like the retired light scenes (LightScene::Renew): freeing those crashed, and
@@ -950,7 +956,7 @@ namespace Render::PortalPass
 
 		// The remote cell's shapes into the accumulator, culled with a camera whose frustum only covers
 		// the doorway: everything else would be drawn and then hidden by the walls around the door anyway.
-		void CullRemote(RE::ShadowSceneNode* a_root, const Active& a_portal, const ScreenRect& a_doorway, bool a_capturing)
+		void CullRemote(RE::ShadowSceneNode* a_root, const Active& a_portal, const ScreenRect& a_doorway, bool a_capturing, const std::vector<RE::TESObjectCELL*>& a_cells)
 		{
 			Portal::LightScene::PrepareForView();
 			ResetAccumulator(portalAccumulator.get());
@@ -987,7 +993,7 @@ namespace Render::PortalPass
 			}
 			// NPCs of a remote interior keep NiAVObject::kNotVisible on their 3D root, and the cull
 			// skips them: in the portal the room was empty. Outdoors the flag was clear.
-			const auto actors = a_capturing ? HideActorsForCapture(Portal::Manager::RemoteCells()) : ShowActorsForCull(Portal::Manager::RemoteCells());
+			const auto actors = a_capturing ? HideActorsForCapture(a_cells) : ShowActorsForCull(a_cells);
 			{
 				const Diag::Scope scope("portal cull");
 				RE::BSCullingProcess::Process(context);
@@ -1130,9 +1136,14 @@ namespace Render::PortalPass
 		}
 	}
 
-	json Draw(const Active& a_portal, const ScreenRect& a_doorway, const std::optional<Pictures::CaptureCamera>& a_capture, bool a_fullTarget)
+	namespace
 	{
-		auto* root = Portal::LightScene::Get();
+		// The pass itself: a_root is the light scene of the space drawn (registered as the portal scene for
+		// the draw), a_cells its cells.
+		json DrawIn(const Active& a_portal, const ScreenRect& a_doorway, const std::optional<Pictures::CaptureCamera>& a_capture, bool a_fullTarget, RE::ShadowSceneNode* a_root,
+			const std::vector<RE::TESObjectCELL*>& a_cells, bool a_describe)
+		{
+		auto* root = a_root;
 		auto* mainCamera = RE::Main::WorldRootCamera();
 		if (!mainCamera) {
 			throw std::runtime_error("no main camera");
@@ -1151,7 +1162,7 @@ namespace Render::PortalPass
 		const HiddenFarDoors    hiddenDoors(linked);
 
 		const bool capturing = a_capture.has_value();
-		CullRemote(root, a_portal, a_doorway, capturing);
+		CullRemote(root, a_portal, a_doorway, capturing, a_cells);
 
 		// The other side's sun and ambient.
 		const auto background = SpaceLighting::ApplyRemoteLighting(root, a_portal.cell);
@@ -1200,7 +1211,65 @@ namespace Render::PortalPass
 		Native::SetPortalClip(std::nullopt);
 		restoreRendererState();
 
-		return Diag::AgentMode() ? DescribePass(a_portal, mainCamera, linked) : json::object();
+		return a_describe && Diag::AgentMode() ? DescribePass(a_portal, mainCamera, linked) : json::object();
+		}
+
+		// The accumulator of the ahead pass in place of the shown space's, put back when the draw ends.
+		class AheadAccumulatorInPlace
+		{
+		public:
+			AheadAccumulatorInPlace()
+			{
+				std::swap(portalAccumulator, aheadAccumulator);
+				std::swap(portalAccumulatorGeneration, aheadAccumulatorGeneration);
+			}
+			~AheadAccumulatorInPlace()
+			{
+				std::swap(portalAccumulator, aheadAccumulator);
+				std::swap(portalAccumulatorGeneration, aheadAccumulatorGeneration);
+			}
+			AheadAccumulatorInPlace(const AheadAccumulatorInPlace&) = delete;
+			AheadAccumulatorInPlace& operator=(const AheadAccumulatorInPlace&) = delete;
+		};
+
+		// A space's light scene registered as the portal scene for the length of a draw, the shown one's after.
+		class SceneShown
+		{
+		public:
+			explicit SceneShown(RE::ShadowSceneNode* a_scene) :
+				before(Portal::LightScene::Get())
+			{
+				Portal::LightScene::Show(a_scene);
+			}
+			~SceneShown() { Portal::LightScene::Show(before); }
+			SceneShown(const SceneShown&) = delete;
+			SceneShown& operator=(const SceneShown&) = delete;
+
+		private:
+			RE::ShadowSceneNode* before;
+		};
+	}
+
+	json Draw(const Active& a_portal, const ScreenRect& a_doorway, const std::optional<Pictures::CaptureCamera>& a_capture, bool a_fullTarget)
+	{
+		return DrawIn(a_portal, a_doorway, a_capture, a_fullTarget, Portal::LightScene::Get(), Portal::Manager::RemoteCells(), true);
+	}
+
+	bool DrawAhead(const Active& a_portal, const Pictures::CaptureCamera& a_camera, RE::ShadowSceneNode* a_scene, const std::vector<RE::TESObjectCELL*>& a_cells)
+	{
+		constexpr ScreenRect wholeScreen{ 0.0f, 1.0f, 0.0f, 1.0f };
+		const SceneShown                 shown(a_scene);
+		const AheadAccumulatorInPlace    accumulator;
+		DrawIn(a_portal, wholeScreen, a_camera, false, a_scene, a_cells, false);
+		if (freedPassesThisSubmit > 0) {
+			// Parts of the room missing: no picture to keep. The request stands, and is taken again.
+			captureDrawn.reset();
+			return false;
+		}
+		if (captureDrawn) {
+			captureDrawn->ahead = true;
+		}
+		return true;
 	}
 
 	void HookDrawPass(std::uintptr_t a_site)

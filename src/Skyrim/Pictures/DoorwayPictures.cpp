@@ -82,7 +82,8 @@ namespace Pictures
 			}
 			// Whether or not the doorway is settled otherwise (a room waits to be merged for this).
 			Guarded([&] {
-				const Pictures::Source source{ Render::PortalPass::DrawingTargets().color.SRV, Render::PortalPass::DrawingTargets().depth.depthSRV, a_drawn.nearClip, a_drawn.farClip, true };
+				Pictures::Source source{ Render::PortalPass::DrawingTargets().color.SRV, Render::PortalPass::DrawingTargets().depth.depthSRV, a_drawn.nearClip, a_drawn.farClip, true };
+				source.ahead = a_drawn.ahead;
 				const auto             corners = CaptureCorners(a_drawn.door, a_drawn.gate, a_viewer);
 				if (a_drawn.layer >= 0) {
 					Pictures::CaptureLayer(a_view, source, a_drawn.door, a_drawn.outdoors, a_drawn.layer, corners);

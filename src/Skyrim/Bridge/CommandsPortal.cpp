@@ -7,6 +7,7 @@
 #include "Skyrim/Doors/Settings.h"
 #include "Skyrim/Graph/DoorScan.h"
 #include "Skyrim/Pictures/Cache.h"
+#include "Skyrim/Portal/Ahead.h"
 #include "Skyrim/Portal/MergedCull.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
@@ -145,6 +146,49 @@ namespace Bridge
 					 }
 				 }
 				 return summary;
+			 } } },
+			// The doorway pictures on disk for this load order, per door: which tiers (image, depth image with
+			// its views) and for which part of the day ("inside" for a room), where each came from (`visit`: the
+			// player stood there; `ahead`: taken from the space held out of sight), its age in seconds, size and
+			// whether it is in video memory now. {door: "<hex runtime id>"} or {plugin, id} limits it to one door.
+			{ "pictures", { [](const json& a) {
+				 std::string only;
+				 if (a.contains("plugin") || a.contains("door")) {
+					 const auto  id = a.contains("plugin") ? LookupInPlugin(a.at("plugin").get<std::string>(), ParseFormID(a.at("id"))) : ParseFormID(a.at("door"));
+					 auto*       form = RE::TESForm::LookupByID(id);
+					 auto*       file = form ? form->GetFile(0) : nullptr;
+					 only = file ? Core::Pictures::DoorKey(file->GetFilename(), id, file->IsLight()) : Core::Pictures::DoorKeyWithoutPlugin(id);
+				 }
+				 const auto now = static_cast<std::uint32_t>(std::time(nullptr));
+				 std::map<std::string, json> doors;
+				 std::uint64_t total = 0;
+				 for (const auto& listing : Pictures::Cache::List()) {
+					 if (!only.empty() && listing.door != only) {
+						 continue;
+					 }
+					 auto& door = doors[listing.door];
+					 if (door.is_null()) {
+						 door = { { "door", listing.door }, { "pictures", json::array() } };
+					 }
+					 total += listing.bytes;
+					 door["pictures"].push_back({ { "tier", listing.layered ? "depth-image" : "image" }, { "part", listing.part }, { "views", listing.layered ? json(listing.layers) : json(nullptr) },
+						 { "source", listing.source == Pictures::Cache::Source::kAhead ? "ahead" : "visit" }, { "ageSeconds", listing.takenAt ? json(now - listing.takenAt) : json(nullptr) },
+						 { "bytes", listing.bytes }, { "inMemory", listing.inMemory } });
+				 }
+				 json out = json::array();
+				 for (auto& [key, door] : doors) {
+					 out.push_back(std::move(door));
+				 }
+				 return json{ { "doors", out }, { "files", Pictures::Cache::Count().inMemory + Pictures::Cache::Count().layered }, { "bytesOnDisk", total }, { "ahead", Portal::Ahead::Status() },
+					 { "format", "BC6H colour with mips + R16F distance, version 7" } };
+			 } } },
+			// Takes the pictures of one of the player's space's doors from its space held out of sight, as the
+			// scheduler's tiers ask for them: {ref} or {plugin, id}; {retake: true} drops what the door has for
+			// this part of the day first. The space must be attached (the scheduler holds it at T3) or cheap to
+			// attach for it (an interior of few references); it ignores the frame time. Watch `pictures`.
+			{ "capture_ahead", { [](const json& a) {
+				 const auto* ref = RequireRef(a, a.contains("door") ? "door" : "ref");
+				 return Portal::Ahead::Force(ref->GetFormID(), a.value("retake", false));
 			 } } },
 			{ "portal_passes", { [](const json& a) { return PortalDiagnostics::RenderPasses(Portal::Manager::Space(), a.value("drop", false)); } } },
 			{ "portals_enable", { [](const json& a) {

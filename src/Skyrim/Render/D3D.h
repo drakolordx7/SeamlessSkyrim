@@ -66,7 +66,12 @@ namespace Render::D3D
 		D3D11_PRIMITIVE_TOPOLOGY  topology{};
 		ID3D11Buffer*             vertexBuffer = nullptr;
 		UINT                      stride = 0, offset = 0;
-		ID3D11ShaderResourceView* textures[2]{};
+		ID3D11ShaderResourceView* textures[4]{};
+		// The compute stage (the pictures' compression binds one texture, one target, one buffer).
+		ID3D11ComputeShader*       computeShader = nullptr;
+		ID3D11ShaderResourceView*  computeTexture = nullptr;
+		ID3D11UnorderedAccessView* computeTarget = nullptr;
+		ID3D11Buffer*              computeConstants = nullptr;
 		ID3D11SamplerState*       sampler = nullptr;
 		ID3D11Buffer*             psConstants = nullptr;
 		ID3D11Buffer*             vsConstants = nullptr;

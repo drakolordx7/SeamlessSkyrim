@@ -53,9 +53,7 @@ namespace Core::Pictures::Camera
 	// a_eyeUp: the eye's height in the doorway's heights (Frame::PlaceOf).
 	[[nodiscard]] DoorwayPlace PlaceOf(const CameraShape& a_shape, float a_eyeUp);
 
-	// Half-float RGBA, in video memory and on disk: colour, and in alpha how far behind the door's
-	// plane the surface seen there is.
-	inline constexpr int kBytesPerTexel = 8;
+	// Stored as BC6H colour plus a half-float distance behind the door's plane (Compress.h).
 	// A doorway's shape: three quarters as wide as high, or wider (a double door, a city gate: at
 	// three quarters its picture had a third or less of the texels across that it had up, the
 	// street seen through Solitude's gate smeared sideways). Its own shape there, in sixteenths.
@@ -65,7 +63,8 @@ namespace Core::Pictures::Camera
 	[[nodiscard]] float AspectOf(const Quad& a_corners);
 	// The width of a picture of a_height texels at the narrowest shape.
 	[[nodiscard]] std::uint32_t WidthFor(std::uint32_t a_height);
-	// A picture's size in texels: the doorway at the size set and its shape (AspectOf), times the extent.
+	// A picture's size in texels: the doorway at the size set and its shape (AspectOf), times the extent,
+	// each side rounded up to a whole compression block.
 	[[nodiscard]] std::pair<std::uint32_t, std::uint32_t> SizeFor(const Extent& a_extent, int a_doorwayHeight, float a_aspect);
 
 	// The doorway's frame: corner 0 and its edges, and its normal turned away from a_eye (so the

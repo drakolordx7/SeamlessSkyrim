@@ -98,7 +98,11 @@ namespace Render::D3D
 		context->IAGetInputLayout(&layout);
 		context->IAGetPrimitiveTopology(&topology);
 		context->IAGetVertexBuffers(0, 1, &vertexBuffer, &stride, &offset);
-		context->PSGetShaderResources(0, 2, textures);
+		context->PSGetShaderResources(0, 4, textures);
+		context->CSGetShader(&computeShader, nullptr, nullptr);
+		context->CSGetShaderResources(0, 1, &computeTexture);
+		context->CSGetUnorderedAccessViews(0, 1, &computeTarget);
+		context->CSGetConstantBuffers(0, 1, &computeConstants);
 		context->PSGetSamplers(0, 1, &sampler);
 		context->PSGetConstantBuffers(0, 1, &psConstants);
 		context->VSGetConstantBuffers(0, 1, &vsConstants);
@@ -106,7 +110,11 @@ namespace Render::D3D
 
 	SavedState::~SavedState()
 	{
-		context->PSSetShaderResources(0, 2, textures);
+		context->PSSetShaderResources(0, 4, textures);
+		context->CSSetShader(computeShader, nullptr, 0);
+		context->CSSetShaderResources(0, 1, &computeTexture);
+		context->CSSetUnorderedAccessViews(0, 1, &computeTarget, nullptr);
+		context->CSSetConstantBuffers(0, 1, &computeConstants);
 		context->PSSetSamplers(0, 1, &sampler);
 		context->PSSetConstantBuffers(0, 1, &psConstants);
 		context->VSSetConstantBuffers(0, 1, &vsConstants);
@@ -129,7 +137,7 @@ namespace Render::D3D
 			}
 		}
 		for (IUnknown* object : std::initializer_list<IUnknown*>{ depthView, depthState, blendState, rasterState, vertexShader, pixelShader, geometryShader, hullShader, domainShader,
-				 layout, vertexBuffer, textures[0], textures[1], sampler, psConstants, vsConstants }) {
+				 layout, vertexBuffer, textures[0], textures[1], textures[2], textures[3], sampler, psConstants, vsConstants, computeShader, computeTexture, computeTarget, computeConstants }) {
 			if (object) {
 				object->Release();
 			}

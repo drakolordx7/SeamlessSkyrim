@@ -2,6 +2,7 @@
 
 #include "Core/Crossing/Sequence.h"
 #include "Core/Graph/Tiers.h"
+#include "Skyrim/Pictures/Tiers.h"
 #include "Skyrim/Spaces/RemoteCell.h"
 
 // The tier scheduler (Core/Graph/Tiers.h) run on the game: every frame it is given where the player
@@ -88,6 +89,27 @@ namespace Portal::Schedule
 	bool TakeKept(const RE::TESObjectCELL* a_cell, Spaces::RemoteCell& a_into);
 	// A kept space let go (the player took a door into it the engine's way).
 	void LetGoKept(const RE::TESObjectCELL* a_cell, std::string_view a_why);
+
+	// What Portal/Ahead needs to take a picture of the space behind one of the player's doors.
+	struct AheadTarget
+	{
+		Pictures::Doorway   doorway;     // as the pictures ask for it
+		RE::FormID          linkedDoor;  // the door at the other end
+		Core::Graph::SpaceIx space;
+		Core::Graph::Tier   tier;        // what the scheduler holds the space at
+		float               rank;        // TierScheduler::RankOf: lower is likelier
+		RE::TESObjectCELL*  interior;    // the cell, when the space is an interior; else null
+		Spaces::RemoteCell* kept;        // the scheduler's attached, paused space (T3), if it holds one
+	};
+	// Main thread: nothing for a door that is not in the player's space, the graph or a paired doorway, or
+	// that fell back to the engine's own.
+	[[nodiscard]] std::optional<AheadTarget> AheadTargetOf(RE::FormID a_door);
+	[[nodiscard]] const Core::Graph::AheadConfig& AheadBudget();
+	// The frame time to spare, the scheduler held (a crossing, or the shown space loading) and the memory
+	// left under the budget.
+	[[nodiscard]] float HeadroomMs();
+	[[nodiscard]] bool  Frozen();
+	[[nodiscard]] float FreeMb();
 
 	// The end of a frame's main-thread work, at Present: the frame time the headroom is measured from.
 	void FrameEnded();

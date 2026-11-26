@@ -23,7 +23,10 @@ namespace Core::Pictures
 	//
 	// 6: the image tier at the full size without blur, files carry the load order's hash and the
 	// picture's brightness, and the depth image tier's layered files (FileFormat.h) exist.
-	inline constexpr std::uint32_t kVersion = 6;
+	//
+	// 7: block compressed (BC6H colour with its mips, half-float distance apart: Compress.h), and the
+	// header says where the picture came from (a visit or taken ahead) and when.
+	inline constexpr std::uint32_t kVersion = 7;
 	inline constexpr std::uint32_t kMagic = 0x57445353;  // "SSDW"
 
 	// A picture is taken again at most this often (the room changes; the light outdoors does).

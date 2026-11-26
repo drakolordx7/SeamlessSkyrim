@@ -71,6 +71,7 @@ namespace Render::PortalPass
 		float      nearClip;
 		float      farClip;
 		int        layer = -1;  // Pictures::CaptureCamera::layer
+		bool       ahead = false;  // DrawAhead: the space is held out of sight
 	};
 	[[nodiscard]] const std::optional<CaptureDrawn>& CaptureDrawnThisFrame();
 	// Render thread, before this frame's pass is drawn.
@@ -88,6 +89,13 @@ namespace Render::PortalPass
 	// drawn (a diagnostic file wants that too); otherwise the picture for the doorway on screen.
 	// What it did, for portal_status (empty outside agent sessions).
 	json Draw(const Portal::Active& a_portal, const ScreenRect& a_doorway, const std::optional<Pictures::CaptureCamera>& a_capture, bool a_fullTarget);
+
+	// The doorway picture of a space nobody looks at, taken ahead of the player (Portal/Ahead): a_portal's
+	// space (its light scene a_scene, registered as the portal scene for the draw, its cells a_cells) drawn
+	// with the picture's own camera into the targets not on screen, as a capture for the shown portal is.
+	// The shown portal's pass and picture are untouched. Nothing is drawn on screen. False when parts of the
+	// room were left out of the pass (nothing to keep: CaptureDrawnThisFrame is empty).
+	[[nodiscard]] bool DrawAhead(const Portal::Active& a_portal, const Pictures::CaptureCamera& a_camera, RE::ShadowSceneNode* a_scene, const std::vector<RE::TESObjectCELL*>& a_cells);
 
 	// The cells' actors whose 3D carries NiAVObject::kNotVisible get it cleared for a cull; the
 	// returned ones are to have it back afterwards, for the engine.

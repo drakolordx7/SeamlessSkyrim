@@ -1,5 +1,6 @@
 // Unit tests of the game-independent Core: the maths that moved out of the Skyrim modules, run
 // without a game. Plain checks (assert is compiled out in the build types that matter here).
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <functional>
@@ -12,9 +13,11 @@
 #include "Core/Doors/Policy.h"
 #include "Core/Doors/Swing.h"
 #include "Core/ImageSpace/Blend.h"
+#include "Core/Pictures/Bc6h.h"
 #include "Core/Pictures/Budget.h"
 #include "Core/Pictures/CacheRules.h"
 #include "Core/Pictures/Camera.h"
+#include "Core/Pictures/Compress.h"
 #include "Core/Pictures/Exposure.h"
 #include "Core/Pictures/FileFormat.h"
 #include "Core/Pictures/Layers.h"
@@ -509,6 +512,7 @@ int main()
 	Run("picture camera geometry", PictureCamera);
 	Run("depth image layers: march, votes, camera", LayeredDepthImages);
 	Run("picture exposure, budget, load order, files", ExposureBudgetAndFiles);
+	Run("pictures: block compression", CompressedPictures);
 	failures += RunGraphTests();
 	std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
 	return failures ? 1 : 0;

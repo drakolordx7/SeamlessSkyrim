@@ -23,6 +23,8 @@
 // To have a tier captured: Request it, and have the doorway's portal pass drawn (the portal
 // active for that door, Render::PortalPass); the capture takes one frame a picture (a layer),
 // every other frame at most, and the doorway on screen keeps showing its last picture meanwhile.
+// A door whose space is not the shown portal's is photographed from the space itself while the scheduler
+// holds it (T3), or attached for it briefly (T1, T2): Portal/Ahead draws the pass, from PendingRequests.
 // Poll Ready (or Wanted: false) for it; a request that is no longer wanted is dropped.
 // Everything here is the render thread's (the main thread's, between frames), and additive to
 // DoorwaySnapshot.h.
@@ -60,6 +62,18 @@ namespace Pictures
 	void Cancel(RE::FormID a_door);
 	// A capture of the tier is asked for and still to be taken.
 	[[nodiscard]] bool Requested(const Doorway& a_doorway, Tier a_tier);
+
+	// The captures asked for and still to be taken (not Wanted ones dropped), in the order they were
+	// asked: the scheduler asks the likeliest space's doors first (Portal/Ahead takes them from here).
+	struct Pending
+	{
+		Doorway doorway;
+		Tier    tier;
+	};
+	[[nodiscard]] std::vector<Pending> PendingRequests();
+	// Every picture of the door's, this part of the day, dropped from memory and disk, so that it is
+	// Wanted again (the bridge's capture_ahead with retake).
+	void Retake(RE::FormID a_door, bool a_outdoors);
 
 	// Render, as the portal pass for a_portalDoor is about to be drawn: the camera of the next
 	// capture requested for it, if any (Pictures::CaptureCameraFor uses this).
