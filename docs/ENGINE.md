@@ -335,6 +335,12 @@ Found porting the plugin; each was checked in the code of both.
     frame indoors too, from the main view's cull roots, as long as the weather has rain or snow.
     ID 26176 switches it (and clears it once).
   - Rain writes no depth: a picture put over the main view later covers the rain in front of it.
+  - The shape's `worldBound` is not where the particles are: it is that of the static vertices (Belethor's:
+    centre 1275 units off the camera on each axis, radius 705, while the shape's origin is the camera and
+    the shader puts every particle in a cube of the emitter's `cubeSize` (850) around it). Anything that
+    classifies the shape by its bound (the doorway mask's whole / left out / cut decision) must use the
+    camera and the cube instead; by the bound, seen from indoors the street's rain was wholly beyond the
+    doorway's planes and left out.
   - The weather's rain and snow are drawn by `BSParticleShader` (its `ENVCUBE` techniques), not the
     effect shader: a hook on the effect shader's SetupGeometry never sees them. Hooked like the others
     (`NativeMask.cpp`, vfuncs 6 and 7 of `VTABLE_BSParticleShader[0]`), the doorway's clip distances
