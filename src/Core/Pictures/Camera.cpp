@@ -5,13 +5,6 @@
 
 namespace Core::Pictures::Camera
 {
-	namespace
-	{
-		// Its texels per doorway against a picture taken with the player's view: taken once and kept,
-		// and seen at more of an angle (stretched further).
-		constexpr float kCameraDensity = 2.0f;
-	}
-
 	DoorwayPlace PlaceOf(const CameraShape& a_shape, float a_eyeUp)
 	{
 		return { 0.5f, a_shape.atEye ? std::clamp(a_eyeUp, 0.0f, 1.0f) : 0.5f, -a_shape.back };
@@ -30,9 +23,8 @@ namespace Core::Pictures::Camera
 
 	std::pair<std::uint32_t, std::uint32_t> SizeFor(const Extent& a_extent, int a_doorwayHeight, float a_aspect)
 	{
-		const float density = a_extent != kDoorwayOnly ? kCameraDensity : 1.0f;
-		return { static_cast<std::uint32_t>(std::lround(a_doorwayHeight * a_aspect * density * (a_extent[1] - a_extent[0]))),
-			static_cast<std::uint32_t>(std::lround(a_doorwayHeight * density * (a_extent[3] - a_extent[2]))) };
+		return { static_cast<std::uint32_t>(std::lround(a_doorwayHeight * a_aspect * (a_extent[1] - a_extent[0]))),
+			static_cast<std::uint32_t>(std::lround(a_doorwayHeight * (a_extent[3] - a_extent[2]))) };
 	}
 
 	Frame::Frame(const Quad& a_corners, const Vec3& a_eye) :
@@ -85,8 +77,12 @@ namespace Core::Pictures::Camera
 
 	std::array<float, 4> Clip(const CaptureCamera& a_camera, const Frame& a_frame, float a_across, float a_up)
 	{
-		const auto  point = a_frame.PointAt({ a_across, a_up, 0.0f });
-		const auto  offset = point - a_camera.transform.translate;
+		return ClipOfPoint(a_camera, a_frame.PointAt({ a_across, a_up, 0.0f }));
+	}
+
+	std::array<float, 4> ClipOfPoint(const CaptureCamera& a_camera, const Vec3& a_point)
+	{
+		const auto  offset = a_point - a_camera.transform.translate;
 		const auto& rotate = a_camera.transform.rotate;
 		const float ahead = offset.x * rotate.entry[0][0] + offset.y * rotate.entry[1][0] + offset.z * rotate.entry[2][0];
 		const float up = (offset.x * rotate.entry[0][1] + offset.y * rotate.entry[1][1] + offset.z * rotate.entry[2][1]) / ahead;

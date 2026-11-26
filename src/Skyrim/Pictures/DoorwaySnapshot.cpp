@@ -36,9 +36,19 @@ namespace Pictures
 		return std::exchange(captureWanted, std::nullopt);
 	}
 
-	CaptureCamera CameraFor(RE::FormID a_door, const Corners& a_corners, const RE::NiPoint3& a_eye)
+	CaptureCamera CameraFor(RE::FormID a_door, const Corners& a_corners, const RE::NiPoint3& a_eye, bool a_gate)
 	{
-		return { a_door, Camera::For(Camera::Frame(ToCore(a_corners), ToCore(a_eye)), Camera::kRoomCamera, Camera::PlaceOf(Camera::kRoomCamera, 0.0f)) };
+		const auto&         shape = Camera::ShapeOf(a_gate);
+		const Camera::Frame frame(ToCore(a_corners), ToCore(a_eye));
+		return { a_door, Camera::For(frame, shape, Camera::PlaceOf(shape, a_gate ? frame.PlaceOf(ToCore(a_eye))[1] : 0.0f)) };
+	}
+
+	CaptureCamera LayerCameraFor(RE::FormID a_door, int a_layer, const Corners& a_corners, const RE::NiPoint3& a_eye)
+	{
+		const Camera::Frame frame(ToCore(a_corners), ToCore(a_eye));
+		const Layers::Axes  axes(frame);
+		const auto          places = Layers::PlacesFor(DepthLayers());
+		return { a_door, Layers::CameraFor(frame, Layers::ViewAt(places[a_layer], axes.width, axes.height)), a_layer };
 	}
 
 	void Prewarm()
@@ -178,12 +188,97 @@ namespace Pictures
 		ID3D11Texture2D*     copy = nullptr;
 		if (SUCCEEDED(device->CreateTexture2D(&staging, nullptr, &copy))) {
 			context->CopyResource(copy, Gpu::Target());
-			Cache::Queue({ key, copy, width, height, picture.takenFrom, extent, picture.lightScale, 0, picture.taken });
+			Cache::Queue({ .key = key, .staging = copy, .width = width, .height = height, .takenFrom = picture.takenFrom, .extent = extent, .lightScale = picture.lightScale, .taken = picture.taken });
 		}
 		logger::info("doorway snapshot: {} taken ({}x{}, {})", key, width, height, withCamera ? "capture camera" : "the player's view");
 	}
 
-	void Draw(const View& a_view, RE::FormID a_door, bool a_outdoors, bool a_gate, const Corners& a_corners, float a_alpha, const RE::NiColor& a_plain, const Adaptation& a_adaptation)
+	void CaptureLayer(const View& a_view, const Source& a_source, RE::FormID a_door, bool a_outdoors, int a_layer, const Corners& a_corners)
+	{
+		auto*     context = Render::D3D::Context();
+		auto*     device = Render::D3D::Device();
+		const int count = DepthLayers();
+		if (count <= 0 || a_layer >= count || !a_source.color || !a_source.depth || !Gpu::EnsurePipeline(device)) {
+			return;
+		}
+		Cache::WriteReadbacks(context);
+		const auto          corners = ToCore(a_corners);
+		const auto          eye = ToCore(a_view.eye);
+		const Camera::Frame frame(corners, eye);
+		const Layers::Axes  axes(frame);
+		const auto          places = Layers::PlacesFor(count);
+		const auto [width, height] = Layers::SizeOf(PictureHeight());
+
+		const auto key = Cache::KeyOf(a_door, a_outdoors, a_outdoors ? Cache::PartOfDay() : 0);
+		auto&      entry = Cache::EntryLayered(key);
+		entry.used = std::chrono::steady_clock::now();
+		// One at another size or with another number of views (the settings changed since) begins again.
+		if (!entry.texture || entry.width != width || entry.height != height || entry.layers != count) {
+			Cache::ReleaseLayered(entry);
+			if (!Cache::MakeLayeredView(device, entry, nullptr, width, height, count)) {
+				return;
+			}
+			entry.places = places;
+			entry.diskTried = true;
+		}
+		if (entry.captured & (1u << a_layer)) {
+			return;
+		}
+		if (!Gpu::EnsureTarget(device, width, height)) {
+			return;
+		}
+
+		const auto view = Layers::ViewAt(places[a_layer], axes.width, axes.height);
+		const auto camera = Layers::CameraFor(frame, view);
+		const auto clip = Layers::CaptureCorners(camera, frame, view);
+		auto*      sceneView = static_cast<ID3D11ShaderResourceView*>(a_source.color);
+		{
+			Gpu::CaptureConstants constants{};
+			for (int i = 0; i < 3; ++i) {
+				std::ranges::copy(clip[i], constants.corner[i]);
+			}
+			// The portal pass's image fills its target.
+			constants.sizes[0] = a_view.width;
+			constants.sizes[1] = a_view.height;
+			constants.sizes[2] = 1.0f / a_view.width;
+			constants.sizes[3] = 1.0f / a_view.height;
+			constants.out[0] = static_cast<float>(width);
+			constants.out[1] = static_cast<float>(height);
+			std::copy_n(a_view.viewProjInverse, 16, constants.inverseViewProj);
+			for (int row = 0; row < 4; ++row) {
+				constants.wColumn[row] = a_view.viewProj[row * 4 + 3];
+			}
+			PutCorner(constants.origin, frame.origin - eye, 0.0f);
+			PutCorner(constants.inward, frame.inward, 0.0f);
+			constants.portal[0] = a_source.portalNear;
+			constants.portal[1] = a_source.portalFar;
+			constants.portal[2] = 1.0f;
+			constants.portal[3] = camera.toDoorway;
+			Gpu::Capture(context, constants, sceneView, static_cast<ID3D11ShaderResourceView*>(a_source.depth), width, height);
+		}
+		D3D11_TEXTURE2D_DESC made{};
+		entry.texture->GetDesc(&made);
+		context->CopySubresourceRegion(entry.texture, D3D11CalcSubresource(0, a_layer, made.MipLevels), 0, 0, 0, Gpu::Target(), 0, nullptr);
+		entry.captured |= 1u << a_layer;
+		logger::info("doorway snapshot: {} depth image layer {}/{} taken ({}x{})", key, a_layer + 1, count, width, height);
+		if (!entry.Complete()) {
+			return;
+		}
+		context->GenerateMips(entry.view);
+		entry.taken = std::chrono::steady_clock::now();
+		entry.lightScale = std::max(a_source.lightScale, 0.01f);
+		D3D11_TEXTURE2D_DESC staging{ width, height, 1, static_cast<UINT>(count), DXGI_FORMAT_R16G16B16A16_FLOAT, { 1, 0 }, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0 };
+		ID3D11Texture2D*     copy = nullptr;
+		if (SUCCEEDED(device->CreateTexture2D(&staging, nullptr, &copy))) {
+			for (int layer = 0; layer < count; ++layer) {
+				context->CopySubresourceRegion(copy, D3D11CalcSubresource(0, layer, 1), 0, 0, 0, entry.texture, D3D11CalcSubresource(0, layer, made.MipLevels), nullptr);
+			}
+			Cache::Queue({ .key = key, .staging = copy, .width = width, .height = height, .lightScale = entry.lightScale, .layers = count, .places = places, .taken = entry.taken });
+		}
+	}
+
+	void Draw(const View& a_view, RE::FormID a_door, bool a_outdoors, bool a_gate, const Corners& a_corners, float a_alpha, const RE::NiColor& a_plain, const Adaptation& a_adaptation,
+		const DrawOptions& a_options)
 	{
 		auto* context = Render::D3D::Context();
 		auto* device = Render::D3D::Device();
@@ -200,6 +295,10 @@ namespace Pictures
 			return;
 		}
 		const auto* picture = Cache::Find(device, a_door, a_outdoors);
+		const auto* layers = a_options.depthImage ? Cache::FindLayered(device, a_door, a_outdoors) : nullptr;
+		if (layers && !layers->Complete()) {
+			layers = nullptr;
+		}
 
 		// Corner order bottom, bottom across, top, top across: a strip; the picture's top row is v = 0.
 		const float uv[4][2] = { { 0, 1 }, { 1, 1 }, { 0, 0 }, { 1, 0 } };
@@ -235,11 +334,25 @@ namespace Pictures
 		constants.look[0] = static_cast<float>(std::to_underlying(a_adaptation.kind));
 		constants.look[1] = std::clamp(a_adaptation.daylight, 0.0f, 1.0f);
 		constants.look[2] = a_outdoors ? 1.0f : 0.0f;
-		constants.look[3] = picture ? a_adaptation.lightScale / picture->lightScale : 1.0f;
+		// What the picture was taken under (the layers', with no picture) and now, and the viewer's exposure.
+		const float takenUnder = picture ? picture->lightScale : layers ? layers->lightScale : 1.0f;
+		constants.look[3] = picture || layers ? a_adaptation.lightScale / takenUnder * a_options.exposure : 1.0f;
 		const auto& extent = picture ? picture->extent : Camera::kDoorwayOnly;
 		std::ranges::copy(extent, constants.extent);
 		constants.gate[0] = a_gate ? 1.0f : 0.0f;
-		Gpu::Draw(context, constants, vertices, { sceneTarget, motionTarget, depthView, a_view.width, a_view.height }, picture ? picture->view : nullptr, a_alpha >= 0.999f);
+		if (layers) {
+			const Layers::Axes axes(frame);
+			constants.layerInfo[0] = static_cast<float>(layers->layers);
+			constants.layerInfo[1] = static_cast<float>(layers->width);
+			constants.layerInfo[2] = static_cast<float>(layers->height);
+			PutCorner(constants.axisAcross, axes.across, axes.width);
+			PutCorner(constants.axisUp, axes.up, axes.height);
+			for (int i = 0; i < layers->layers; ++i) {
+				PutCorner(constants.layerPos[i], Layers::ViewAt(layers->places[i], axes.width, axes.height).position, 0.0f);
+			}
+		}
+		Gpu::Draw(context, constants, vertices, { sceneTarget, motionTarget, depthView, a_view.width, a_view.height }, picture ? picture->view : nullptr, layers ? layers->view : nullptr,
+			a_alpha >= 0.999f);
 	}
 
 	void Flush()
@@ -253,6 +366,7 @@ namespace Pictures
 	{
 		const auto counts = Cache::Count();
 		const int  height = PictureHeight();
-		return { { "pictures", counts.inMemory }, { "readbacks", counts.readbacks }, { "failed", Gpu::Failed() }, { "size", std::format("{}x{}", Camera::WidthFor(height), height) } };
+		return { { "pictures", counts.inMemory }, { "depthImages", counts.layered }, { "readbacks", counts.readbacks }, { "failed", Gpu::Failed() },
+			{ "size", std::format("{}x{}", Camera::WidthFor(height), height) }, { "depthLayers", DepthLayers() } };
 	}
 }

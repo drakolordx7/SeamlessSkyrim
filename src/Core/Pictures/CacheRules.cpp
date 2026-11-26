@@ -45,6 +45,28 @@ namespace Core::Pictures
 		return name;
 	}
 
+	std::uint64_t LoadOrderHash(const std::vector<std::string>& a_plugins)
+	{
+		// FNV-1a, 64 bit.
+		std::uint64_t hash = 0xcbf29ce484222325ull;
+		const auto    mix = [&](unsigned char a_byte) {
+            hash ^= a_byte;
+            hash *= 0x100000001b3ull;
+		};
+		for (const auto& name : a_plugins) {
+			for (const char c : name) {
+				mix(static_cast<unsigned char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c));
+			}
+			mix(0);
+		}
+		return hash;
+	}
+
+	std::string FileName(std::string_view a_key, std::uint64_t a_loadOrder, bool a_layered)
+	{
+		return std::format("{}@{:08x}{}", FileStem(a_key), static_cast<std::uint32_t>(a_loadOrder), a_layered ? ".ssdl" : ".ssdw");
+	}
+
 	bool HeaderValid(const std::uint32_t (&a_header)[4], std::uint32_t a_widest, std::uint32_t a_highest)
 	{
 		return a_header[0] == kMagic && a_header[1] == kVersion && a_header[2] >= 1 && a_header[2] <= a_widest && a_header[3] >= 1 &&

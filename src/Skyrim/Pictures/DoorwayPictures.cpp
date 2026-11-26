@@ -4,6 +4,7 @@
 #include "Skyrim/Doors/Pair.h"
 #include "Skyrim/Engine/Fog.h"
 #include "Skyrim/Pictures/DoorwaySnapshot.h"
+#include "Skyrim/Pictures/Tiers.h"
 #include "Skyrim/Portal/LightOcclusion.h"
 #include "Skyrim/Portal/MergedView.h"
 #include "Skyrim/Portal/PortalManager.h"
@@ -16,43 +17,42 @@
 
 namespace Pictures
 {
-	namespace
+	Pictures::View SnapshotView()
 	{
-		// An interior never seen through its door: a dim grey, a little lighter than a dark room.
-		constexpr RE::NiColor kPlainInside{ 0.08f, 0.08f, 0.08f };
-
-		Pictures::View SnapshotView()
-		{
-			auto&                  mainView = Render::CurrentMainView();
-			const auto             eye = mainView.posAdjust.getEye();
-			const auto             previousEye = mainView.previousPosAdjust.getEye();
-			const auto             view = mainView.cameraData.getEye();
-			Pictures::View out;
-			std::memcpy(out.viewProj, &view.viewProjMat, sizeof(out.viewProj));
-			double matrix[16], inverse[16];
+		auto&                  mainView = Render::CurrentMainView();
+		const auto             eye = mainView.posAdjust.getEye();
+		const auto             previousEye = mainView.previousPosAdjust.getEye();
+		const auto             view = mainView.cameraData.getEye();
+		Pictures::View         out;
+		std::memcpy(out.viewProj, &view.viewProjMat, sizeof(out.viewProj));
+		double matrix[16], inverse[16];
+		for (int i = 0; i < 16; ++i) {
+			matrix[i] = out.viewProj[i];
+		}
+		if (Render::D3D::Invert(matrix, inverse)) {
 			for (int i = 0; i < 16; ++i) {
-				matrix[i] = out.viewProj[i];
+				out.viewProjInverse[i] = static_cast<float>(inverse[i]);
 			}
-			if (Render::D3D::Invert(matrix, inverse)) {
-				for (int i = 0; i < 16; ++i) {
-					out.viewProjInverse[i] = static_cast<float>(inverse[i]);
-				}
-			}
-			std::memcpy(out.viewProjUnjittered, &view.viewProjMatrixUnjittered, sizeof(out.viewProjUnjittered));
-			std::memcpy(out.previousViewProjUnjittered, &view.previousViewProjMatrixUnjittered, sizeof(out.previousViewProjUnjittered));
-			out.eye = { eye.x, eye.y, eye.z };
-			out.eyeDelta = { eye.x - previousEye.x, eye.y - previousEye.y, eye.z - previousEye.z };
-			auto&                scene = RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
-			D3D11_TEXTURE2D_DESC desc{};
-			if (scene.texture) {
-				reinterpret_cast<ID3D11Texture2D*>(scene.texture)->GetDesc(&desc);
-			}
-			const auto scale = Render::D3D::RenderScale();
-			out.width = desc.Width * scale[0];
-			out.height = desc.Height * scale[1];
-			out.fog = Engine::Fog::World();
-			return out;
+		}
+		std::memcpy(out.viewProjUnjittered, &view.viewProjMatrixUnjittered, sizeof(out.viewProjUnjittered));
+		std::memcpy(out.previousViewProjUnjittered, &view.previousViewProjMatrixUnjittered, sizeof(out.previousViewProjUnjittered));
+		out.eye = { eye.x, eye.y, eye.z };
+		out.eyeDelta = { eye.x - previousEye.x, eye.y - previousEye.y, eye.z - previousEye.z };
+		auto&                scene = RE::BSGraphics::Renderer::GetSingleton()->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN];
+		D3D11_TEXTURE2D_DESC desc{};
+		if (scene.texture) {
+			reinterpret_cast<ID3D11Texture2D*>(scene.texture)->GetDesc(&desc);
+		}
+		const auto scale = Render::D3D::RenderScale();
+		out.width = desc.Width * scale[0];
+		out.height = desc.Height * scale[1];
+		out.fog = Engine::Fog::World();
+		return out;
 	}
+
+	Pictures::Corners CaptureCorners(RE::FormID a_door, bool a_gate, const RE::NiPoint3& a_viewer)
+	{
+		return Portal::Doors::Quad(Portal::Doors::Door(a_door), a_viewer, { .behindPanel = !a_gate, .wholeMesh = a_gate });
 	}
 
 	namespace
@@ -71,15 +71,6 @@ namespace Pictures
 			}
 		}
 
-		// The doorway as the picture is asked for with: a gate's with another shape was a picture of
-		// another size, never the one asked for, and Whiterun's gate was captured every other frame for
-		// good, every other frame showing the picture of the frame before (the view through it
-		// stuttered, and lagged a turn by a frame half the time).
-		Pictures::Corners CaptureCorners(RE::FormID a_door, bool a_gate, const RE::NiPoint3& a_viewer)
-		{
-			return Portal::Doors::Quad(Portal::Doors::Door(a_door), a_viewer, { .behindPanel = !a_gate, .wholeMesh = a_gate });
-		}
-
 		// The picture the portal pass drew this frame with the capture camera.
 		void TakeCameraPicture(const Pictures::View& a_view, const Render::PortalPass::CaptureDrawn& a_drawn, const RE::NiPoint3& a_viewer)
 		{
@@ -91,7 +82,12 @@ namespace Pictures
 			// Whether or not the doorway is settled otherwise (a room waits to be merged for this).
 			Guarded([&] {
 				const Pictures::Source source{ Render::PortalPass::DrawingTargets().color.SRV, Render::PortalPass::DrawingTargets().depth.depthSRV, a_drawn.nearClip, a_drawn.farClip, true };
-				Pictures::Capture(a_view, source, a_drawn.door, a_drawn.outdoors, a_drawn.gate, CaptureCorners(a_drawn.door, a_drawn.gate, a_viewer));
+				const auto             corners = CaptureCorners(a_drawn.door, a_drawn.gate, a_viewer);
+				if (a_drawn.layer >= 0) {
+					Pictures::CaptureLayer(a_view, source, a_drawn.door, a_drawn.outdoors, a_drawn.layer, corners);
+				} else {
+					Pictures::Capture(a_view, source, a_drawn.door, a_drawn.outdoors, a_drawn.gate, corners);
+				}
 			});
 		}
 
@@ -101,7 +97,7 @@ namespace Pictures
 		{
 			Guarded([&] {
 				Pictures::Source source;
-				auto*                    renderer = RE::BSGraphics::Renderer::GetSingleton();
+				auto*            renderer = RE::BSGraphics::Renderer::GetSingleton();
 				if (a_merged) {
 					source.color = renderer->GetRuntimeData().renderTargets[RE::RENDER_TARGETS::kMAIN].SRV;
 					source.depth = renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].depthSRV;
@@ -115,30 +111,22 @@ namespace Pictures
 				Pictures::Capture(a_view, source, a_chance.door, a_chance.outdoors, a_chance.gate, CaptureCorners(a_chance.door, a_chance.gate, a_viewer));
 			});
 		}
+	}
 
-		// How bright the day is outside, 0 at night .. 1 in full day, and the colour a street seen
-		// through a doorway is drawn with before its picture exists.
-		struct OutdoorLook
-		{
-			RE::NiColor plain;
-			float       daylight;
-		};
-
-		OutdoorLook OutdoorLookNow()
-		{
-			if (const auto weather = Render::SpaceLighting::WeatherLighting()) {
-				// The horizon's colour for the hour, half way to grey: the sky alone read as a blue
-				// panel, a street is mostly walls and ground under it.
-				const auto& sky = weather->sky.horizon;
-				const float grey = 0.2126f * sky.red + 0.7152f * sky.green + 0.0722f * sky.blue;
-				// The horizon rather than the sun: under heavy cloud the sun's colour is dim by day, and
-				// a street is still far brighter than a room.
-				return { { 0.5f * (sky.red + grey), 0.5f * (sky.green + grey), 0.5f * (sky.blue + grey) }, std::clamp((grey - 0.1f) / 0.3f, 0.0f, 1.0f) };
-			}
-			auto*       calendar = RE::Calendar::GetSingleton();
-			const float hour = calendar ? calendar->GetHour() : 12.0f;
-			return { kPlainInside, std::clamp(std::min(hour - 5.0f, 21.0f - hour) / 3.0f, 0.0f, 1.0f) };
+	OutdoorLook OutdoorLookNow()
+	{
+		if (const auto weather = Render::SpaceLighting::WeatherLighting()) {
+			// The horizon's colour for the hour, half way to grey: the sky alone read as a blue
+			// panel, a street is mostly walls and ground under it.
+			const auto& sky = weather->sky.horizon;
+			const float grey = 0.2126f * sky.red + 0.7152f * sky.green + 0.0722f * sky.blue;
+			// The horizon rather than the sun: under heavy cloud the sun's colour is dim by day, and
+			// a street is still far brighter than a room.
+			return { { 0.5f * (sky.red + grey), 0.5f * (sky.green + grey), 0.5f * (sky.blue + grey) }, std::clamp((grey - 0.1f) / 0.3f, 0.0f, 1.0f) };
 		}
+		auto*       calendar = RE::Calendar::GetSingleton();
+		const float hour = calendar ? calendar->GetHour() : 12.0f;
+		return { kPlainInside, std::clamp(std::min(hour - 5.0f, 21.0f - hour) / 3.0f, 0.0f, 1.0f) };
 	}
 
 	std::optional<Pictures::CaptureCamera> CaptureCameraFor(const Portal::Active& a_portal, bool a_forFile)
@@ -148,9 +136,13 @@ namespace Pictures
 		// Every other frame at most: a room takes several to measure its lights for (UpdateDoorwayPictures),
 		// and the doorway on screen stays still while one is drawn.
 		static bool capturedLastFrame = false;
+		auto*       camera = RE::Main::WorldRootCamera();
 		if (const auto door = Portal::StandIns::PictureWanted(); !capture && door == a_portal.sourceDoor && !capturedLastFrame) {
-			auto* camera = RE::Main::WorldRootCamera();
 			capture = Pictures::CameraFor(door, Portal::Doors::Quad(Portal::Doors::Door(door), camera->world.translate, { .behindPanel = true }), camera->world.translate);
+		}
+		// What a scheduler asked for (Tiers.h): the image tier's picture, or the depth image's next view.
+		if (!capture && !capturedLastFrame && !a_forFile) {
+			capture = Pictures::NextRequestedCamera(a_portal.sourceDoor, camera->world.translate);
 		}
 		// A diagnostic file wants the player's view; the request is asked for again.
 		if (capture && (a_forFile || capture->door != a_portal.sourceDoor)) {

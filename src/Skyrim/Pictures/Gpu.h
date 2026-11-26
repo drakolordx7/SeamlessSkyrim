@@ -5,8 +5,8 @@
 #include <d3d11.h>
 
 // The doorway pictures' shaders and states: the capture (a doorway's rectangle of the frame, or of
-// the portal pass, averaged into a small picture) and the draw (the picture in relief in the
-// doorway). The constants are the shaders' cbuffers laid out as C++.
+// the portal pass, averaged into a picture; or a depth image's layer, a view from inside the
+// doorway) and the draw (the picture in relief in the doorway, the depth image's layers marched). The constants are the shaders' cbuffers laid out as C++.
 namespace Pictures::Gpu
 {
 	// cbuffer Capture. Clip space corners: the picture's bottom, bottom across, top.
@@ -45,10 +45,14 @@ namespace Pictures::Gpu
 		float                look[4];               // x: Adaptation::Kind; y: daylight; z: 1 = the outdoors behind; w: the picture's light now against when taken
 		float                extent[4];             // the part of the door's plane the picture covers
 		float                gate[4];               // x: 1 = a city gate (the same sky on both sides)
+		float                layerInfo[4];          // x: the depth image's layers (0 = the image tier alone); yz: a layer's size in texels
+		float                axisAcross[4];         // xyz: the doorway's bottom edge, unit; w: its width in units
+		float                axisUp[4];             // xyz: its side going up, unit; w: its height in units
+		float                layerPos[3][4];        // xyz: each view's place in the doorway's units
 	};
 
 	static_assert(sizeof(CaptureConstants) == 52 * sizeof(float));
-	static_assert(sizeof(DrawConstants) == 104 * sizeof(float));
+	static_assert(sizeof(DrawConstants) == 128 * sizeof(float));
 
 	// Made on first use or by Prewarm; false when it could not be made, for good.
 	bool EnsurePipeline(ID3D11Device* a_device);
@@ -72,5 +76,7 @@ namespace Pictures::Gpu
 		float                   width;
 		float                   height;
 	};
-	void Draw(ID3D11DeviceContext* a_context, const DrawConstants& a_constants, const float (&a_vertices)[4][5], const DrawTargets& a_targets, ID3D11ShaderResourceView* a_picture, bool a_opaque);
+	// a_layers: the depth image's array texture, or none.
+	void Draw(ID3D11DeviceContext* a_context, const DrawConstants& a_constants, const float (&a_vertices)[4][5], const DrawTargets& a_targets, ID3D11ShaderResourceView* a_picture,
+		ID3D11ShaderResourceView* a_layers, bool a_opaque);
 }

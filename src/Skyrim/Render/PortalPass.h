@@ -70,6 +70,7 @@ namespace Render::PortalPass
 		bool       gate;      // Gates::IsGate: the doorway is the gate's whole opening (DoorwayQuad)
 		float      nearClip;
 		float      farClip;
+		int        layer = -1;  // Pictures::CaptureCamera::layer
 	};
 	[[nodiscard]] const std::optional<CaptureDrawn>& CaptureDrawnThisFrame();
 	// Render thread, before this frame's pass is drawn.

@@ -919,14 +919,17 @@ namespace Render::PortalPass
 			// from aside. The street's side has its own wall and frame anyway.
 			constexpr float kCaptureCut = 12.0f;
 			auto&           frustum = portalCamera->GetRuntimeData2().viewFrustum;
-			frustum.fNear = a_capture ? toDoor + kCaptureCut : std::max(defaultNear, toDoor - 20.0f);
+			// A camera inside the doorway (a depth image's view) cuts where its own near plane is: there is
+			// no door plane in front of it, and the wall and frame are behind it.
+			const float nearClip = a_capture ? a_capture->camera.nearClip : 0.0f;
+			frustum.fNear = a_capture ? (nearClip > 0.0f ? nearClip * a_mapping.toLinked.scale : toDoor + kCaptureCut) : std::max(defaultNear, toDoor - 20.0f);
 			// The doorway on screen still shows the last picture, read with the clip distances it was
 			// drawn with.
 			if (a_capture) {
 				// In the player's space's units, as the picture keeps its distances: the depth read with
 				// them gives the far side's distances divided by the mapping's scale.
 				const float scale = a_mapping.toLinked.scale;
-				captureDrawn = CaptureDrawn{ a_capture->door, !a_portal.cell->IsInteriorCell(), Portal::Gates::IsGate(a_portal), frustum.fNear / scale, frustum.fFar / scale };
+				captureDrawn = CaptureDrawn{ a_capture->door, !a_portal.cell->IsInteriorCell(), Portal::Gates::IsGate(a_portal), frustum.fNear / scale, frustum.fFar / scale, a_capture->layer };
 			} else {
 				portalNear = frustum.fNear;
 				portalFar = frustum.fFar;

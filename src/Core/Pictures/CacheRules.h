@@ -20,7 +20,10 @@ namespace Core::Pictures
 	// a texel's average where anything else is in it, a gate's from further back. Only this version
 	// is read; changing the layout or what a picture holds bumps it, and files of any other are
 	// taken again.
-	inline constexpr std::uint32_t kVersion = 5;
+	//
+	// 6: the image tier at the full size without blur, files carry the load order's hash and the
+	// picture's brightness, and the depth image tier's layered files (FileFormat.h) exist.
+	inline constexpr std::uint32_t kVersion = 6;
 	inline constexpr std::uint32_t kMagic = 0x57445353;  // "SSDW"
 
 	// A picture is taken again at most this often (the room changes; the light outdoors does).
@@ -43,6 +46,14 @@ namespace Core::Pictures
 	[[nodiscard]] std::string             KeyOf(std::string_view a_doorKey, bool a_outdoors, int a_part);
 	// The key as a file name stem.
 	[[nodiscard]] std::string FileStem(std::string_view a_key);
+
+	// The load order as one number: the plugins' names, in order (case aside). Pictures are of what
+	// the load order made of a space, so another load order's are not shown or kept: a hash of it is in
+	// the file name, and in the file. A different order of the same plugins is another load order.
+	[[nodiscard]] std::uint64_t LoadOrderHash(const std::vector<std::string>& a_plugins);
+	// A file name: the key's stem, the hash's low 32 bits, and the extension (".ssdw" the image tier's,
+	// ".ssdl" the depth image's).
+	[[nodiscard]] std::string FileName(std::string_view a_key, std::uint64_t a_loadOrder, bool a_layered);
 
 	// The file: four 32-bit words, magic, version, width, height, then where the picture was taken
 	// from and what it covers, then the texels. The widest and highest a picture was ever written
