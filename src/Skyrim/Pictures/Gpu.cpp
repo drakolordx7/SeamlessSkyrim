@@ -93,7 +93,6 @@ namespace Pictures::Gpu
 				float2 p = float2((id << 1) & 2, id & 2);
 				return float4(p * float2(2, -2) + float2(-1, 1), 0, 1);
 			}
-			struct Captured { float4 color : SV_Target0; float distance : SV_Target1; };
 			float Behind(float2 ndc, float2 pixel)
 			{
 				float2 size;
