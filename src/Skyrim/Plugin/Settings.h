@@ -29,6 +29,8 @@ namespace Plugin::Settings
 		kStepExteriorFromInside,
 		kHandOverStreet,
 		kProfileCrossingsTo,
+		kDoorwaySound,
+		kDoorwaySoundVolume,
 		kCount,
 	};
 
@@ -84,6 +86,9 @@ namespace Plugin::Settings
 		{ Id::kHandOverStreet, L"Portals", L"bHandOverStreet", Type::kBool, 1 },
 		// Agent sessions: a folder every crossing's main-thread samples are written to.
 		{ Id::kProfileCrossingsTo, L"Portals", L"sProfileCrossingsTo", Type::kString, 0, 0, 0, L"" },
+		// The live room's sound heard through its open doorway (Skyrim/Audio), and how loud, in percent.
+		{ Id::kDoorwaySound, L"Audio", L"bDoorwaySound", Type::kBool, 1 },
+		{ Id::kDoorwaySoundVolume, L"Audio", L"iDoorwaySoundVolume", Type::kInt, 70, 0, 100 },
 	} };
 
 	[[nodiscard]] constexpr const Entry& Of(Id a_id)

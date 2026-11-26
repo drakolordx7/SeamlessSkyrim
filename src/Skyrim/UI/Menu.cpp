@@ -1,5 +1,6 @@
 #include "Skyrim/UI/Menu.h"
 
+#include "Skyrim/Audio/DoorwayAudio.h"
 #include "Skyrim/Doors/Settings.h"
 #include "Skyrim/Doors/DoorUse.h"
 #include "Skyrim/Pictures/Cache.h"
@@ -161,6 +162,24 @@ namespace
 		if (ImGui::Checkbox("Street physics while indoors (people outside walk)", &step)) {
 			Portal::Manager::SetStepExterior(step);
 			Plugin::Settings::SaveUser(Id::kStepExteriorFromInside, step);
+		}
+
+		ImGui::NewLine();
+
+		{
+			bool sound = Audio::Doorway::Enabled();
+			if (ImGui::Checkbox("Hear rooms through open doors", &sound)) {
+				Audio::Doorway::SetEnabled(sound);
+				Plugin::Settings::SaveUser(Id::kDoorwaySound, sound);
+			}
+			const auto& range = Plugin::Settings::Of(Id::kDoorwaySoundVolume);
+			int         percent = Audio::Doorway::Volume();
+			if (ImGui::SliderInt("Doorway sound volume (%)", &percent, range.min, range.max)) {
+				Audio::Doorway::SetVolume(percent);
+			}
+			SaveWhenReleased(Id::kDoorwaySoundVolume, percent);
+			ImGui::TextWrapped("Standing at an open door, the room behind it can be heard from the doorway, quieter and duller with "
+							   "distance and angle, and gone again when the door shuts. Only the room that is live, only while its door is open.");
 		}
 
 		ImGui::NewLine();

@@ -1,5 +1,6 @@
 #include "Skyrim/Portal/PortalManager.h"
 
+#include "Skyrim/Audio/DoorwayAudio.h"
 #include "Skyrim/Diag/Probe.h"
 #include "Skyrim/Diag/Telemetry.h"
 #include "Skyrim/Doors/DoorUse.h"
@@ -91,6 +92,12 @@ namespace Portal::Manager
 				}
 			}
 			Portal::DoorUse::PublishOpen(std::move(doors));
+		}
+
+		// How far the portal's door stands open (0 shut), merged or not.
+		float OpenAmount(const Active& a_portal)
+		{
+			return remote.Merged() ? MergedView::ShownAmount() : PortalDoor::Holds(a_portal.sourceDoor) ? PortalDoor::Amount() : 0.0f;
 		}
 
 		void ReleaseShown(std::string_view a_reason, float a_holdoff = 0.0f, bool a_handOver = false)
@@ -313,6 +320,7 @@ namespace Portal::Manager
 			// blended image space and the camera's stop at the door plane stayed.
 			ImageSpaceBlend::Clear();
 			Portal::CameraLimit::ClearPlane();
+			Audio::Doorway::Stop();
 			return;
 		}
 		auto* player = RE::PlayerCharacter::GetSingleton();
@@ -364,6 +372,10 @@ namespace Portal::Manager
 		ImageSpaceBlend::Update(ready);
 		Crossing::UpdateCameraPlane(here, ready);
 		PublishOpenDoors();
+		// Heard through its doorway only while the room is live and its door open.
+		const auto shown = CurrentPortal();
+		const bool live = shown && ready && Schedule::TierOf(shown->cell) >= Core::Graph::Tier::Live;
+		Audio::Doorway::Update(a_delta, live ? shown : std::nullopt, live ? OpenAmount(*shown) : 0.0f);
 	}
 
 	void OnArrival()
@@ -374,6 +386,7 @@ namespace Portal::Manager
 
 	void ReleaseAll(std::string_view a_reason, float a_holdoff, bool a_handOver)
 	{
+		Audio::Doorway::Stop();
 		{
 			const Diag::Scope scope("release kept");
 			Schedule::ReleaseAll(a_reason);

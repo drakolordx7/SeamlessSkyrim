@@ -1,5 +1,6 @@
 #include "Skyrim/Bridge/Commands.h"
 
+#include "Skyrim/Audio/DoorwayAudio.h"
 #include "Skyrim/Bridge/CommandSupport.h"
 #include "Skyrim/Bridge/FrameHooks.h"
 #include "Skyrim/Bridge/PortalDiagnostics.h"
@@ -206,6 +207,7 @@ namespace Bridge
 				 auto status = PortalDiagnostics::Status();
 				 status["lastFrame"] = ::Render::Frame::LastFrame();
 				 status["travel"] = Portal::Travel::Status();
+				 status["audio"] = Audio::Doorway::Status();
 				 return status;
 			 } } },
 			{ "travel_profile", { [](const json& a) {
