@@ -178,9 +178,11 @@ namespace Spaces
 		// 3D here, as long as the cell is ours (see Release).
 		void HangAlwaysRender(RE::TESObjectCELL* a_cell);
 		void UnhangAlwaysRender();
-		// A street to be merged into an interior: what the engine's change into it on the walk out
-		// would read from disk, read beforehand, one piece a frame once the space is ready.
-		void Prewarm();
+		// An exterior space: what the engine's change into it (the grid around the arrival cell) would
+		// read from the plugin files, read beforehand, one piece a frame once the space is ready, kept
+		// out of sight or shown.
+		void               Prewarm();
+		[[nodiscard]] bool PrewarmPending() const { return prewarmModel || prewarmLand || !prewarmCells.empty(); }
 		// Loose items lying in the remote cells (weapons, food: inventory objects placed in the
 		// world) were missing from the street seen from indoors. Logs which have no 3D (or 3D far
 		// from where the item is, i.e. fallen), and loads the 3D of those the engine isn't loading.

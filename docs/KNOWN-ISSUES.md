@@ -14,10 +14,14 @@
   hooked on SE and AE 1.7.99+ (the call site is only known for 1.6.1170, so the bug may stay there).
 
 - Frame hitches left after the crossing work (Whiterun crawl, 38 doors, the hitch watcher: BUILD.md): around each crossing
-  (`in`, `out` stages) 80-90 frames per crawl are 40-90 ms (median frame 10-13 ms), no door over 100 ms except two
-  one-frame ones: the main gate walking in from Tamriel (~160 ms: the engine reads Whiterun's grid cells from the plugin
-  files, `TESFile::SeekCell` under `TESWorldSpace::LoadCell` in the teleport; `RemoteCell::Prewarm` only runs for a walk
-  out of an interior) and Dragonsreach's cellar door walking out (~140 ms, `TESWaterSystem::AddLODWater` in the teleport).
+  (`in`, `out` stages) 80-90 frames per crawl are 40-90 ms (median frame 10-13 ms). The main gate walking in from Tamriel
+  was 160-310 ms (the grid's cells and lands read from the plugin files in the teleport, `TESFile::SeekCell`); the grid is
+  now read while the space is kept (`RemoteCell::Prewarm`, ENGINE.md) and the crossing is ~100 ms (median of 3: 164 -> 104).
+  What is left in it: `ID 41051` (under the teleport, ID 40438) ~40 ms of `ID 41336` lookups under the form map's lock
+  (`ID 11653`/`12329`, NGIO-NG hooks there), not identified; the light update and terrain LOD (`ID 30104`, SmoothTerrain).
+  Dragonsreach's cellar door walking out was 140 ms once and 0-85 ms (median 44) in six visits since; `TESWaterSystem::AddLODWater`
+  (`BGSTerrainChunk::AttachWater` in the change into an exterior, ID 13317) is ~8 ms of it, not the cause: left alone (it
+  is the distant water; it can only run with the terrain chunks' attach).
   The rest is spread thin: the portal pass's draws (`PortalPass::DrawPassHook` and the driver waits under it, ~half),
   scene graph walks of ours in the crossing frame (`Engine::ForceFadeIn`, `MovedBounds::UnfixBeforeMove`,
   `SettleMotion`, 40-70 ms), the light update, `Pictures::Cache` creating a layered picture's textures (`gpu-wait`).

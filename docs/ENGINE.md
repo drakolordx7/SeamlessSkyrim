@@ -406,6 +406,13 @@ Found porting the plugin; each was checked in the code of both.
   the record found, 0x40F once loaded). It also demands the world map's clouds (ID 53142 + 0x272,
   `BSModelDB::Demand` into a global emptied indoors; the path from ID 20495, by default
   `Meshes\Sky\SkyrimWorldMapCloudBank.nif`): ~25 ms from disk.
+- **The grid is read ahead for every exterior space we keep** (`RemoteCell::Prewarm`): the cells around the door's cell
+  (`uGridsToLoad` / 2) one `LoadCell` (attached and detached again if new) and one `GetLand()->LoadVertices` a frame, from
+  the moment the space is ready, kept out of sight (paused) or shown, nearest the door last. Before, only a street merged
+  into an interior got this, and only once it was live: the main gate (Tamriel -> WhiterunWorld, `TESFile::SeekCell` under
+  IDs 13427 -> 18747 -> 18748 and 20460) took 160-310 ms in the teleport; with it ~100 ms (median of 3, the gate's three
+  visits). A prewarm step is under 40 ms (none seen in the hitch watcher). `TESWaterSystem::AddLODWater` (ID 32209, from
+  `BGSTerrainChunk::AttachWater` ID 31742 under ID 13317) is ~8 ms of a 70-85 ms exterior arrival.
 - **A cell read from the files and never attached** (`LoadCell`, with or without ID 19111's
   temporary references) crashed the AI update (ID 36031 under 35600 -> 35567), also after
   loading a game. Attached and detached again (IDs 18976, 19063, 19130) it stays kUnattached like
