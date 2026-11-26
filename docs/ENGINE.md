@@ -75,6 +75,19 @@ Found porting the plugin; each was checked in the code of both.
     the freed room crashed an engine worker thread the same ms (0C0E2E). Not a race: the main thread did both, and
     the crash log's `Render::Frame::ShowActor` frames are the actor cull hook's trampoline mislabelled by the PDB.
     The unload hook leaves the player's room (`TES::interiorCell`) loaded like a held cell.
+  - **Exterior cells take the same road.** The buffer for exteriors (`TES+0xD0`, ID 13434's other branch) holds 36 cells
+    (5 x 5 grid in the dump read here), a cell pushed off its end is unloaded by the same ID 13721. The unload hook
+    only keeps held cells and the player's interior; no exterior cell the engine is using is kept.
+  - **Winterhold College** (Midden01 is the player's room, `0002BCD7`): Hall of Countenance and Midden02 attached for their
+    pictures and let go pushed the room out; the culling job (`BSGeometryListCullingProcess`, ID 76561) read
+    `BSCullingProcess::portalGraphEntry->portalGraph` (+0x30190 -> +0x10) as null and died at `+0x58`
+    (`alwaysRenderChildren`). The hook's refusal line appeared at the moment of the crash in the repeat run and the game
+    went on: covered by the Windhelm fix.
+  - **The wait for the frame's jobs can't be called from the player's update.** ID 35409 (`WaitForSingleObject(INFINITE)`
+    on the frame's job event, state `[+0x6C]`, the engine calls it at the end of Main::Update) called before ID 19130 from
+    the portal update hung the game at the first release: the player's update is itself part of what is waited for.
+    Detaching at the end of the frame instead (queue, run after the wait) hung it after merged crossings too (the arrival
+    finished, then the main thread stopped); not looked into.
     Seen in the log (Windhelm crawl, pictures of the palace's inner doors cleared so they were taken again): the hook refused
     the palace exactly when Upstairs02 was let go after its pictures. On walking out, `TES::interiorCell` still points to the
     room (state Detaching) when ID 13316 detaches it into the buffer, and the cell that falls off then is another one
